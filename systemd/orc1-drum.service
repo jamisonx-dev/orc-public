@@ -1,0 +1,32 @@
+[Unit]
+Description=ORC-1 Drum host (909 voices + one-shot slots, split from the synth 2026-09-02)
+# Mirrors orc1-synth/orc1-sampler coupling: ordered past the brain + the sole
+# jackd owner; a card switch (restart orc1-jackd) cascades a restart; a MIDI-bus
+# restart (orc1) cascades too, since it subscribes to that bus.
+After=sound.target orc1.service
+Wants=orc1.service
+# jackd coupling (After + BindsTo) is supplied by the 50-jack-server.conf
+# drop-in: main -> orc1-jackd, a card assignment -> orc1-jackd@<card>. Kept out
+# of the base unit so a card-hosted module binds ONLY its card server (a stale
+# base BindsTo could not be cleared by a drop-in on this systemd, and made an
+# M3-routed module die whenever the default L12 server stopped).
+PartOf=orc1.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+Environment=JACK_NO_AUDIO_RESERVATION=1
+# NEVER start a competing jackd -- orc1-jackd is the sole owner (cold-boot race).
+Environment=JACK_NO_START_SERVER=1
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/orc1/orc1_drum_host.py
+Restart=on-failure
+RestartSec=5
+# Same RT budget as the synth: this renders on the JACK callback thread.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

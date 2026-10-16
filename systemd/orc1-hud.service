@@ -1,0 +1,38 @@
+[Unit]
+Description=ORC-1 HUD: live play-state screen on the HDMI monitor (on demand only)
+# Same kiosk shape as orc1-visuals.service (read its notes): NO [Install]
+# section, own logind session on VT7, display :0. Control with
+# `sudo ~/orc/orc1/daw/hud.sh start|stop|shot`.
+# VISUALS, DAW and DJ mode share the monitor, so they conflict with this unit:
+# starting any of them replaces the HUD (hud.sh start refuses while DAW or DJ
+# runs). The renderer is not a JACK client and talks to nothing but a tmpfs
+# file the brain publishes (/dev/shm/orc1_playstate.json).
+After=systemd-user-sessions.service
+Conflicts=getty@tty7.service orc1-daw.service orc1-dj.service orc1-visuals.service
+# Copy the memory caps onto the X session's logind scope from a SEPARATE,
+# tty-less unit -- NEVER an ExecStartPost here: it vhangups tty7 while xinit
+# starts and kills it (see orc1-kiosk-cap@.service).
+Wants=orc1-kiosk-cap@%N.service
+
+[Service]
+Type=simple
+User=pibox
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+WorkingDirectory=/home/pibox
+# X must start on the ACTIVE console (see orc1-visuals.service: measured
+# 2026-10-05). "-" = never blocks.
+ExecStartPre=-+/usr/bin/chvt 7
+ExecStart=/usr/bin/xinit /home/pibox/orc/orc1/daw/hud_session.sh -- :0 vt7 -nolisten tcp -keeptty
+Restart=no
+# SKIPBACK COMES FIRST: a status screen never gets to crowd the recorder.
+MemoryHigh=120M
+MemoryMax=180M
+OOMScoreAdjust=900

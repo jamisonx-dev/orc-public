@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · HUD{% endblock %}
+{% block page_label %}HUD{% endblock %}
+{% block page_css %}
+<style>
+  #hud-root { max-width: 760px; margin: 0 auto; transition: opacity .3s; }
+  #hud-root.stale .hud-body { opacity: .35; }
+  .hud-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .hud-bpm { font-family: var(--fh); font-size: clamp(38px, 13vw, 64px); line-height: 1; color: #ffb228; }
+  .hud-sub { font-size: 11px; color: var(--muted); letter-spacing: .08em; margin-top: 4px; }
+  .hud-chord { font-family: var(--fh); font-size: clamp(30px, 11vw, 56px); line-height: 1; color: var(--bright);
+    text-align: right; overflow-wrap: anywhere; }
+  .hud-key { font-size: 11px; color: var(--muted); text-align: right; margin-top: 4px; }
+  .hud-transport { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; flex-wrap: wrap; }
+  .hud-badge { font-family: var(--fh); font-size: 18px; letter-spacing: .12em; padding: 6px 14px; border-radius: 8px;
+    border: 2px solid var(--muted); color: var(--muted); }
+  .hud-badge.play { color: var(--live); border-color: var(--live); background: rgba(34,224,151,.12); }
+  .hud-badge.rec  { color: #f04646; border-color: #f04646; background: rgba(240,70,70,.12); }
+  .hud-pos { font-size: 15px; color: var(--bright); letter-spacing: .05em; }
+  .hud-lamps { display: flex; gap: 8px; margin-left: auto; }
+  .hud-lamp { width: 16px; height: 16px; border-radius: 50%; background: #ffb228; opacity: .12; }
+  .hud-card { background: rgba(255,255,255,.03); border-radius: 10px; padding: 8px; margin-top: 10px; }
+  #hud-grid { width: 100%; display: block; }
+  .hud-mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin-top: 10px; }
+  .hud-mod { border-radius: 8px; padding: 6px 2px; text-align: center; background: rgba(255,255,255,.05);
+    color: var(--muted); border: 1px solid transparent; }
+  .hud-mod b { display: block; font-family: var(--fh); font-size: 12px; letter-spacing: .04em; }
+  .hud-mod i { display: block; font-style: normal; font-size: 9px; opacity: .7; margin-top: 2px; }
+  .hud-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 12px;
+    flex-wrap: wrap; }
+  #hud-held { font-family: var(--fh); font-size: clamp(20px, 7vw, 32px); color: #ffb228; min-height: 1.2em; }
+  .hud-flag { font-size: 13px; letter-spacing: .06em; color: var(--muted); opacity: .6; }
+  .hud-flag.on { color: var(--live); opacity: 1; }
+  #hud-conn { position: sticky; top: 0; z-index: 5; text-align: center; font-size: 12px; letter-spacing: .1em;
+    padding: 6px; border-radius: 6px; margin-bottom: 8px; background: rgba(224,160,0,.15); color: var(--warn);
+    border: 1px solid var(--warn-border); }
+  #hud-conn.live { background: rgba(34,224,151,.08); color: var(--live); border-color: rgba(34,224,151,.3); }
+</style>
+{% endblock %}
+{% block content %}
+<div id="hud-root" class="stale">
+  <div id="hud-conn">CONNECTING…</div>
+  <div class="hud-body">
+    <div class="hud-top">
+      <div>
+        <div class="hud-bpm" id="hud-bpm">---</div>
+        <div class="hud-sub" id="hud-clock">BPM</div>
+      </div>
+      <div>
+        <div class="hud-chord" id="hud-chord">--</div>
+        <div class="hud-key" id="hud-key"></div>
+      </div>
+    </div>
+    <div class="hud-transport">
+      <span class="hud-badge" id="hud-badge">STOP</span>
+      <span class="hud-pos" id="hud-pos">BAR --- BEAT - STEP -</span>
+      <span class="hud-lamps">
+        <span class="hud-lamp"></span><span class="hud-lamp"></span><span class="hud-lamp"></span><span class="hud-lamp"></span>
+      </span>
+    </div>
+    <div class="hud-card"><canvas id="hud-grid" height="10"></canvas></div>
+    <div class="hud-mods" id="hud-mods"></div>
+    <div class="hud-foot">
+      <span id="hud-held">-</span>
+      <span class="hud-flag" id="hud-arp">ARP OFF</span>
+      <span class="hud-flag" id="hud-bb"></span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block page_js %}
+<script src="/static/js/hud.js"></script>
+{% endblock %}

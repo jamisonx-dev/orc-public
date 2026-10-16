@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · KIKPAD{% endblock %}
+{% block page_label %}KIKPAD MAPS{% endblock %}
+{% block page_css %}
+<style>
+  #kp-page { max-width: 760px; }
+  .kp-status { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px; font-size:13px; }
+  .kp-dot { width:10px; height:10px; border-radius:50%; background:#c33; display:inline-block; }
+  .kp-dot.on { background:#0a7; }
+  .kp-dot.part { background:#e0a020; }
+  #kp-flash { font-size:12px; color:#0a7; }
+  #kp-flash.err { color:#c33; }
+  #kp-saved { font-size:12px; opacity:.75; }
+  .kp-help { font-size:12px; opacity:.7; margin:0 0 10px; line-height:1.45; }
+  .kp-tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .kp-tabs .btn.on { outline:2px solid var(--accent); background:var(--accent-bg); }
+  .kp-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; font-size:12px; margin:6px 0; }
+  .kp-row label { display:flex; align-items:center; gap:6px; }
+  .kp-grid { display:grid; grid-template-columns:repeat(8, minmax(0,1fr)); gap:5px; max-width:520px; }
+  .kp-pad { aspect-ratio:1; min-width:0; border-radius:6px; border:2px solid rgba(128,128,128,.35);
+    font:inherit; font-size:10px; line-height:1.15; padding:2px; cursor:pointer; color:#fff;
+    text-shadow:0 0 3px #000, 0 0 2px #000; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; overflow:hidden; }
+  .kp-pad.off { color:inherit; text-shadow:none; opacity:.45; background:transparent; }
+  .kp-pad.sel { border-color:var(--accent); outline:2px solid var(--accent); }
+  .kp-pad .ch { font-size:9px; opacity:.85; }
+  .kp-pad:disabled { cursor:default; }
+  .kp-under { font-size:11px; opacity:.55; margin:6px 0 0; max-width:520px; text-align:center; }
+  .kp-edit { margin-top:12px; padding:10px; border-radius:8px; border:1px solid var(--accent-border); }
+  .kp-edit h4 { margin:0 0 6px; font-size:11px; letter-spacing:.06em; opacity:.65; font-weight:600; }
+  .kp-edit select, .kp-edit input, .kp-enc select, .kp-enc input, .kp-row select {
+    font:inherit; font-size:12px; padding:4px 6px; border-radius:5px;
+    border:1px solid rgba(128,128,128,.45); background:transparent; color:inherit; }
+  .kp-edit input[type=number], .kp-enc input[type=number] { width:64px; }
+  .kp-pal { display:grid; grid-template-columns:repeat(16, minmax(0,1fr)); gap:3px; max-width:420px; margin-top:6px; }
+  .kp-sw { aspect-ratio:1; min-width:0; border-radius:3px; border:1px solid rgba(128,128,128,.4); cursor:pointer; padding:0; }
+  .kp-sw.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  table.kp-enc { border-collapse:collapse; font-size:12px; }
+  table.kp-enc th { font-weight:600; font-size:11px; opacity:.7; padding:3px 8px; text-align:left; }
+  table.kp-enc td { padding:3px 8px; }
+  .kp-resets { display:flex; flex-wrap:wrap; gap:6px; }
+  .kp-name { opacity:.6; font-size:11px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="kp-page">
+
+  <div class="kp-status">
+    <span class="kp-dot" id="kp-dot"></span>
+    <b>KIKPAD</b>
+    <span id="kp-conn">—</span>
+    <button class="btn" type="button" id="kp-refresh">RE-READ</button>
+    <span id="kp-saved"></span>
+    <span id="kp-flash"></span>
+  </div>
+  <p class="kp-help">These maps are stored <b>on the pad itself</b>, so it plays them into any USB host
+    (a box driving the MPC, a laptop), not only the ORC. Everything shown here is read back from the pad.
+    An edit sounds straight away and the pad saves it a couple of seconds later.</p>
+
+  <section class="card">
+    <div class="card-label">PADS · CLICK ONE TO EDIT · LAID OUT AS ON THE PAD (ENCODERS AT THE BOTTOM)</div>
+    <div class="kp-tabs" id="kp-banks"></div>
+    <div class="kp-row">
+      <label>Bank channel
+        <select id="kp-bankch"></select></label>
+      <span class="kp-name" id="kp-bankch-note"></span>
+    </div>
+    <div class="kp-grid" id="kp-grid"></div>
+    <p class="kp-under">N = note, CC = momentary CC (127 / 0), TG = toggle CC. A small number under it = its own
+      channel; none = the bank channel.</p>
+    <div class="kp-edit" id="kp-edit" hidden></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">ENCODERS · BANKS 0, 1 AND 3 · THE BOTTOM-ROW BUTTON PICKS THE MODE</div>
+    <div class="kp-tabs" id="kp-modes"></div>
+    <table class="kp-enc" id="kp-enc"></table>
+    <p class="kp-help" style="margin-top:8px">Each encoder sends its CC (counting up and down from 0-127) on its
+      channel. In bank 0, UP adds 8 to the channel.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">BACK TO THE FACTORY MAPS</div>
+    <div class="kp-resets">
+      <button class="btn" type="button" data-reset="bank0">RESET BANK 0</button>
+      <button class="btn" type="button" data-reset="bank1">RESET BANK 1</button>
+      <button class="btn" type="button" data-reset="encoders">RESET ENCODERS + BANK CHANNELS</button>
+      <button class="btn" type="button" data-reset="all">RESET ALL</button>
+    </div>
+    <p class="kp-help" style="margin-top:8px">Bank 0's factory map is the MPC1000 face (channel 14), bank 1 the
+      bass layout in 4ths. Bank 3 (faders) and the sequencer (bank 4) are not affected.</p>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/kikpad.js"></script>
+{% endblock %}

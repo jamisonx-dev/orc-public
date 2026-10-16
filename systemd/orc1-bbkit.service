@@ -1,0 +1,28 @@
+[Unit]
+Description=ORC-1 BeatBuddy Kit host (sampled full-articulation kits, 2026-09-14)
+# Mirrors orc1-drum coupling: ordered past the brain + the sole jackd owner; a
+# card switch (restart orc1-jackd) cascades a restart; a MIDI-bus restart (orc1)
+# cascades too, since it subscribes to that bus.
+After=sound.target orc1.service orc1-jackd.service
+Wants=orc1.service
+BindsTo=orc1-jackd.service
+PartOf=orc1.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+Environment=JACK_NO_AUDIO_RESERVATION=1
+# NEVER start a competing jackd -- orc1-jackd is the sole owner (cold-boot race).
+Environment=JACK_NO_START_SERVER=1
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/orc1/orc1_bbkit_host.py
+Restart=on-failure
+RestartSec=5
+# Same RT budget as the other hosts: renders on the JACK callback thread.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1{% endblock %}
+
+{% block content %}
+  <div id="content">
+    <div class="offline-card"><div class="offline-icon">◈</div><div class="offline-msg">WAITING FOR ENGINE…</div></div>
+  </div>
+  <div class="card" id="levels-card">
+    <div class="card-label">LEVELS</div>
+    <div id="levels-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+  <div class="card" id="skipback-compact-card">
+    <div class="card-label">SKIPBACK</div>
+    <div id="skipback-compact-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+  <div class="card" id="sys-compact-card">
+    <div class="card-label">PI HEALTH</div>
+    <div id="sys-compact-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/system.js"></script>
+<script src="/static/js/main.js"></script>
+{% endblock %}

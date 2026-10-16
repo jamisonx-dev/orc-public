@@ -1,0 +1,24 @@
+[Unit]
+Description=ORC-1 JACK server (sole owner; skipback + all audio depend on it)
+After=sound.target
+Before=orc1-synth.service orc-bt-jack.service pisound-in.service pisound-out.service
+
+[Service]
+Type=simple
+User=pibox
+Environment=JACK_NO_AUDIO_RESERVATION=1
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+# Reap ONLY a stale DEFAULT (nameless) jackd -- never a named per-card server
+# (jackd -n <card>, per-host-jackd model 2026-09-22). The old `pkill -x jackd`
+# killed EVERY jackd, including live per-card servers, without re-instating them.
+# The reap is a script (not inline bash) to avoid systemd ExecStart escaping.
+ExecStartPre=-/home/pibox/orc/orc1/orc1_jackd_reap_default.sh
+ExecStartPre=-/bin/bash -c 'rm -f /dev/shm/jack* /dev/shm/jack_* 2>/dev/null; true'
+ExecStartPre=-/bin/sleep 1
+ExecStart=/home/pibox/orc/orc1/orc1_jackd_start.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

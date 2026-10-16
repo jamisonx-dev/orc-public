@@ -1,0 +1,15 @@
+[Unit]
+Description=ORC-1 multitrack skipback ring recorder (JACK client skipback-rec)
+After=orc1-jackd.service
+Wants=orc1-jackd.service
+
+[Service]
+Type=simple
+User=pibox
+Environment=JACK_NO_START_SERVER=1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/skipback/skipback_recorder.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

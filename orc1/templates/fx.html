@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · FX{% endblock %}
+{% block page_label %}FX{% endblock %}
+
+{% block page_css %}<link rel="stylesheet" href="/static/css/fx.css">{% endblock %}
+
+{% block content %}
+  <div class="section-lbl">FX I/O</div>
+  <div class="card blue" id="fx-io-card">
+    <div class="card-label">SIGNAL ROUTING</div>
+    <div class="btn-row" style="margin-bottom:8px">
+      <button class="btn" id="io-hw-btn"   onclick="setPreset('hardware')">HARDWARE INSERT</button>
+      <button class="btn" id="io-int-btn"  onclick="setPreset('internal')">INTERNAL</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <span class="port-label">INTERNAL SOURCE</span>
+      <select class="orc-select" id="io-mod" onchange="setModule(this.value)" style="flex:1">
+        <option value="">— pick a module —</option>
+      </select>
+    </div>
+    <div id="io-warn" class="warn-banner" style="display:none"></div>
+    <div class="port-grid">
+      <span class="port-label">SEND L</span>  <input class="port-inp" id="io-sl" oninput="markDirty()">
+      <span class="port-label">SEND R</span>  <input class="port-inp" id="io-sr" oninput="markDirty()">
+      <span class="port-label">RETURN L</span><input class="port-inp" id="io-rl" oninput="markDirty()">
+      <span class="port-label">RETURN R</span><input class="port-inp" id="io-rr" oninput="markDirty()">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <button class="btn accent" id="io-apply-btn" onclick="applyIO()" style="display:none">APPLY</button>
+      <span id="io-status" style="font-size:9px;color:var(--muted)"></span>
+    </div>
+    <div style="font-size:8px;color:var(--label);margin-top:4px">
+      INTERNAL routes one module through the FX rack and back to wherever that module plays (set on /patch) — no cables needed.<br>
+      HARDWARE INSERT uses a physical cable loop on the audio interface.
+    </div>
+  </div>
+
+  <div class="section-lbl">FX RACK
+    <span style="font-size:8px;font-weight:normal;color:var(--muted);margin-left:8px">stack up to 3 effects, in series · SEND → 1 → 2 → 3 → OUT</span>
+  </div>
+  <div id="rack-flow" class="rack-flow"></div>
+  <div id="rack-slots"></div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/fx.js"></script>{% endblock %}

@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Captured audio / recordings — bulk data, not source
+orc1/samples/*.wav
+*.raw
+
+# BeatBuddy sampled kits — bulk WAVs + manifest, deployed per-Pi, not source
+# (extracted from .DRM by _beatbuddy/tools/drm2kit.py; see _planning/ORC1_BeatBuddy_Spec.md)
+orc1/kits/
+
+# Local working artifacts (mirror pulls, retired files)
+*.pi_current
+*.retired_*
+*.bak
+
+# Editor / OS cruft
+*.swp
+.DS_Store
+
+# Generated build output — gen_cc_map.py writes these (with a timestamp), so
+# tracking them means perpetual spurious drift. Regenerate from source instead;
+# the web app serves the on-Pi copy. See gen_cc_map.py.
+orc1/static/cc_map.html
+orc1/static/cc_map.json

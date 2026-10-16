@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · SKIPBACK{% endblock %}
+{% block page_label %}SKIPBACK{% endblock %}
+
+{% block content %}
+
+  <div class="card" id="sb-ram-card">
+    <div class="card-label"><span>SKIPBACK · MULTITRACK</span>
+      <span id="sb-ram-txt" style="font-size:11px;font-family:var(--fs)">—</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
+      <span>RAM RING SPACE (RAM tracks only)</span>
+    </div>
+    <div style="height:8px;border-radius:4px;background:#1b1e24;overflow:hidden;margin:2px 0 8px">
+      <div id="sb-ram-bar" style="height:100%;width:0;background:var(--accent);transition:width .3s"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">
+      <span>CARD RING SPACE (CARD tracks)</span><span id="sb-card-txt">—</span>
+    </div>
+    <div style="height:6px;border-radius:3px;background:#1b1e24;overflow:hidden;margin:2px 0 8px">
+      <div id="sb-card-bar" style="height:100%;width:0;background:var(--accent);transition:width .3s"></div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <select id="sb-quick" onchange="sbQuick(this.value)"
+              title="add a track already wired to a stereo pair or a single input"><option value="">+ QUICK ADD…</option></select>
+      <button class="flag" onclick="sbAddTrack()">+ ADD TRACK</button>
+      <button class="flag" onclick="sbSave()" id="sb-save-btn">SAVE</button>
+      <button class="flag" onclick="sbReset()">RESET TO DEFAULT</button>
+    </div>
+    <div id="sb-msg" style="margin-top:8px;font-size:11px;min-height:14px;color:var(--muted)"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">GRAB ALL — SAMPLE-ALIGNED</div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.5">
+      One folder in ~/recordings, one WAV per track, every file starting on the
+      same sample and the same length: drop them in a DAW at zero and they line
+      up. Tap a track to leave it out. ALL = everything the chosen tracks hold
+      in common.
+    </div>
+    <div id="sb-all-tracks" class="flags" style="margin-top:6px"></div>
+    <div class="flags" style="margin-top:6px">
+      <button class="flag" onclick="sbGrabAll(30)">30s</button>
+      <button class="flag" onclick="sbGrabAll(60)">60s</button>
+      <button class="flag" onclick="sbGrabAll(300)">5m</button>
+      <button class="flag" onclick="sbGrabAll(600)">10m</button>
+      <button class="flag" onclick="sbGrabAll(0)">ALL</button>
+    </div>
+    <div id="sb-all-msg" style="margin-top:4px;font-size:11px;color:var(--accent);min-height:14px"></div>
+    <div style="font-size:10px;color:var(--label);margin-top:8px">STEREO JOINS</div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.5">
+      Two MONO tracks saved as ONE stereo WAV (L left, R right). Saved on the
+      Pi, so the FCB's GRAB ALL uses them too. Tap a join to remove it.
+    </div>
+    <div id="sb-joins" class="flags" style="margin-top:4px"></div>
+    <div id="sb-join-msg" style="font-size:11px;min-height:14px"></div>
+  </div>
+
+  <div id="sb-tracks">
+    <div class="card"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+
+  <div class="card" style="opacity:.7">
+    <div class="card-label">ABOUT</div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.5">
+      Skipback is an always-on recorder: each track continuously records an
+      audio source into its own ring, and you grab the last N seconds of one
+      track, or of several at once with GRAB ALL, to ~/recordings.
+      <br><br>
+      <b>RAM</b> tracks live in memory and start empty after a reboot; they share
+      the RAM budget (top meter). <b>CARD</b> tracks live on a separate ring
+      partition (second meter) and cost no RAM. With <b>PERSIST</b> their history
+      survives a reboot or power cut (the last second or so may be lost);
+      <b>FRESH</b> starts them empty on each boot. Switching a track between RAM
+      and CARD clears its audio. A CARD track will not arm while the partition
+      is not mounted.
+      <br><br>
+      AUTO follows the rig (Zoom L-12 master when present, else pisound in, else
+      the card's first stereo input); MANUAL pins a source you choose. Changes
+      apply within about 5 s of SAVE.
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/skipback.js"></script>
+{% endblock %}

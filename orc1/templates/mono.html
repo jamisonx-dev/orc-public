@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · MONO{% endblock %}
+{% block page_label %}MONO{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/css/voices.css">
+{% endblock %}
+
+{% block content %}
+  <div class="section-lbl">MONO SYNTH <span class="ch-tag" id="ch-tag-mono">CH —</span></div>
+  <div style="font-size:9px;color:var(--label);text-align:center;padding:2px 0 8px">
+    Layered monophonic voice: up to three stacked oscillators,
+    with portamento glide and note-tracking ring mod.
+  </div>
+
+  <div class="card">
+    <div class="card-label">LAYER 0 · BASE (always on)</div>
+    <div class="seg btn-row">
+      <button class="btn wave-btn L0" data-val="16"  onclick="setWave(1,16)">SINE</button>
+      <button class="btn wave-btn L0 active" data-val="48" onclick="setWave(1,48)">SAW</button>
+      <button class="btn wave-btn L0" data-val="80"  onclick="setWave(1,80)">SQ</button>
+      <button class="btn wave-btn L0" data-val="112" onclick="setWave(1,112)">TRI</button>
+    </div>
+    <div class="param-list" style="margin-top:10px">
+      <div class="prow">
+        <span class="plab">GAIN</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l0g" oninput="onCC(MONO_CH,19,+this.value,'v-l0g')">
+        <span class="pval" id="v-l0g">64</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">LAYER 1 <button class="btn layer-tog" id="tog-l1" onclick="toggleLayer(1)">OFF</button></div>
+    <div class="seg btn-row">
+      <button class="btn wave-btn L1" data-val="16"  onclick="setWave(23,16)">SINE</button>
+      <button class="btn wave-btn L1 active" data-val="48" onclick="setWave(23,48)">SAW</button>
+      <button class="btn wave-btn L1" data-val="80"  onclick="setWave(23,80)">SQ</button>
+      <button class="btn wave-btn L1" data-val="112" onclick="setWave(23,112)">TRI</button>
+    </div>
+    <div class="param-list" style="margin-top:10px">
+      <div class="prow">
+        <span class="plab">SEMI</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l1s" oninput="onSemi(21,+this.value,'v-l1s')">
+        <span class="pval" id="v-l1s">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DETUNE</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l1d" oninput="onCents(22,+this.value,'v-l1d')">
+        <span class="pval" id="v-l1d">0¢</span>
+      </div>
+      <div class="prow">
+        <span class="plab">GAIN</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l1g" oninput="onCC(MONO_CH,24,+this.value,'v-l1g')">
+        <span class="pval" id="v-l1g">64</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">LAYER 2 <button class="btn layer-tog" id="tog-l2" onclick="toggleLayer(2)">OFF</button></div>
+    <div class="seg btn-row">
+      <button class="btn wave-btn L2" data-val="16"  onclick="setWave(28,16)">SINE</button>
+      <button class="btn wave-btn L2 active" data-val="48" onclick="setWave(28,48)">SAW</button>
+      <button class="btn wave-btn L2" data-val="80"  onclick="setWave(28,80)">SQ</button>
+      <button class="btn wave-btn L2" data-val="112" onclick="setWave(28,112)">TRI</button>
+    </div>
+    <div class="param-list" style="margin-top:10px">
+      <div class="prow">
+        <span class="plab">SEMI</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l2s" oninput="onSemi(26,+this.value,'v-l2s')">
+        <span class="pval" id="v-l2s">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DETUNE</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l2d" oninput="onCents(27,+this.value,'v-l2d')">
+        <span class="pval" id="v-l2d">0¢</span>
+      </div>
+      <div class="prow">
+        <span class="plab">GAIN</span>
+        <input type="range" min="0" max="127" value="64" id="sl-l2g" oninput="onCC(MONO_CH,29,+this.value,'v-l2g')">
+        <span class="pval" id="v-l2g">64</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">PORTAMENTO</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">GLIDE</span>
+        <input type="range" min="0" max="127" value="0" id="sl-gld" oninput="onCC(MONO_CH,5,+this.value,'v-gld')">
+        <span class="pval" id="v-gld">0</span>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--label);padding:2px 0 0">0 = instant · higher = slower glide</div>
+
+    <hr class="card-divider">
+    <div class="card-label">ENVELOPE</div>
+    <div class="param-list">
+      <div class="prow"><span class="plab">ATK</span><input type="range" min="0" max="127" value="4"  id="sl-atk" oninput="onCC(MONO_CH,8,+this.value,'v-atk')"><span class="pval" id="v-atk">4</span></div>
+      <div class="prow"><span class="plab">DEC</span><input type="range" min="0" max="127" value="40" id="sl-dec" oninput="onCC(MONO_CH,9,+this.value,'v-dec')"><span class="pval" id="v-dec">40</span></div>
+      <div class="prow"><span class="plab">SUS</span><input type="range" min="0" max="127" value="89" id="sl-sus" oninput="onCC(MONO_CH,10,+this.value,'v-sus')"><span class="pval" id="v-sus">89</span></div>
+      <div class="prow"><span class="plab">REL</span><input type="range" min="0" max="127" value="30" id="sl-rel" oninput="onCC(MONO_CH,11,+this.value,'v-rel')"><span class="pval" id="v-rel">30</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">RING MOD</div>
+    <div class="param-list">
+      <div class="prow"><span class="plab">DEPTH</span><input type="range" min="0" max="127" value="0" id="sl-rmd" oninput="onCC(MONO_CH,12,+this.value,'v-rmd')"><span class="pval" id="v-rmd">0</span></div>
+      <div class="prow"><span class="plab">RATIO</span><input type="range" min="0" max="127" value="64" id="sl-rmr" oninput="onCC(MONO_CH,14,+this.value,'v-rmr')"><span class="pval" id="v-rmr">64</span></div>
+      <div class="prow"><span class="plab">CARRIER</span><input type="range" min="0" max="127" value="0" id="sl-rmh" oninput="onCC(MONO_CH,15,+this.value,'v-rmh')"><span class="pval" id="v-rmh">0</span></div>
+    </div>
+    <div style="font-size:9px;color:var(--label);padding:2px 0 0">CARRIER 0 = ratio follows the note · above 0 = fixed frequency</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">FILTER</div>
+    <div class="seg btn-row" style="margin-bottom:10px">
+      <button class="btn fmode-btn active" data-val="21"  onclick="setFilterMode(21)">LP</button>
+      <button class="btn fmode-btn"        data-val="64"  onclick="setFilterMode(64)">HP</button>
+      <button class="btn fmode-btn"        data-val="106" onclick="setFilterMode(106)">BP</button>
+    </div>
+    <div class="param-list">
+      <div class="prow"><span class="plab">CUTOFF</span><input type="range" min="0" max="127" value="100" id="sl-cut" oninput="onCC(MONO_CH,74,+this.value,'v-cut')"><span class="pval" id="v-cut">100</span></div>
+      <div class="prow"><span class="plab">RES</span><input type="range" min="0" max="127" value="0"  id="sl-res" oninput="onCC(MONO_CH,71,+this.value,'v-res')"><span class="pval" id="v-res">0</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">OUTPUT</div>
+    <div class="param-list" style="margin-bottom:12px">
+      <div class="prow"><span class="plab">LEVEL</span><input type="range" min="0" max="127" value="64" id="sl-lvl" oninput="onCC(MONO_CH,13,+this.value,'v-lvl')"><span class="pval" id="v-lvl">64</span></div>
+    </div>
+    <div style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label);margin-bottom:8px">OCTAVE</div>
+    <div class="seg btn-row">
+      <button class="btn oct-btn" data-val="0"   onclick="setOctave(0)">-2</button>
+      <button class="btn oct-btn" data-val="32"  onclick="setOctave(32)">-1</button>
+      <button class="btn oct-btn active" data-val="64" onclick="setOctave(64)">0</button>
+      <button class="btn oct-btn" data-val="96"  onclick="setOctave(96)">+1</button>
+      <button class="btn oct-btn" data-val="127" onclick="setOctave(127)">+2</button>
+    </div>
+
+    <hr class="card-divider">
+    <div class="card-label">AUDITION</div>
+    <div class="seg btn-row" id="kbd"></div>
+    <div style="font-size:9px;color:var(--label);text-align:center;padding:6px 0 0">
+      Tap to hear the voice. Portamento glide only happens between overlapping notes
+      played from a MIDI controller.
+    </div>
+  </div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/mono.js"></script>{% endblock %}

@@ -1,0 +1,20 @@
+[Unit]
+Description=ORC-1 kiosk memory cap: copy %i's MemoryHigh/MemoryMax onto its logind session scope
+# Pulled in by the VT7 kiosks (orc1-visuals / orc1-hud / orc1-dj) with
+# Wants=orc1-kiosk-cap@%N.service. PAMName=login moves the kiosk's X session
+# into user-1000.slice/session-N.scope, so the kiosk unit's own caps never
+# touch it; daw_mode.sh cap-session copies them over (finds the scope from
+# the kiosk's MainPID, always exits 0).
+#
+# WHY A SEPARATE UNIT, not ExecStartPost in the kiosk (2026-10-12): every Exec*
+# line of a kiosk inherits StandardInput=tty + TTYVHangup=yes, and with
+# Type=simple ExecStartPost forks at the same moment as xinit. Its executor
+# vhangup()s tty7 -- when xinit had already taken tty7, the hangup SIGHUPed it
+# before PAM, systemd counted SIGHUP as a clean exit ("Deactivated
+# successfully") and the monitor stayed dark. Kernel-traced on 3 of 20
+# stop/start cycles. This unit has NO tty, so it can never hang tty7 up.
+After=%i.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/pibox/orc/orc1/daw/daw_mode.sh cap-session %i.service

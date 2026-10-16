@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · VISUALS{% endblock %}
+{% block page_label %}VISUALS{% endblock %}
+
+{% block content %}
+  <!-- Layout (2026-10-12, reorganised with owner): SHOW (+ logo), LISTEN,
+       LINES, TRAILS, MOVEMENT, BACKGROUND, PEEPHOLE, MIDI. Every slider is a
+       CC on the visuals module's channel; the knob table lives in
+       static/js/visuals.js (KNOB), checked against the renderer by the suite. -->
+  <style>
+    .vrow { display:grid; grid-template-columns:78px 1fr 58px; gap:8px; align-items:center; margin-bottom:2px; }
+    .vrow .vl { font-size:9px; color:var(--label); font-family:var(--fh); letter-spacing:.1em; }
+    .vrow .vv { font-size:9px; color:var(--muted); text-align:right; font-family:var(--fs); white-space:nowrap; }
+    .vrow input { width:100%; }
+    .vhint { font-size:9px; color:var(--muted); line-height:1.4; margin:0 0 6px 86px; }
+    .vgroup { font-size:9px; color:var(--label); letter-spacing:.12em; margin:10px 0 4px; font-family:var(--fh); }
+    .vdim { opacity:.4; transition:opacity .2s; }
+    .vnote { font-size:9px; color:var(--warn,#fbbf24); margin:0 0 6px 86px; min-height:0; }
+    .mod-grid { display:grid; grid-template-columns:78px 1fr 1fr; gap:4px 10px; align-items:center; }
+    .mod-grid .mh { font-size:9px; color:var(--muted); letter-spacing:.1em; font-family:var(--fh); }
+    .mod-grid .vl { font-size:9px; color:var(--label); font-family:var(--fh); letter-spacing:.1em; }
+    .mod-grid input { width:100%; }
+    .vmeter { height:6px; border-radius:3px; background:var(--dim); position:relative; overflow:hidden; flex:1; }
+    .vmeter > div { position:absolute; top:0; bottom:0; left:0; background:var(--accent,#ff5cc8); }
+    #aud-ticks { position:relative; height:12px; font-size:9px; color:var(--muted); margin:2px 0 8px; }
+    #aud-ticks span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+    #bg-patterns { display:flex; flex-wrap:wrap; gap:4px; max-height:260px; overflow-y:auto; }
+    .pthumb { width:44px; height:44px; border:1px solid var(--dim); border-radius:4px; padding:0;
+              background-color:#000; background-repeat:repeat; background-size:22px auto; cursor:pointer; }
+    .pthumb.on { outline:2px solid var(--accent,#ff5cc8); }
+    details.vmore > summary { cursor:pointer; font-size:10px; color:var(--label); letter-spacing:.1em; font-family:var(--fh); }
+  </style>
+
+  <!-- SHOW -------------------------------------------------------------------->
+  <div class="card" id="vis-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>SHOW</span><span id="vis-state" style="font-size:10px;font-family:var(--fs)">—</span>
+    </div>
+    <div class="flags" style="margin-bottom:6px">
+      <button class="flag" id="vis-start" onclick="visCmd({action:'start'})">START</button>
+      <button class="flag" id="vis-stop" onclick="visCmd({action:'stop'})">STOP</button>
+      <button class="flag" onclick="visCmd({action:'next'})">NEXT ›</button>
+    </div>
+    <div class="flags" id="vis-scenes" style="margin-bottom:6px"></div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--label)">
+      <span>CYCLE EVERY
+        <select id="vis-secs" onchange="visSetCycle()">
+          <option value="15">15 s</option><option value="30">30 s</option>
+          <option value="60">1 min</option><option value="120">2 min</option>
+          <option value="300">5 min</option>
+        </select></span>
+      <span>FRAME RATE
+        <select id="vis-fps" onchange="visCmd({action:'fps', fps:+this.value})">
+          <option value="30">30 fps</option><option value="45">45 fps</option>
+          <option value="60">60 fps</option>
+        </select></span>
+    </div>
+    <div id="vis-msg" style="font-size:11px;min-height:14px;margin-top:4px"></div>
+
+    <details class="vmore" id="logo-box" style="margin-top:6px">
+      <summary>LOGO <span id="logo-name" style="font-family:var(--fs);color:var(--muted)"></span>
+        <span style="color:var(--muted)">· used by the LOGO and SHAPE4D scenes</span></summary>
+      <div class="flags" id="logo-list" style="margin:6px 0"></div>
+      <canvas id="logo-preview" height="120" style="width:100%;display:block;background:#000;border-radius:6px"></canvas>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:10px">
+        <input type="file" id="logo-file" accept=".svg,image/svg+xml">
+        <button class="flag" onclick="logoUpload()">UPLOAD</button>
+        <button class="flag" id="logo-del" onclick="logoDelete()" style="display:none">DELETE THIS ONE</button>
+        <span id="logo-msg"></span>
+      </div>
+      <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+        LOGO draws it turning in 3D with a bright trace along its lines; SHAPE4D turns its
+        outline into a 4D shape (CHORD SHAPE = the held chord's shape instead). Upload SVG
+        line art, 2 MB max: fills become outlines, text and images are ignored. Only logos
+        you uploaded can be deleted.
+      </div>
+    </details>
+  </div>
+
+  <!-- LISTEN ------------------------------------------------------------------>
+  <div class="card" id="listen-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>LISTEN</span>
+      <span style="display:flex;gap:10px;align-items:center;font-size:10px;font-family:var(--fs)">
+        <span id="aud-band">—</span>
+        <span id="aud-beat" style="width:12px;height:12px;border-radius:50%;background:var(--dim);display:inline-block;flex:none"
+              title="lights on every beat the shapes' band hears"></span>
+        <span id="aud-beat2" style="width:12px;height:12px;border-radius:50%;background:var(--dim);display:none;flex:none"
+              title="lights on every beat the background's band hears"></span>
+      </span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--label);margin-bottom:6px">
+      <span>SOURCE</span>
+      <select id="aud-src" onchange="srcSet()" style="max-width:100%"></select>
+      <span id="aud-src-msg"></span>
+    </div>
+    <canvas id="aud-spec" height="170" style="width:100%;display:block;background:#000;border-radius:6px;touch-action:none;cursor:ew-resize"></canvas>
+    <div id="aud-ticks"></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--label);margin-bottom:6px">
+      <span>DRAG SETS THE BAND FOR</span>
+      <span class="flags" id="band-pick">
+        <button class="flag" data-b="1" onclick="pickDragBand(1)">SHAPES</button>
+        <button class="flag" data-b="2" onclick="pickDragBand(2)">BACKGROUND</button>
+      </span>
+      <button class="flag" id="band-same" style="display:none" onclick="bandSame()">BACKGROUND = SAME AS SHAPES</button>
+    </div>
+    <div class="vhint" style="margin-left:0">
+      <b>Drag across the spectrum</b> to pick what counts as a beat (drag an edge to adjust).
+      The shapes and the background share one band until you pick BACKGROUND: it then gets
+      its OWN BAND (cyan, starting as a copy of the shapes' band) and its own SENS BG.
+      The dotted outlines are what each detector really hears: it listens to only the
+      newest 21 ms so it can react fast, which blurs the bass into ~47 Hz steps.
+    </div>
+    <div id="aud-knobs"></div>
+    <div id="aud-latency" style="font-size:10px;color:var(--label);margin-top:6px;line-height:1.5"></div>
+  </div>
+
+  <!-- LINES ------------------------------------------------------------------->
+  <div class="card" id="lines-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>LINES</span>
+      <button class="rescan-btn" onclick="visCentre('lines-knobs')">CENTRE ALL</button>
+    </div>
+    <div id="lines-knobs"></div>
+  </div>
+
+  <!-- TRAILS ------------------------------------------------------------------>
+  <div class="card" id="trails-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>TRAILS</span>
+      <button class="rescan-btn" onclick="visCentre('trails-knobs')">CENTRE ALL</button>
+    </div>
+    <div id="trails-knobs"></div>
+    <div class="vhint" style="margin-left:0">
+      Each frame the last picture is faded and kept: those ghosts are the trails.
+      TRAIL ZOOM and TRAIL TWIST move only the ghosts, never the shape itself, so they
+      show only when TRAILS is up. (To resize or turn the shape, use SIZE and ANGLE.)
+    </div>
+  </div>
+
+  <!-- MOVEMENT ---------------------------------------------------------------->
+  <div class="card" id="move-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>MOVEMENT</span>
+      <span style="display:flex;gap:8px;align-items:center;font-size:9px;color:var(--muted);min-width:150px">
+        BEAT <span class="vmeter"><div id="mv-hit"></div></span>
+        LFO <span class="vmeter"><div id="mv-lfo" style="width:4px"></div></span>
+      </span>
+    </div>
+    <div class="vgroup" style="margin-top:0">LFO</div>
+    <div class="flags" id="lfo-sync" style="margin-bottom:4px"></div>
+    <div id="lfo-knobs"></div>
+    <div class="vnote" id="lfo-note"></div>
+    <div class="mod-grid" id="mod-grid"></div>
+    <div class="vhint" style="margin:6px 0 0">
+      REACT = how much the beat moves it: drum kicks and the audio beat, shaped by LISTEN's
+      ATTACK and RELEASE, plus loudness (separate from LINES' BEAT: they react even with
+      BEAT at 0). LFO = how far the LFO swings it. Both at 0 = off.
+      SYNC locks the LFO to the ORC's bar while the sequencer runs (at its tempo when
+      stopped); FREE uses RATE.
+    </div>
+  </div>
+
+  <!-- BACKGROUND -------------------------------------------------------------->
+  <div class="card" id="bg-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>BACKGROUND</span><span id="bg-pattern-name" style="font-size:10px;font-family:var(--fs)"></span>
+    </div>
+    <div class="vhint" style="margin-left:0">
+      A repeating pattern behind the lines. <b>It rests at black</b> and the music brings it
+      in; its gaps always stay black.
+    </div>
+    <div class="vgroup">PATTERN</div>
+    <div class="flags" id="bg-sets" style="margin-bottom:6px"></div>
+    <div class="flags" id="bg-patterns" style="margin-bottom:6px"></div>
+    <div id="pat-custom" style="display:none;margin-bottom:6px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
+        <input type="file" id="pat-file" accept=".svg,image/svg+xml">
+        <button class="flag" onclick="patUpload()">UPLOAD</button>
+        <button class="flag" id="pat-del" onclick="patDelete()" style="display:none">DELETE THIS ONE</button>
+        <span id="pat-msg"></span>
+      </div>
+      <div class="vhint" style="margin:4px 0 0">
+        Your own tiles (SVG, 512 KB max, up to 128). Draw ONE repeat that wraps
+        seamlessly (what leaves the right edge comes back on the left, same for top and
+        bottom), in white or grey on black or transparent: the ORC adds the colour and
+        reads only brightness (the red part of each colour, so pure blue shows nothing).
+        Black stays black on screen. Same file name = replaces your earlier one.
+      </div>
+    </div>
+    <div class="vgroup">WHEN IT SHOWS</div>
+    <div id="bg-show-knobs"></div>
+    <div class="vgroup">BEND <span style="color:var(--muted)">(EarthBound-style)</span></div>
+    <div class="flags" id="bg-modes" style="margin-bottom:6px"></div>
+    <div id="bg-bend-knobs"></div>
+    <div class="vgroup">LOOK</div>
+    <div id="bg-look-knobs"></div>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+      Sets: built-in, HERO = Hero Patterns by Steve Schoger (CC BY 4.0), MONSTER = Pattern
+      Monster (MIT); credits in orc1/daw/patterns/CREDITS.md.
+    </div>
+  </div>
+
+  <!-- PEEPHOLE ---------------------------------------------------------------->
+  <div class="card" id="mask-card">
+    <div class="card-label">PEEPHOLE</div>
+    <div class="vhint" style="margin-left:0">
+      Everything outside the shape is pure black, lines included (for a projector). OFF =
+      the whole screen.
+    </div>
+    <div class="flags" id="mask-shapes" style="margin-bottom:8px"></div>
+    <div id="mask-knobs"></div>
+    <div class="vgroup">KEEP THE SCENE INSIDE</div>
+    <div id="mask-fit-knobs"></div>
+  </div>
+
+  <!-- MIDI -------------------------------------------------------------------->
+  <div class="card" id="midi-card">
+    <div class="card-label">MIDI</div>
+    <div id="vis-bind" style="font-size:10px;color:var(--label)"></div>
+    <details class="vmore" style="margin-top:6px">
+      <summary>EVERY CONTROL'S CC NUMBER</summary>
+      <div id="midi-list" style="font-size:9px;color:var(--muted);line-height:1.6;margin-top:6px"></div>
+    </details>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+      Every slider is a MIDI CC on the <b>visuals</b> module's channel, so any controller
+      (or a Fire knob set to the visuals module) can move it too. The visuals also follow
+      the ORC's MIDI: drum kicks pulse, snares flash, the held chord sets the colour.
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/visuals.js"></script>
+{% endblock %}

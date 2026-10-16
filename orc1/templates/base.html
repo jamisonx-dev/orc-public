@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0b0d">
+<title>{% block title %}ORC-1{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/shared.css">
+{% block page_css %}{% endblock %}
+</head>
+<body>
+<div class="shell">
+
+  <!-- HEADER -->
+  <div class="hdr">
+    <div class="logo">
+      ORC<span>-1</span>
+      <span class="logo-sub">{% block page_label %}{% endblock %}</span>
+    </div>
+    <div class="hdr-right">
+      <span class="age" id="age">—</span>
+      <div class="dot" id="dot"></div>
+    </div>
+  </div>
+
+  <!-- PAGE CONTENT -->
+  {% block content %}{% endblock %}
+
+  <!-- FOOTER -->
+  <div class="footer">ORC-1 · RASPBERRY PI</div>
+
+</div><!-- /.shell -->
+
+<!-- BOTTOM NAV — grouped rail. Sub-rows sit ABOVE the category row (the bar is
+     bottom-fixed); shared.js opens one group at a time and auto-opens the group
+     holding the current page. Order = PLAY, then heaviest-used groups first. -->
+<nav class="nav-bar">
+  <div class="nav-subs">
+    <div class="nav-sub" id="g-signal">
+      <a class="nav-item" href="/matrix">MATRIX</a>
+      <a class="nav-item" href="/patch">PATCH</a>
+      <a class="nav-item" href="/routes">ROUTE</a>
+      <a class="nav-item" href="/cme">CME</a>
+      <a class="nav-item" href="/fx">FX</a>
+      <a class="nav-item" href="/performve">PVE</a>
+    </div>
+    <div class="nav-sub" id="g-sample">
+      <a class="nav-item" href="/sampler">SMPL</a>
+      <a class="nav-item" href="/skipback">SKIP</a>
+    </div>
+    <div class="nav-sub" id="g-voices">
+      <a class="nav-item" href="/synth">SYNTH</a>
+      <a class="nav-item" href="/chip">CHIP</a>
+      <a class="nav-item" href="/mono">MONO</a>
+      <a class="nav-item" href="/drums">DRUM</a>
+    </div>
+    <div class="nav-sub" id="g-rhythm">
+      <a class="nav-item" href="/seq">SEQ</a>
+      <a class="nav-item" href="/beatbuddy">BEAT</a>
+    </div>
+    <div class="nav-sub" id="g-control">
+      <a class="nav-item" href="/control">CTRL</a>
+      <a class="nav-item" href="/beatstep">BSP</a>
+      <a class="nav-item" href="/rc505">RC505</a>
+      <a class="nav-item" href="/pedal">PEDAL</a>
+      <a class="nav-item" href="/pads">PADS</a>
+      <a class="nav-item" href="/kikpad">KIK</a>
+      <a class="nav-item" href="/cc">CC</a>
+      <a class="nav-item" href="/screens">SCRN</a>
+    </div>
+  </div>
+  <div class="nav-cats">
+    <a class="nav-cat solo" href="/">PLAY</a>
+    <button class="nav-cat" type="button" data-group="g-signal">SIGNAL</button>
+    <button class="nav-cat" type="button" data-group="g-sample">SAMPLE</button>
+    <button class="nav-cat" type="button" data-group="g-voices">VOICES</button>
+    <button class="nav-cat" type="button" data-group="g-rhythm">RHYTHM</button>
+    <button class="nav-cat" type="button" data-group="g-control">CONTROL</button>
+    <a class="nav-cat solo" href="/hud">HUD</a>
+    <a class="nav-cat solo" href="/visuals">VIS</a>
+    <a class="nav-cat solo" href="/system">SYS</a>
+  </div>
+</nav>
+
+<!-- SHARED JS (starts poll loop, activates nav) -->
+<script src="/static/js/shared.js"></script>
+{% block page_js %}{% endblock %}
+</body>
+</html>

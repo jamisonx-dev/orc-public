@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · RC505{% endblock %}
+{% block page_label %}RC505{% endblock %}
+{% block page_css %}
+<style>
+  #rc-page { max-width: 900px; }
+  .rc-conn { font-weight:600; padding:3px 10px; border-radius:6px; }
+  .rc-conn.live { color:#0a7; } .rc-conn.dead { color:#c33; }
+  .rc-transport .btn { min-width:120px; }
+  .rc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+  .rc-ctl { border:1px solid var(--line,#3333); border-radius:8px; padding:8px; }
+  .rc-ctl .cc { float:right; font-size:11px; opacity:.6; }
+  .rc-ctl .tgt { font-size:12px; font-weight:600; display:block; margin-bottom:6px; }
+  .rc-ctl button.trig { width:100%; }
+  .rc-ctl input[type=range] { width:100%; }
+  .rc-map table { width:100%; border-collapse:collapse; font-size:12px; }
+  .rc-map td { padding:2px 6px; border-bottom:1px solid var(--line,#2222); }
+  .rc-map input.cc { width:52px; text-align:center; }
+  .rc-map tr.mapped { background:rgba(0,160,120,.07); }
+  .rc-map .grp { font-weight:700; opacity:.7; padding-top:10px; }
+  #rc-mapcount.warn { color:#c33; font-weight:700; }
+  .rc-note { font-size:12px; opacity:.75; margin-top:6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="rc-page">
+
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+    <span id="rc-conn" class="rc-conn dead">○ checking…</span>
+    <button class="btn" onclick="RC505.refresh()">⟳ refresh</button>
+    <span id="rc-flash" style="font-size:12px;color:#0a7"></span>
+  </div>
+
+  <section class="card rc-transport">
+    <div class="card-label">TRANSPORT</div>
+    <div class="btn-row">
+      <button class="btn accent" onclick="RC505.action('all_start_stop')">ALL START / STOP</button>
+      <button class="btn" onclick="RC505.transport(true)">▶ START</button>
+      <button class="btn" onclick="RC505.transport(false)">■ STOP</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">MEMORY</div>
+    <div class="btn-row" style="align-items:center">
+      <button class="btn" onclick="RC505.action('memory_dec')">◄ PREV</button>
+      <button class="btn" onclick="RC505.action('memory_inc')">NEXT ►</button>
+      <span style="margin-left:12px">go to&nbsp;</span>
+      <input id="rc-mem" type="number" min="1" max="99" value="1" style="width:60px">
+      <button class="btn" onclick="RC505.gotoMem()">SELECT</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">CONTROLS <span style="font-weight:400;opacity:.6">(mapped actions)</span></div>
+    <div class="rc-grid" id="rc-controls"></div>
+  </section>
+
+  <section class="card rc-map">
+    <div class="card-label">MAPPING <span style="font-weight:400;opacity:.6">— connect an action to a CC</span></div>
+    <p class="card-sub" style="margin:0 0 6px 0">
+      Set a CC (1–31 or 64–95) next to any action; blank = unmapped. At most
+      <b>16</b> mapped (<span id="rc-mapcount">0</span>/16). Saving updates the ORC's
+      control map immediately.
+    </p>
+    <div style="max-height:340px;overflow:auto"><table><tbody id="rc-maprows"></tbody></table></div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn accent" onclick="RC505.saveMap()">SAVE MAPPING</button>
+      <span id="rc-savemsg" class="rc-note"></span>
+    </div>
+    <p class="rc-note">To make the mapping take effect <b>on the RC itself</b>: put the unit in USB STORAGE mode, run
+      <code>bash ~/rc505_tools/rc505_write.sh</code>, then power-cycle it.</p>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/rc505.js"></script>{% endblock %}

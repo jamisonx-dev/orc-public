@@ -1,0 +1,14 @@
+[Unit]
+Description=ORC-1 System Dashboard
+After=network.target
+
+[Service]
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc-control
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc-control/orc1_system.py 5002
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

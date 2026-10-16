@@ -1,0 +1,439 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · CHIP{% endblock %}
+{% block page_label %}CHIP{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/css/voices.css">
+{% endblock %}
+
+{% block content %}
+
+  <div class="section-lbl">NES PULSE 1 <span class="ch-tag" id="ch-tag-chip">CH —</span></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">DUTY CYCLE</div>
+      <button class="trig-btn" onclick="audition(CH_CHIP,60)">▶ TEST</button>
+    </div>
+    <div class="seg btn-row" style="margin-bottom:12px">
+      <button class="btn duty-btn" data-voice="p1" data-val="16"  onclick="setDuty('p1',16)">12.5%</button>
+      <button class="btn duty-btn" data-voice="p1" data-val="48"  onclick="setDuty('p1',48)">25%</button>
+      <button class="btn duty-btn active" data-voice="p1" data-val="80" onclick="setDuty('p1',80)">50%</button>
+      <button class="btn duty-btn" data-voice="p1" data-val="112" onclick="setDuty('p1',112)">75%</button>
+    </div>
+    <div class="card-label" style="margin-bottom:8px">ENVELOPE</div>
+    <div class="param-list" id="p1-params">
+      <div class="prow">
+        <span class="plab">ATK</span>
+        <input type="range" min="0" max="127" value="0"  id="p1-atk" oninput="onCC(CH_CHIP,8,+this.value,'p1-v-atk')">
+        <span class="pval" id="p1-v-atk">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DEC</span>
+        <input type="range" min="0" max="127" value="64" id="p1-dec" oninput="onCC(CH_CHIP,9,+this.value,'p1-v-dec')">
+        <span class="pval" id="p1-v-dec">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">SUS</span>
+        <input type="range" min="0" max="127" value="89" id="p1-sus" oninput="onCC(CH_CHIP,10,+this.value,'p1-v-sus')">
+        <span class="pval" id="p1-v-sus">89</span>
+      </div>
+      <div class="prow">
+        <span class="plab">REL</span>
+        <input type="range" min="0" max="127" value="50" id="p1-rel" oninput="onCC(CH_CHIP,11,+this.value,'p1-v-rel')">
+        <span class="pval" id="p1-v-rel">50</span>
+      </div>
+      <div class="prow">
+        <span class="plab">LEVEL</span>
+        <input type="range" min="0" max="127" value="89" id="p1-lvl" oninput="onCC(CH_CHIP,13,+this.value,'p1-v-lvl')">
+        <span class="pval" id="p1-v-lvl">89</span>
+      </div>
+    </div>
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">FILTER</div>
+    <div class="seg btn-row" style="margin-bottom:10px">
+      <button class="btn fmode-btn active" data-voice="p1" data-val="21"  onclick="setFilterMode('p1',21)">LP</button>
+      <button class="btn fmode-btn"        data-voice="p1" data-val="64"  onclick="setFilterMode('p1',64)">HP</button>
+      <button class="btn fmode-btn"        data-voice="p1" data-val="106" onclick="setFilterMode('p1',106)">BP</button>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">CUTOFF</span>
+        <input type="range" min="0" max="127" value="64" id="p1-cut" oninput="onCC(CH_CHIP,74,+this.value,'p1-v-cut')">
+        <span class="pval" id="p1-v-cut">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">RES</span>
+        <input type="range" min="0" max="127" value="0"  id="p1-res" oninput="onCC(CH_CHIP,71,+this.value,'p1-v-res')">
+        <span class="pval" id="p1-v-res">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">OCTAVE</span>
+        <input type="range" min="0" max="127" value="64" id="p1-oct" oninput="onCC(CH_CHIP,75,+this.value,'p1-v-oct')">
+        <span class="pval" id="p1-v-oct">64</span>
+      </div>
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">PITCH BEND + VIBRATO</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab" title="Bend range in semitones, up or down (default ±12); set on the /system page">BEND</span>
+        <input type="range" min="-8192" max="8191" value="0" id="p1-bend"
+               oninput="bendInput('p1',+this.value)"
+               onpointerup="bendRelease('p1')" onpointercancel="bendRelease('p1')"
+               onmouseleave="bendRelease('p1')" onchange="bendRelease('p1')">
+        <span class="pval" id="p1-v-bend">0.0st</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato depth: 0–100 cents">VIB DEP</span>
+        <input type="range" min="0" max="127" value="0" id="p1-vibd" oninput="onCC(CH_CHIP,77,+this.value,'p1-v-vibd')">
+        <span class="pval" id="p1-v-vibd">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato rate: 0.1–12 Hz">VIB RATE</span>
+        <input type="range" min="0" max="127" value="64" id="p1-vibr" oninput="onCC(CH_CHIP,78,+this.value,'p1-v-vibr')">
+        <span class="pval" id="p1-v-vibr">64</span>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:4px">
+      Depth 0–100 cents · Rate 0.1–12 Hz · Bend springs back to center on release
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">HARDWARE SWEEP
+      <span style="font-size:8px;font-weight:normal;color:var(--muted);margin-left:6px">(auto pitch slide · re-armed each note)</span>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab" title="Sweep speed: 0 = off, 1 = fastest … 7 = slowest">TIME</span>
+        <input type="range" min="0" max="7" value="0" id="sw-time" oninput="setSweep(79,+this.value,'sw-v-time')">
+        <span class="pval" id="sw-v-time">OFF</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Size of each sweep step: 0 = none, 1 = largest … 7 = smallest">SHIFT</span>
+        <input type="range" min="0" max="7" value="0" id="sw-shift" oninput="setSweep(80,+this.value,'sw-v-shift')">
+        <span class="pval" id="sw-v-shift">0</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+      <span style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">DIRECTION</span>
+      <button class="btn" id="sweep-dir-btn" onclick="toggleSweepDir()">UP ↑</button>
+    </div>
+    <div class="mods-slot" data-voice="p1"></div>
+  </div>
+
+  <div class="section-lbl">NES PULSE 2 <span class="ch-tag" id="ch-tag-chip-p2">CH —</span></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">DUTY CYCLE</div>
+      <button class="trig-btn" onclick="audition(CH_CHIP_P2,60)">▶ TEST</button>
+    </div>
+    <div class="seg btn-row" style="margin-bottom:12px">
+      <button class="btn duty-btn" data-voice="p2" data-val="16"  onclick="setDuty('p2',16)">12.5%</button>
+      <button class="btn duty-btn" data-voice="p2" data-val="48"  onclick="setDuty('p2',48)">25%</button>
+      <button class="btn duty-btn active" data-voice="p2" data-val="80" onclick="setDuty('p2',80)">50%</button>
+      <button class="btn duty-btn" data-voice="p2" data-val="112" onclick="setDuty('p2',112)">75%</button>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">ATK</span>
+        <input type="range" min="0" max="127" value="0"  id="p2-atk" oninput="onCC(CH_CHIP_P2,8,+this.value,'p2-v-atk')">
+        <span class="pval" id="p2-v-atk">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DEC</span>
+        <input type="range" min="0" max="127" value="64" id="p2-dec" oninput="onCC(CH_CHIP_P2,9,+this.value,'p2-v-dec')">
+        <span class="pval" id="p2-v-dec">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">SUS</span>
+        <input type="range" min="0" max="127" value="89" id="p2-sus" oninput="onCC(CH_CHIP_P2,10,+this.value,'p2-v-sus')">
+        <span class="pval" id="p2-v-sus">89</span>
+      </div>
+      <div class="prow">
+        <span class="plab">REL</span>
+        <input type="range" min="0" max="127" value="50" id="p2-rel" oninput="onCC(CH_CHIP_P2,11,+this.value,'p2-v-rel')">
+        <span class="pval" id="p2-v-rel">50</span>
+      </div>
+      <div class="prow">
+        <span class="plab">LEVEL</span>
+        <input type="range" min="0" max="127" value="89" id="p2-lvl" oninput="onCC(CH_CHIP_P2,13,+this.value,'p2-v-lvl')">
+        <span class="pval" id="p2-v-lvl">89</span>
+      </div>
+      <div class="prow">
+        <span class="plab">CUTOFF</span>
+        <input type="range" min="0" max="127" value="64" id="p2-cut" oninput="onCC(CH_CHIP_P2,74,+this.value,'p2-v-cut')">
+        <span class="pval" id="p2-v-cut">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">RES</span>
+        <input type="range" min="0" max="127" value="0"  id="p2-res" oninput="onCC(CH_CHIP_P2,71,+this.value,'p2-v-res')">
+        <span class="pval" id="p2-v-res">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">OCTAVE</span>
+        <input type="range" min="0" max="127" value="64" id="p2-oct" oninput="onCC(CH_CHIP_P2,75,+this.value,'p2-v-oct')">
+        <span class="pval" id="p2-v-oct">64</span>
+      </div>
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">PITCH BEND + VIBRATO</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab" title="Bend range in semitones, up or down (default ±12); set on the /system page">BEND</span>
+        <input type="range" min="-8192" max="8191" value="0" id="p2-bend"
+               oninput="bendInput('p2',+this.value)"
+               onpointerup="bendRelease('p2')" onpointercancel="bendRelease('p2')"
+               onmouseleave="bendRelease('p2')" onchange="bendRelease('p2')">
+        <span class="pval" id="p2-v-bend">0.0st</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato depth: 0–100 cents">VIB DEP</span>
+        <input type="range" min="0" max="127" value="0" id="p2-vibd" oninput="onCC(CH_CHIP_P2,77,+this.value,'p2-v-vibd')">
+        <span class="pval" id="p2-v-vibd">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato rate: 0.1–12 Hz">VIB RATE</span>
+        <input type="range" min="0" max="127" value="64" id="p2-vibr" oninput="onCC(CH_CHIP_P2,78,+this.value,'p2-v-vibr')">
+        <span class="pval" id="p2-v-vibr">64</span>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:4px">
+      Depth 0–100 cents · Rate 0.1–12 Hz · Bend springs back to center on release
+    </div>
+    <div class="mods-slot" data-voice="p2"></div>
+  </div>
+
+  <div class="section-lbl">P1 + P2 LINK</div>
+  <div class="card blue">
+    <div class="card-label" style="margin-bottom:8px">COUPLE MODE</div>
+    <div class="couple-grid" id="couple-btns">
+      <button class="couple-btn active" data-val="9"   onclick="setCouple(9)">NONE</button>
+      <button class="couple-btn"        data-val="27"  onclick="setCouple(27)">UNISON</button>
+      <button class="couple-btn"        data-val="45"  onclick="setCouple(45)">DETUNE</button>
+      <button class="couple-btn"        data-val="63"  onclick="setCouple(63)">FIFTH</button>
+      <button class="couple-btn"        data-val="81"  onclick="setCouple(81)">THIRD</button>
+      <button class="couple-btn"        data-val="99"  onclick="setCouple(99)">OCTAVE</button>
+      <button class="couple-btn"        data-val="118" onclick="setCouple(118)">OCT DN</button>
+    </div>
+    <div class="param-list" style="margin-top:12px">
+      <div class="prow">
+        <span class="plab">DETUNE</span>
+        <input type="range" min="0" max="127" value="64" id="sl-detune" oninput="onCC(CH_CHIP,73,+this.value,'v-detune')">
+        <span class="pval" id="v-detune">64</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <span style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">STEREO SPREAD</span>
+      <button class="btn" id="spread-btn" onclick="toggleSpread()">OFF</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <span style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">ANTI-ALIAS</span>
+      <button class="btn" id="aa-btn" onclick="toggleAA()">OFF</button>
+      <span style="font-size:9px;color:var(--muted)">tames the detune &ldquo;fizz&rdquo; (softens the raw grit)</span>
+    </div>
+  </div>
+
+  <div class="section-lbl">NES TRIANGLE <span class="ch-tag" id="ch-tag-chip-tri">CH —</span></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:9px;color:var(--muted)">No envelope: the stepped waveform plays at full level while a note is held</span>
+      <button class="trig-btn" onclick="audition(CH_CHIP_TRI,60)">▶ TEST</button>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">LEVEL</span>
+        <input type="range" min="0" max="127" value="89" id="tri-lvl" oninput="onCC(CH_CHIP_TRI,13,+this.value,'tri-v-lvl')">
+        <span class="pval" id="tri-v-lvl">89</span>
+      </div>
+      <div class="prow">
+        <span class="plab">CUTOFF</span>
+        <input type="range" min="0" max="127" value="64" id="tri-cut" oninput="onCC(CH_CHIP_TRI,74,+this.value,'tri-v-cut')">
+        <span class="pval" id="tri-v-cut">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">RES</span>
+        <input type="range" min="0" max="127" value="0"  id="tri-res" oninput="onCC(CH_CHIP_TRI,71,+this.value,'tri-v-res')">
+        <span class="pval" id="tri-v-res">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">OCTAVE</span>
+        <input type="range" min="0" max="127" value="64" id="tri-oct" oninput="onCC(CH_CHIP_TRI,75,+this.value,'tri-v-oct')">
+        <span class="pval" id="tri-v-oct">64</span>
+      </div>
+    </div>
+    <div class="mods-slot" data-voice="tri"></div>
+  </div>
+
+  <div class="section-lbl">NES NOISE <span class="ch-tag" id="ch-tag-chip-ns">CH —</span></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="seg btn-row" style="flex:1;margin-right:10px">
+        <button class="btn noise-mode-btn active" data-val="32"  onclick="setNoiseMode(32)">15-BIT (LONG)</button>
+        <button class="btn noise-mode-btn"        data-val="96"  onclick="setNoiseMode(96)">7-BIT (METALLIC)</button>
+      </div>
+      <button class="trig-btn" onclick="audition(CH_CHIP_NS,60)">▶ TEST</button>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">ATK</span>
+        <input type="range" min="0" max="127" value="0"  id="ns-atk" oninput="onCC(CH_CHIP_NS,8,+this.value,'ns-v-atk')">
+        <span class="pval" id="ns-v-atk">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DEC</span>
+        <input type="range" min="0" max="127" value="64" id="ns-dec" oninput="onCC(CH_CHIP_NS,9,+this.value,'ns-v-dec')">
+        <span class="pval" id="ns-v-dec">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">SUS</span>
+        <input type="range" min="0" max="127" value="0"  id="ns-sus" oninput="onCC(CH_CHIP_NS,10,+this.value,'ns-v-sus')">
+        <span class="pval" id="ns-v-sus">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab">REL</span>
+        <input type="range" min="0" max="127" value="40" id="ns-rel" oninput="onCC(CH_CHIP_NS,11,+this.value,'ns-v-rel')">
+        <span class="pval" id="ns-v-rel">40</span>
+      </div>
+      <div class="prow">
+        <span class="plab">LEVEL</span>
+        <input type="range" min="0" max="127" value="89" id="ns-lvl" oninput="onCC(CH_CHIP_NS,13,+this.value,'ns-v-lvl')">
+        <span class="pval" id="ns-v-lvl">89</span>
+      </div>
+    </div>
+    <div class="param-list" style="margin-top:10px">
+      <div class="prow">
+        <span class="plab" title="Notes at or above this note number play the second noise voice (noise2). 0 = off">SPLIT</span>
+        <input type="range" min="0" max="127" value="0" id="ns-split" oninput="onCC(CH_CHIP_NS,114,+this.value,null);_splitLabel(+this.value)">
+        <span class="pval" id="ns-v-split">OFF</span>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:4px">
+      Notes from the split point up play NOISE 2, which has its own 15-bit/7-bit mode. Bind
+      CHIP NS2 on /matrix to reach its other settings.
+    </div>
+    <div class="mods-slot" data-voice="ns"></div>
+  </div>
+
+  <div class="section-lbl">GB WAVE <span class="ch-tag" id="ch-tag-chip-gb">CH —</span></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label)">WAVEFORM BANK</div>
+      <button class="trig-btn" onclick="audition(CH_GB_WAVE,48)">▶ TEST</button>
+    </div>
+    <div class="bank-grid">
+      <button class="bank-btn active" data-val="8"   onclick="setGBWave(8)">TRI</button>
+      <button class="bank-btn"        data-val="24"  onclick="setGBWave(24)">SINE</button>
+      <button class="bank-btn"        data-val="40"  onclick="setGBWave(40)">SAW↑</button>
+      <button class="bank-btn"        data-val="56"  onclick="setGBWave(56)">SAW↓</button>
+      <button class="bank-btn"        data-val="72"  onclick="setGBWave(72)">SQ</button>
+      <button class="bank-btn"        data-val="88"  onclick="setGBWave(88)">PLS25</button>
+      <button class="bank-btn"        data-val="104" onclick="setGBWave(104)">2×SAW</button>
+      <button class="bank-btn"        data-val="120" onclick="setGBWave(120)">WARM</button>
+    </div>
+    <div class="param-list" style="margin-top:12px">
+      <div class="prow">
+        <span class="plab">VOLUME</span>
+        <input type="range" min="0" max="127" value="127" id="gb-vol" oninput="onCC(CH_GB_WAVE,7,+this.value,'gb-v-vol')">
+        <span class="pval" id="gb-v-vol">127</span>
+      </div>
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">ENVELOPE</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab" title="Attack: 1 ms – 3 s">ATTACK</span>
+        <input type="range" min="0" max="127" value="11" id="gb-atk" oninput="onCC(CH_GB_WAVE,8,+this.value,'gb-v-atk')">
+        <span class="pval" id="gb-v-atk">11</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Decay: 5 ms – 3 s (time to fall from the attack peak to SUSTAIN)">DECAY</span>
+        <input type="range" min="0" max="127" value="63" id="gb-dec" oninput="onCC(CH_GB_WAVE,9,+this.value,'gb-v-dec')">
+        <span class="pval" id="gb-v-dec">63</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Sustain level. 0 = the note plucks and dies; 127 = holds flat like real hardware">SUSTAIN</span>
+        <input type="range" min="0" max="127" value="102" id="gb-sus" oninput="onCC(CH_GB_WAVE,10,+this.value,'gb-v-sus')">
+        <span class="pval" id="gb-v-sus">102</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Release: 5 ms – 3 s. Very short values can click">RELEASE</span>
+        <input type="range" min="0" max="127" value="68" id="gb-rel" oninput="onCC(CH_GB_WAVE,11,+this.value,'gb-v-rel')">
+        <span class="pval" id="gb-v-rel">68</span>
+      </div>
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:6px">HARDWARE ACCURACY</div>
+    <div class="seg btn-row">
+      <button class="btn" id="gb-volq-btn" onclick="gbVolQuant(true)"
+              title="Authentic DMG: volume is one of 4 fixed levels (mute/25%/50%/100%)">4-STEP VOL</button>
+      <button class="btn active" id="gb-volc-btn" onclick="gbVolQuant(false)"
+              title="Continuous volume fader (default)">SMOOTH VOL</button>
+    </div>
+    <div class="seg btn-row" style="margin-top:6px">
+      <button class="btn" id="gb-hardrt-btn" onclick="gbHardRetrig(true)"
+              title="Authentic DMG: every trigger resets the wavetable to step 0 — this is the classic retrigger pop">HARD RETRIG</button>
+      <button class="btn active" id="gb-softrt-btn" onclick="gbHardRetrig(false)"
+              title="Phase-continuous retrigger: no pop when re-triggering a sounding note (default)">SMOOTH RETRIG</button>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      4-STEP VOL limits the fader to 0 / 25% / 50% / 100%. HARD RETRIG resets the wave on every trigger (the original DMG pop). Both are off by default.
+    </div>
+
+    <div class="card-label" style="margin-top:12px;margin-bottom:8px">PITCH BEND + VIBRATO</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab" title="Bend range in semitones, up or down (default ±12); set on the /system page">BEND</span>
+        <input type="range" min="-8192" max="8191" value="0" id="gb-bend"
+               oninput="bendInput('gb',+this.value)"
+               onpointerup="bendRelease('gb')" onpointercancel="bendRelease('gb')"
+               onmouseleave="bendRelease('gb')" onchange="bendRelease('gb')">
+        <span class="pval" id="gb-v-bend">0.0st</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato depth: 0–100 cents">VIB DEP</span>
+        <input type="range" min="0" max="127" value="0" id="gb-vibd" oninput="onCC(CH_GB_WAVE,77,+this.value,'gb-v-vibd')">
+        <span class="pval" id="gb-v-vibd">0</span>
+      </div>
+      <div class="prow">
+        <span class="plab" title="Vibrato rate: 0.1–12 Hz">VIB RATE</span>
+        <input type="range" min="0" max="127" value="64" id="gb-vibr" oninput="onCC(CH_GB_WAVE,78,+this.value,'gb-v-vibr')">
+        <span class="pval" id="gb-v-vibr">64</span>
+      </div>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:4px">
+      Depth 0–100 cents · Rate 0.1–12 Hz · Bend springs back to center on release
+    </div>
+
+    <div class="card-label" style="margin-top:14px;margin-bottom:8px">WAVE SHAPE · HARMONICS
+      <span style="font-size:8px;font-weight:normal;color:var(--muted);margin-left:6px">(moving one plays the shaped wave)</span>
+    </div>
+    <div class="param-list" id="gb-harm"></div>
+    <div class="card-label" style="margin-top:12px;margin-bottom:6px">WAVE SLOTS
+      <span style="font-size:8px;font-weight:normal;color:var(--muted);margin-left:6px">(tap = recall · STORE then tap = save the playing wave)</span>
+    </div>
+    <div class="bank-grid" id="gb-slots"></div>
+    <div class="seg btn-row" style="margin-top:6px">
+      <button class="btn" id="gb-store-btn" onclick="gbStoreArm()">STORE</button>
+    </div>
+
+    <div class="card-label" style="margin-top:14px;margin-bottom:6px">CUSTOM WAVE RAM
+      <span style="font-size:8px;font-weight:normal;color:var(--muted);margin-left:6px">(drag to draw · 32 steps × 16 levels)</span>
+    </div>
+    <canvas id="wave-ram-canvas"
+            style="width:100%;height:128px;display:block;touch-action:none;cursor:crosshair;border:1px solid var(--border);border-radius:var(--radius);background:rgba(0,0,0,.25)"></canvas>
+    <div class="seg btn-row" style="margin-top:8px">
+      <button class="btn" id="wave-custom-btn" onclick="waveCustomOn()">ACTIVATE CUSTOM</button>
+      <button class="btn active" id="wave-preset-btn" onclick="waveCustomOff()">PRESET MODE</button>
+    </div>
+    <div class="mods-slot" data-voice="gb"></div>
+  </div>
+
+  <div class="section-lbl" style="margin-top:10px">MIDI IN CHANNEL</div>
+  <div class="card">
+    <div style="font-size:10px;color:var(--label);line-height:1.5">
+      This page follows the channel each chip voice is bound to (shown next to
+      its title). To move a chip voice to another channel, use
+      <a href="/matrix" class="orc-link">MATRIX &rarr;</a>
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/chip.js"></script>{% endblock %}

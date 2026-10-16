@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · PEDAL{% endblock %}
+{% block page_label %}FCB1010 PEDAL{% endblock %}
+{% block page_css %}
+<style>
+  #pd-page { max-width: 860px; }
+  .pd-status { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;
+    font-size:13px; }
+  #pd-flash { color:#0a7; font-size:12px; }
+  #pd-flash.err { color:#c33; }
+  .pd-help { font-size:12px; opacity:.7; margin:0 0 10px; line-height:1.45; }
+  .pd-tabs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px; }
+  .pd-tabs .btn.on { outline:2px solid var(--accent); background:var(--accent-bg); }
+  table.pd { width:100%; border-collapse:collapse; font-size:13px; }
+  table.pd th { text-align:left; font-size:11px; letter-spacing:.06em; opacity:.6;
+    font-weight:600; padding:2px 6px 6px; }
+  table.pd td { padding:3px 6px; vertical-align:middle; }
+  table.pd td.sw { width:44px; font-weight:700; opacity:.85; }
+  table.pd tr.dim td { opacity:.4; }
+  .pd select, .pd input, .pd-row select, .pd-row input { font:inherit; padding:4px 6px;
+    border-radius:5px; border:1px solid rgba(128,128,128,.4); background:transparent;
+    color:inherit; max-width:100%; }
+  .pd select { width:100%; }
+  .pd input.num, .pd-row input.num { width:58px; }
+  .pd .inherit { font-size:11px; opacity:.55; }
+  .pd-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
+  .pd-row .lbl { min-width:88px; font-weight:600; }
+  .pd-fwd { display:inline-flex; gap:6px; align-items:center; margin-top:4px; font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="pd-page">
+
+  <div class="pd-status">
+    <span id="pd-src">—</span>
+    <span id="pd-flash"></span>
+  </div>
+  <p class="pd-help">The FCB's own <b>mode button</b> picks the page family: <b>EF</b>
+    (press only), <b>SP</b> (sounds while held; switches 1–2 are the relays), <b>Pr</b>
+    (dial a channel + number, then send). Every change saves instantly — no restart.</p>
+
+  <section class="card">
+    <div class="card-label">EF MODE · SWITCHES 1–10 · PRESS ONLY</div>
+    <div class="pd-tabs" id="pd-ef-tabs"></div>
+    <table class="pd" id="pd-ef"></table>
+  </section>
+
+  <section class="card">
+    <div class="card-label">SP MODE · SWITCHES 3–10 · HOLD-CAPABLE</div>
+    <div class="pd-tabs" id="pd-notes-tabs"></div>
+    <table class="pd" id="pd-notes"></table>
+  </section>
+
+  <section class="card">
+    <div class="card-label">PR MODE · DIALLED CHANNEL = WHERE THE NUMBER GOES</div>
+    <p class="pd-help">Dial a channel and number on the FCB, then send. Each channel below
+      decides what that number does. Channel 13 can't be a forward target.</p>
+    <table class="pd" id="pd-pr"></table>
+  </section>
+
+  <section class="card">
+    <div class="card-label">EXPRESSION PEDALS → CC</div>
+    <div id="pd-exp"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">CHORDS FROM THE PEDAL</div>
+    <div class="pd-row">
+      <span class="lbl">EF style</span>
+      <select id="pd-style">
+        <option value="latch">rings until the next chord (same switch = stop)</option>
+        <option value="stab">fixed-length stab</option>
+      </select>
+    </div>
+    <div class="pd-row">
+      <span class="lbl">Stab length</span>
+      <input class="num" id="pd-beats" type="number" min="0.25" max="8" step="0.25"> beats
+    </div>
+    <div class="pd-row">
+      <span class="lbl">Octave</span>
+      <input class="num" id="pd-oct" type="number" min="1" max="7" step="1">
+      <span class="pd-help" style="margin:0">4 = chord I rooted on the C below middle C</span>
+    </div>
+    <p class="pd-help">SP-mode chords always sound while your foot is down. Chords follow
+      the ORC's current key + scale.</p>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/pedal.js"></script>
+{% endblock %}

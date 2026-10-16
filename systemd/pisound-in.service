@@ -1,0 +1,11 @@
+[Unit]
+Description=Pisound input as JACK client (FX loop send)
+After=orc1-synth.service
+Wants=orc1-synth.service
+[Service]
+User=pibox
+ExecStart=/usr/bin/alsa_in -d hw:pisound -j pisound-in -r 48000 -p 1024 -n 2
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

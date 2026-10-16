@@ -1,0 +1,287 @@
+/* ORC-1 · control.css — Phase 8 CTRL page */
+
+/* ── Universal Control Surface ──────────────────────────────── */
+.ucs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  flex-wrap: wrap;
+  margin-bottom: .8em;
+}
+
+.ucs-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: .8em;
+  overflow-x: auto;
+}
+
+.ucs-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.ucs-row-label {
+  font-size: .65em;
+  color: var(--muted);
+  margin-left: .4em;
+  flex-shrink: 0;
+}
+
+.ucs-pad {
+  width: 2.4em;
+  height: 2.4em;
+  flex-shrink: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  transition: background .1s;
+}
+.ucs-pad:hover { border-color: var(--accent); }
+.ucs-pad.assigned {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  border-color: var(--accent);
+}
+.ucs-pad.has-base {
+  /* base assigned but current layer not */
+  border-color: var(--muted);
+  border-style: dashed;
+}
+.ucs-pad.sel {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.ucs-pad-type {
+  font-size: .55em;
+  color: var(--accent);
+  font-weight: 700;
+  line-height: 1;
+}
+.ucs-pad-num {
+  font-size: .65em;
+  color: var(--text);
+  line-height: 1;
+}
+.ucs-pad-rc {
+  font-size: .55em;
+  color: var(--muted);
+}
+
+/* Editor panel */
+.ucs-editor {
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: .8em;
+  margin-top: .6em;
+}
+.ucs-ed-hdr {
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  margin-bottom: .7em;
+}
+.ucs-ed-hdr span {
+  font-size: .8em;
+  font-weight: 700;
+  color: var(--accent);
+  flex: 1;
+}
+.ucs-ed-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: .4em .7em;
+  align-items: center;
+  margin-bottom: .7em;
+}
+.ucs-lbl {
+  font-size: .72em;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.ucs-hint {
+  font-size: .7em;
+  color: var(--muted);
+}
+.ucs-seg { display: flex; gap: .3em; }
+.ucs-num, .ucs-sel {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: .25em .4em;
+  font-size: .82em;
+  max-width: 6em;
+}
+.ucs-sel { max-width: 14em; }
+.ucs-save { width: 100%; }
+
+@media (max-width: 520px) {
+  .ucs-pad { width: 1.8em; height: 1.8em; }
+  .ucs-pad-num { font-size: .55em; }
+}
+
+/* ── Knob map ───────────────────────────────────────────────── */
+.km-controls {
+  display: flex;
+  align-items: center;
+  gap: .6em;
+  flex-wrap: wrap;
+  margin-bottom: .8em;
+}
+.km-label { font-size: .75em; color: var(--muted); text-transform: uppercase; }
+
+.km-layers { display: flex; gap: .3em; }
+
+.km-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .5em;
+  margin-bottom: .6em;
+}
+@media (max-width: 520px) {
+  .km-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.km-knob {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: .6em .5em;
+  display: flex;
+  flex-direction: column;
+  gap: .35em;
+}
+.km-knob-label {
+  font-size: .7em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+.km-sel {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: .25em .3em;
+  font-size: .8em;
+}
+.km-cur {
+  font-size: .7em;
+  color: var(--muted);
+  min-height: 1em;
+}
+
+/* ── Chord rows ─────────────────────────────────────────────── */
+.cr-row {
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  padding: .45em 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.cr-row:last-child { border-bottom: none; }
+
+.cr-idx {
+  font-size: .7em;
+  color: var(--accent);
+  font-weight: 700;
+  width: 3em;
+  flex-shrink: 0;
+}
+.cr-type, .cr-port {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: .25em .4em;
+  font-size: .8em;
+}
+.cr-lbl {
+  font-size: .7em;
+  color: var(--muted);
+}
+.cr-ch, .cr-oct {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: .25em .3em;
+  font-size: .8em;
+}
+
+/* ── Controller status ──────────────────────────────────────── */
+.ctrl-dev {
+  padding: .3em 0;
+  font-size: .85em;
+  color: var(--text);
+}
+.ctrl-dm-label {
+  font-size: .7em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: .4em;
+}
+.ctrl-dm-row {
+  display: flex;
+  align-items: center;
+  gap: .7em;
+  padding: .2em 0;
+}
+.ctrl-dm-deck {
+  font-size: .75em;
+  color: var(--accent);
+  font-weight: 700;
+  width: 4em;
+}
+
+/* ── Voice map ───────────────────────────────────────────────── */
+.vm-display {
+  font-size: .8em;
+  color: var(--muted);
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: .6em .8em;
+  min-height: 2.5em;
+}
+.vm-row {
+  display: flex;
+  gap: .7em;
+  padding: .15em 0;
+}
+.vm-slot {
+  color: var(--accent);
+  font-weight: 700;
+  min-width: 9em;
+}
+.vm-silent { color: var(--warn, #c8622a); }
+
+/* ── Flash feedback ─────────────────────────────────────────── */
+@keyframes ctrl-flash {
+  0%   { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: none; }
+}
+.flash { animation: ctrl-flash .6s ease-out; }
+
+/* ── Misc ────────────────────────────────────────────────────── */
+.mt { margin-top: .8em; }
+.card-note {
+  font-size: .72em;
+  color: var(--muted);
+  margin-top: .5em;
+}
+.card-sub {
+  font-size: .75em;
+  color: var(--muted);
+  margin: -.3em 0 .7em;
+}

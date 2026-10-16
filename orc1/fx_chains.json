@@ -1,0 +1,1385 @@
+{
+  "nes_space": {
+    "description": "Galactic shimmer reverb on FX send/return",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/galactic",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-nes_space-0:inL",
+          "fx-nes_space-0:inR"
+        ],
+        "out_to_next": [
+          "fx-nes_space-0:outL",
+          "fx-nes_space-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "replace",
+            "label": "room",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "brightness",
+            "label": "bright",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "bigness",
+            "label": "size",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "detune",
+            "label": "detune",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  "tape_warmth": {
+    "description": "ToTape6 tape saturation on FX send/return",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/totape6",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-tape_warmth-0:inL",
+          "fx-tape_warmth-0:inR"
+        ],
+        "out_to_next": [
+          "fx-tape_warmth-0:outL",
+          "fx-tape_warmth-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "soften",
+            "label": "soften",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "headbump",
+            "label": "bump",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "flutter",
+            "label": "flutter",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "input",
+            "label": "in dB",
+            "min": -12.0,
+            "max": 12.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "output",
+            "label": "out dB",
+            "min": -12.0,
+            "max": 12.0,
+            "default": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  "drum_glue": {
+    "description": "Pressure5 bus compression on FX send/return",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/pressure5",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-drum_glue-0:inL",
+          "fx-drum_glue-0:inR"
+        ],
+        "out_to_next": [
+          "fx-drum_glue-0:outL",
+          "fx-drum_glue-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "pressure",
+            "label": "squeeze",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "speed",
+            "label": "speed",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          },
+          {
+            "symbol": "output",
+            "label": "output",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "mewiness",
+            "label": "mewy",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "pawclaw",
+            "label": "pawclaw",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          }
+        ]
+      }
+    ]
+  },
+  "verbity_room": {
+    "description": "Verbity algorithmic room reverb \u2014 shorter/denser than Galactic",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/verbity",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-verbity_room-0:inL",
+          "fx-verbity_room-0:inR"
+        ],
+        "out_to_next": [
+          "fx-verbity_room-0:outL",
+          "fx-verbity_room-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "bigness",
+            "label": "size",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          },
+          {
+            "symbol": "longness",
+            "label": "length",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "darkness",
+            "label": "dark",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          },
+          {
+            "symbol": "wetness",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          }
+        ]
+      }
+    ]
+  },
+  "tape_and_glue": {
+    "description": "2-plugin series: ToTape6 saturation into Pressure5 compression",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/totape6",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-tape_and_glue-0:inL",
+          "fx-tape_and_glue-0:inR"
+        ],
+        "out_to_next": [
+          "fx-tape_and_glue-0:outL",
+          "fx-tape_and_glue-0:outR"
+        ],
+        "next_in": [
+          "fx-tape_and_glue-1:inL",
+          "fx-tape_and_glue-1:inR"
+        ],
+        "params": [
+          {
+            "symbol": "soften",
+            "label": "soften",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "headbump",
+            "label": "bump",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "flutter",
+            "label": "flutter",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "input",
+            "label": "in dB",
+            "min": -12.0,
+            "max": 12.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "output",
+            "label": "out dB",
+            "min": -12.0,
+            "max": 12.0,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/pressure5",
+        "jack_in": [],
+        "jack_out_to": [],
+        "out_to_next": [
+          "fx-tape_and_glue-1:outL",
+          "fx-tape_and_glue-1:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "pressure",
+            "label": "squeeze",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "speed",
+            "label": "speed",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          },
+          {
+            "symbol": "output",
+            "label": "output",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "Drive": {
+    "description": "the angry distortion",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/drive",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Drive-0:inL",
+          "fx-Drive-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Drive-0:outL",
+          "fx-Drive-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "drive",
+            "label": "Drive",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "highpass",
+            "label": "Highpass",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "outLevel",
+            "label": "Out Level",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "dryWet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "Doublelay": {
+    "description": "StereoDoubler with independent delays and feedback",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/doublelay",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Doublelay-0:inL",
+          "fx-Doublelay-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Doublelay-0:outL",
+          "fx-Doublelay-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "detune",
+            "label": "Detune",
+            "min": -1.0,
+            "max": 1.0,
+            "default": -0.6
+          },
+          {
+            "symbol": "delayL",
+            "label": "Delay L",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.1
+          },
+          {
+            "symbol": "delayR",
+            "label": "Delay R",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.2
+          },
+          {
+            "symbol": "feedbk",
+            "label": "Feedbk",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "dryWet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.6
+          }
+        ]
+      }
+    ]
+  },
+  "kPlateD": {
+    "description": "a plate reverb, not unlike its namesake atop Abbey Road",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kplated",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-kPlateD-0:inL",
+          "fx-kPlateD-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kPlateD-0:outL",
+          "fx-kPlateD-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "inputPad",
+            "label": "InputPad",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "damping",
+            "label": "Damping",
+            "min": 0.0,
+            "max": 10.0,
+            "default": 5.0
+          },
+          {
+            "symbol": "lowCut",
+            "label": "Low Cut",
+            "min": 0.0,
+            "max": 3.0,
+            "default": 3.0
+          },
+          {
+            "symbol": "predelay",
+            "label": "Predelay",
+            "min": 0.0,
+            "max": 0.5,
+            "default": 0.0
+          },
+          {
+            "symbol": "wetness",
+            "label": "Wetness",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          }
+        ]
+      }
+    ]
+  },
+  "Wolfbot": {
+    "description": "aggressive Kalman bandpass with evil in its heart",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/wolfbot",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Wolfbot-0:inL",
+          "fx-Wolfbot-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Wolfbot-0:outL",
+          "fx-Wolfbot-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": []
+      }
+    ]
+  },
+  "Vibrato": {
+    "description": "Lets you vibrato, chorus, flange, and make odd FM noises",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/vibrato",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Vibrato-0:inL",
+          "fx-Vibrato-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Vibrato-0:outL",
+          "fx-Vibrato-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "speed",
+            "label": "Speed",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.3
+          },
+          {
+            "symbol": "depth",
+            "label": "Depth",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "fmspeed",
+            "label": "FM Speed",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.4
+          },
+          {
+            "symbol": "fmdepth",
+            "label": "FM Depth",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "invwet",
+            "label": "Inv/Dry/Wet",
+            "min": -1.0,
+            "max": 1.0,
+            "default": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "SubsOnly": {
+    "description": "Mix check plugin that shows you only the extreme lows",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/subsonly",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-SubsOnly-0:inL",
+          "fx-SubsOnly-0:inR"
+        ],
+        "out_to_next": [
+          "fx-SubsOnly-0:outL",
+          "fx-SubsOnly-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": []
+      }
+    ]
+  },
+  "Srsly2": {
+    "description": "A revisit of Srsly to make the stereo widening more extreme",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/srsly2",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Srsly2-0:inL",
+          "fx-Srsly2-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Srsly2-0:outL",
+          "fx-Srsly2-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "center",
+            "label": "Center",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "space",
+            "label": "Space",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "level",
+            "label": "Level",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "q",
+            "label": "Q",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drywet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "StarChild": {
+    "description": "Weird digital ambience/echo plugin.",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/starchild",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-StarChild-0:inL",
+          "fx-StarChild-0:inR"
+        ],
+        "out_to_next": [
+          "fx-StarChild-0:outL",
+          "fx-StarChild-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "sustain",
+            "label": "Sustain",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "grain",
+            "label": "Grain",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.7
+          },
+          {
+            "symbol": "drywet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.2
+          }
+        ]
+      }
+    ]
+  },
+  "kPlateB": {
+    "description": "a plate reverb, not unlike its namesake atop Abbey Road",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kplateb",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-kPlateB-0:inL",
+          "fx-kPlateB-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kPlateB-0:outL",
+          "fx-kPlateB-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "inputPad",
+            "label": "InputPad",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "damping",
+            "label": "Damping",
+            "min": 0.0,
+            "max": 10.0,
+            "default": 5.0
+          },
+          {
+            "symbol": "lowCut",
+            "label": "Low Cut",
+            "min": 0.0,
+            "max": 3.0,
+            "default": 3.0
+          },
+          {
+            "symbol": "predelay",
+            "label": "Predelay",
+            "min": 0.0,
+            "max": 0.5,
+            "default": 0.0
+          },
+          {
+            "symbol": "wetness",
+            "label": "Wetness",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          }
+        ]
+      }
+    ]
+  },
+  "Capacitor2": {
+    "description": "Capacitor with extra analog modeling and mojo",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/capacitor2",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Capacitor2-0:inL",
+          "fx-Capacitor2-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Capacitor2-0:outL",
+          "fx-Capacitor2-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "lowpass",
+            "label": "Lowpass",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "highpass",
+            "label": "Highpass",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "nonlin",
+            "label": "NonLin",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "drywet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          }
+        ]
+      }
+    ]
+  },
+  "Air4": {
+    "description": "extends Air3 with controllable high frequency limiting",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/air4",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-Air4-0:inL",
+          "fx-Air4-0:inR"
+        ],
+        "out_to_next": [
+          "fx-Air4-0:outL",
+          "fx-Air4-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "air",
+            "label": "Air",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "gnd",
+            "label": "Gnd",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "darkF",
+            "label": "DarkF",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.52
+          },
+          {
+            "symbol": "ratio",
+            "label": "Ratio",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  "GlitchShifter": {
+    "description": "really gnarly, raw-sounding pitch shifter with a dose of insanity",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/glitchshifter",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-GlitchShifter-0:inL",
+          "fx-GlitchShifter-0:inR"
+        ],
+        "out_to_next": [
+          "fx-GlitchShifter-0:outL",
+          "fx-GlitchShifter-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "note",
+            "label": "Note",
+            "min": -12.0,
+            "max": 12.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "trim",
+            "label": "Trim",
+            "min": -1.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "tighten",
+            "label": "Tighten",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "feedback",
+            "label": "Feedback",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "dryWet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          }
+        ]
+      }
+    ]
+  },
+  "kPlateC": {
+    "description": "a plate reverb, not unlike its namesake atop Abbey Road",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kplatec",
+        "jack_in": [
+          "FX_SEND_L",
+          "FX_SEND_R"
+        ],
+        "jack_out_to": [
+          "fx-kPlateC-0:inL",
+          "fx-kPlateC-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kPlateC-0:outL",
+          "fx-kPlateC-0:outR"
+        ],
+        "next_in": [
+          "FX_RETURN_L",
+          "FX_RETURN_R"
+        ],
+        "params": [
+          {
+            "symbol": "inputPad",
+            "label": "InputPad",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "damping",
+            "label": "Damping",
+            "min": 0.0,
+            "max": 10.0,
+            "default": 5.0
+          },
+          {
+            "symbol": "lowCut",
+            "label": "Low Cut",
+            "min": 0.0,
+            "max": 3.0,
+            "default": 3.0
+          },
+          {
+            "symbol": "predelay",
+            "label": "Predelay",
+            "min": 0.0,
+            "max": 0.5,
+            "default": 0.0
+          },
+          {
+            "symbol": "wetness",
+            "label": "Wetness",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          }
+        ]
+      }
+    ]
+  },
+  "BassDrive": {
+    "description": "an old secret weapon, like a kind of bass amp",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/bassdrive",
+        "jack_in": [
+          "pisound-in:capture_1",
+          "pisound-in:capture_2"
+        ],
+        "jack_out_to": [
+          "fx-BassDrive-0:inL",
+          "fx-BassDrive-0:inR"
+        ],
+        "out_to_next": [
+          "fx-BassDrive-0:outL",
+          "fx-BassDrive-0:outR"
+        ],
+        "next_in": [
+          "pisound-out:playback_1",
+          "pisound-out:playback_2"
+        ],
+        "params": [
+          {
+            "symbol": "presence",
+            "label": "Presence",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "high",
+            "label": "High",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "mid",
+            "label": "Mid",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "low",
+            "label": "Low",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "drive",
+            "label": "Drive",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          }
+        ]
+      }
+    ]
+  },
+  "kGuitarHall2": {
+    "description": "puts things in a Loud Room",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kguitarhall2",
+        "jack_in": [
+          "pisound-in:capture_1",
+          "pisound-in:capture_2"
+        ],
+        "jack_out_to": [
+          "fx-kGuitarHall2-0:inL",
+          "fx-kGuitarHall2-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kGuitarHall2-0:outL",
+          "fx-kGuitarHall2-0:outR"
+        ],
+        "next_in": [
+          "pisound-out:playback_1",
+          "pisound-out:playback_2"
+        ],
+        "params": [
+          {
+            "symbol": "regen",
+            "label": "Regen",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "derez",
+            "label": "Derez",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "filter",
+            "label": "Filter",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "earlyRF",
+            "label": "EarlyRF",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "positin",
+            "label": "Positin",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "dryWet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          }
+        ]
+      }
+    ]
+  },
+  "kCosmos": {
+    "description": "infinite space ambient, or titanic hall",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kcosmos",
+        "jack_in": [
+          "pisound-in:capture_1",
+          "pisound-in:capture_2"
+        ],
+        "jack_out_to": [
+          "fx-kCosmos-0:inL",
+          "fx-kCosmos-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kCosmos-0:outL",
+          "fx-kCosmos-0:outR"
+        ],
+        "next_in": [
+          "pisound-out:playback_1",
+          "pisound-out:playback_2"
+        ],
+        "params": [
+          {
+            "symbol": "regen",
+            "label": "Regen",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "derez",
+            "label": "Derez",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "filter",
+            "label": "Filter",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "earlyRF",
+            "label": "EarlyRF",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "predlay",
+            "label": "Predlay",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "dryWet",
+            "label": "Dry/Wet",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          }
+        ]
+      }
+    ]
+  },
+  "ADClip7": {
+    "description": "The original Airwindows loudness maximizer/peak control",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/adclip7",
+        "jack_in": [
+          "pisound-in:capture_1",
+          "pisound-in:capture_2"
+        ],
+        "jack_out_to": [
+          "fx-ADClip7-0:inL",
+          "fx-ADClip7-0:inR"
+        ],
+        "out_to_next": [
+          "fx-ADClip7-0:outL",
+          "fx-ADClip7-0:outR"
+        ],
+        "next_in": [
+          "pisound-out:playback_1",
+          "pisound-out:playback_2"
+        ],
+        "params": [
+          {
+            "symbol": "boost",
+            "label": "Boost",
+            "min": 0.0,
+            "max": 18.0,
+            "default": 0.0
+          },
+          {
+            "symbol": "soften",
+            "label": "Soften",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "enhance",
+            "label": "Enhance",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.5
+          },
+          {
+            "symbol": "mode",
+            "label": "Mode",
+            "min": 0.0,
+            "max": 3.0,
+            "default": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  "kPlateA": {
+    "description": "a plate reverb, not unlike its namesake atop Abbey Road",
+    "exclusive": false,
+    "plugins": [
+      {
+        "uri": "https://hannesbraun.net/ns/lv2/airwindows/kplatea",
+        "jack_in": [
+          "pisound-in:capture_1",
+          "pisound-in:capture_2"
+        ],
+        "jack_out_to": [
+          "fx-kPlateA-0:inL",
+          "fx-kPlateA-0:inR"
+        ],
+        "out_to_next": [
+          "fx-kPlateA-0:outL",
+          "fx-kPlateA-0:outR"
+        ],
+        "next_in": [
+          "pisound-out:playback_1",
+          "pisound-out:playback_2"
+        ],
+        "params": [
+          {
+            "symbol": "inputPad",
+            "label": "InputPad",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 1.0
+          },
+          {
+            "symbol": "damping",
+            "label": "Damping",
+            "min": 0.0,
+            "max": 10.0,
+            "default": 5.0
+          },
+          {
+            "symbol": "lowCut",
+            "label": "Low Cut",
+            "min": 0.0,
+            "max": 3.0,
+            "default": 3.0
+          },
+          {
+            "symbol": "predelay",
+            "label": "Predelay",
+            "min": 0.0,
+            "max": 0.5,
+            "default": 0.0
+          },
+          {
+            "symbol": "wetness",
+            "label": "Wetness",
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.25
+          }
+        ]
+      }
+    ]
+  }
+}

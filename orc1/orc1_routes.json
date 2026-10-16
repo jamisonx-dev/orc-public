@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "_comment": "ORC-1 MIDI routing profiles. Each device profile activates automatically when its port appears. Edit freely \u2014 live-reload via web UI or restart orc1.py.",
+  "devices": {
+    "SP-404mk2": {
+      "description": "SP-404mk2 bank A-D pad routing (uncomment rules to use)",
+      "port_match": "SP-404",
+      "rules": [
+        {
+          "_comment": "Bank routing example \u2014 in_ch is whatever your controller sends on"
+        },
+        {
+          "_comment": "Uncomment and adjust to taste:"
+        },
+        {
+          "_disabled": {
+            "in_ch": 1,
+            "in_type": "note",
+            "match": [
+              36,
+              51
+            ],
+            "out_port": "pisound",
+            "out_ch": 1
+          }
+        },
+        {
+          "_disabled": {
+            "in_ch": 1,
+            "in_type": "note",
+            "match": [
+              52,
+              67
+            ],
+            "out_port": "pisound",
+            "out_ch": 2,
+            "transform": "bank_align"
+          }
+        },
+        {
+          "_disabled": {
+            "in_ch": 1,
+            "in_type": "note",
+            "match": [
+              68,
+              83
+            ],
+            "out_port": "pisound",
+            "out_ch": 3,
+            "transform": "bank_align"
+          }
+        },
+        {
+          "_disabled": {
+            "in_ch": 1,
+            "in_type": "note",
+            "match": [
+              84,
+              99
+            ],
+            "out_port": "pisound",
+            "out_ch": 4,
+            "transform": "bank_align"
+          }
+        }
+      ]
+    },
+    "MPC1000": {
+      "description": "MPC1000 JJOS multitimbral (add rules as needed)",
+      "port_match": "MPC",
+      "rules": []
+    }
+  }
+}

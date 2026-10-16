@@ -1,0 +1,29 @@
+# Zoom L-12 hotplug/wake recovery.
+#
+# When the L-12 re-enumerates (waking from its own auto-power-off, or a replug),
+# restart the JACK SERVER OWNER so jackd grabs the L-12 again. orc1-jackd is the
+# sole jackd owner; every module host (orc1-drum/sampler/poly/chip/mono) is
+# BindsTo=orc1-jackd, so this one restart cascades them all to reconnect to the
+# L-12. This is the same path the web card-switch (/api/audio/device) uses.
+#
+# WAS: restart orc1-synth.service -- but the audio-host split RETIRED orc1-synth
+# (disabled 2026-09-02). Restarting a dead service never recovered the card, so
+# after the L-12 slept the rig stayed stuck on whatever card jackd fell through
+# to. Fixed 2026-09-05.
+#
+# AND the match never fired at all until 2026-09-24: it tested ATTR{id}=="L-12",
+# but the kernel's card id is "L12" (no hyphen -- `cat /sys/class/sound/cardN/id`,
+# the same name orc1_jackd_start.sh looks for). "L-12" is only the USB product
+# string. Found by powering the L-12 on with the rig up: card appeared, jackd
+# stayed on the pisound fallback indefinitely.
+ACTION=="add", KERNEL=="card*", SUBSYSTEM=="sound", ATTR{id}=="L12", \
+    RUN+="/usr/bin/systemctl --no-block restart orc1-jackd.service"
+
+# L-12 GONE (power off / auto power-off / unplug) -- added 2026-09-24. Without
+# this jackd stays up but stops processing, and both skipback rings freeze until
+# the L-12 comes back (measured). The script restarts orc1-jackd only if jackd is
+# on the L-12, so the start script falls back to the pisound. Matched on the USB
+# device's PRODUCT (vendor/product/bcd) because a card's sysfs attrs are already
+# gone by the time a remove event fires.
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{PRODUCT}=="1686/3d5/*", \
+    RUN+="/home/pibox/orc/orc1/orc1_l12_gone.sh"

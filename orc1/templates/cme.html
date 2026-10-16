@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · CME{% endblock %}
+{% block page_label %}CME U6MIDI PRO{% endblock %}
+{% block page_css %}
+<style>
+  #cme-page { max-width: 860px; }
+  .cme-status { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;
+    font-size:13px; }
+  .cme-dot { width:10px; height:10px; border-radius:50%; background:#c33; display:inline-block; }
+  .cme-dot.on { background:#0a7; }
+  .cme-dot.part { background:#e0a020; }
+  #cme-conn.cme-bad { color:#c33; font-weight:700; }
+  #cme-flash { font-size:12px; color:#0a7; }
+  #cme-flash.err { color:#c33; }
+  .cme-help { font-size:12px; opacity:.7; margin:0 0 10px; line-height:1.45; }
+  .cme-presets { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+  .cme-presets .btn { display:flex; flex-direction:column; gap:2px; padding:10px 6px;
+    min-width:0; }
+  .cme-presets .btn .n { font-size:18px; font-weight:700; }
+  .cme-presets .btn .nm { font-size:11px; opacity:.75; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; max-width:100%; }
+  .cme-presets .btn.on { outline:2px solid var(--accent); background:var(--accent-bg); }
+  .cme-scroll { overflow-x:auto; }
+  table.cme-grid { border-collapse:collapse; font-size:12px; min-width:420px; }
+  table.cme-grid th { font-weight:600; font-size:11px; letter-spacing:.04em; opacity:.7;
+    padding:4px 6px; text-align:center; }
+  table.cme-grid th.row { text-align:left; white-space:nowrap; }
+  table.cme-grid th.grp { opacity:.5; font-size:10px; }
+  table.cme-grid td { text-align:center; padding:3px; }
+  table.cme-grid td.sep, table.cme-grid th.sep { border-left:1px solid rgba(128,128,128,.35); }
+  .cme-cell { width:34px; height:28px; border-radius:6px; border:1px solid rgba(128,128,128,.45);
+    background:transparent; color:inherit; cursor:pointer; font:inherit; }
+  .cme-cell.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .cme-cell.busy { opacity:.45; }
+  .cme-cell:disabled { cursor:default; }
+  .cme-ports { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .cme-ports .btn { font-size:11px; padding:6px 8px; position:relative; }
+  .cme-ports .btn.on { outline:2px solid var(--accent); background:var(--accent-bg); }
+  .cme-ports .btn .dot { position:absolute; top:3px; right:4px; width:6px; height:6px;
+    border-radius:50%; background:#e0a020; }
+  .cme-fl-label { font-size:11px; letter-spacing:.06em; opacity:.6; margin:8px 0 4px; }
+  .cme-toggles { display:flex; flex-wrap:wrap; gap:5px; }
+  .cme-tg { min-width:34px; height:28px; padding:0 7px; border-radius:6px; font:inherit;
+    font-size:11px; cursor:pointer; color:inherit; background:transparent;
+    border:1px solid rgba(128,128,128,.45); text-decoration:line-through; opacity:.6; }
+  .cme-tg.pass { background:var(--accent); border-color:var(--accent); color:#fff;
+    text-decoration:none; opacity:1; }
+  .cme-tg:disabled { cursor:default; }
+  .cme-info { font-size:13px; line-height:1.6; }
+  .cme-mlist { display:flex; flex-direction:column; gap:3px; }
+  .cme-mrow { display:flex; gap:8px; align-items:baseline; text-align:left; font:inherit;
+    font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer; color:inherit;
+    background:transparent; border:1px solid rgba(128,128,128,.25); }
+  .cme-mrow .n { font-weight:700; min-width:22px; }
+  .cme-mrow.unused { opacity:.45; }
+  .cme-mrow.off .t { opacity:.7; }
+  .cme-mrow.sel { outline:2px solid var(--accent); background:var(--accent-bg); }
+  .cme-med { margin-top:10px; padding:10px; border-radius:8px; border:1px solid var(--accent-border); }
+  .cme-med h4 { margin:10px 0 4px; font-size:11px; letter-spacing:.06em; opacity:.65; font-weight:600; }
+  .cme-frow { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; font-size:12px; margin:4px 0; }
+  .cme-frow label { display:inline-flex; gap:5px; align-items:center; }
+  .cme-frow select, .cme-frow input[type=number] { font:inherit; font-size:12px; padding:3px 5px;
+    border-radius:5px; border:1px solid rgba(128,128,128,.45); background:transparent; color:inherit; }
+  .cme-frow input[type=number] { width:58px; }
+  .cme-frow select option { color:#000; }
+  .cme-warn { color:#e0a020; font-size:12px; }
+  .cme-curves { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+  .cme-curves figure { margin:0; text-align:center; font-size:11px; opacity:.85; }
+  .cme-curves svg { width:100%; aspect-ratio:1; border:1px solid rgba(128,128,128,.3); border-radius:6px; }
+  .cme-info code { font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="cme-page">
+
+  <div class="cme-status">
+    <span class="cme-dot" id="cme-dot"></span>
+    <b id="cme-name">CME</b>
+    <span id="cme-conn">—</span>
+    <button class="btn" type="button" id="cme-refresh">RE-READ</button>
+    <span id="cme-flash"></span>
+  </div>
+  <p class="cme-help">Everything here is read back from the box itself. The ORC treats the
+    CME as a <b>patchbay</b>: its ports are never engine inputs, so route MIDI through it
+    here (or with its own button / UxMIDI Tools). Changes save on the box straight away.</p>
+
+  <section class="card">
+    <div class="card-label">PRESET · ROUTER, FILTERS AND MAPPERS SWITCH TOGETHER</div>
+    <div class="cme-presets" id="cme-presets"></div>
+    <p class="cme-help" style="margin-top:8px">From the FCB pedal or any pad action, <code>cmd:CME_PRESET</code>
+      steps to the next preset.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">ROUTER · <span id="cme-router-preset">THIS PRESET</span> · CLICK TO CONNECT</div>
+    <div class="cme-scroll"><table class="cme-grid" id="cme-grid"></table></div>
+    <p class="cme-help" style="margin-top:8px">Rows = where MIDI comes IN, columns = where it
+      goes OUT. USB = the box's three ports on the Pi; MIDI = its DIN sockets.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">FILTERS · <span id="cme-fl-preset">THIS PRESET</span> · LIT = PASSES</div>
+    <div class="cme-ports" id="cme-fl-ports"></div>
+    <div id="cme-fl-edit"></div>
+    <p class="cme-help" style="margin-top:8px">Pick a port, then click to block or pass. A dot
+      marks ports with a filter. Ports marked * have not been verified on the hardware.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">MAPPERS · <span id="cme-mp-preset">THIS PRESET</span> · CLICK ONE TO EDIT</div>
+    <div class="cme-mlist" id="cme-mlist"></div>
+    <div class="cme-med" id="cme-med" hidden></div>
+    <p class="cme-help" style="margin-top:8px">A mapper changes matching MIDI on its way through
+      the box (for example pad aftertouch to CCs). A mapper with no input is switched off.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">CURVES · USED BY A MAPPER'S "CURVE" OPTION</div>
+    <div class="cme-curves" id="cme-curves"></div>
+    <p class="cme-help" style="margin-top:8px">Input 0-127 left to right, output bottom to top.
+      The box stores 4; edit them in UxMIDI Tools.</p>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/cme.js"></script>
+{% endblock %}

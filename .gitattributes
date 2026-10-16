@@ -1,0 +1,9 @@
+# This repo deploys to a Linux Raspberry Pi — keep everything LF, always.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.wav binary
+*.raw binary
+# Generated per-box by gen_fx_palette.py (292 plugins x control metadata) -- not
+# hand-edited code. Mark -diff so it stays LF text but never bloats a review diff.
+orc1/fx_palette.json -diff linguist-generated=true

@@ -1,0 +1,30 @@
+[Unit]
+# Health watchdog for the Perform-VE bridges.
+# Detects the two invisible failures: missing JACK ports, and capture that is
+# all-digital-zero (which alsa_in reports as perfectly healthy). Recovers with
+# the ordered stop-both-then-start-capture sequence -- a per-unit restart does
+# not work. See performve_watchdog.py for the full reasoning.
+Description=Perform-VE bridge health watchdog
+After=orc1-jackd.service performve-in.service
+BindsTo=orc1-jackd.service
+Wants=performve-in.service
+
+[Service]
+User=pibox
+Environment=JACK_NO_START_SERVER=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/performve_watchdog.py
+Restart=on-failure
+RestartSec=15
+# RT limits match the other JACK clients (pisound-in/out, performve-*). This is
+# only a monitor, but ANY JACK client whose process callback runs late can xrun
+# the whole graph -- exactly the trap that had skipback-record running its
+# callback at SCHED_OTHER for weeks. The callback here is allocation-free (a
+# buffer view plus np.count_nonzero), so it is safe to promote.
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=70
+LimitRTPRIO=70
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

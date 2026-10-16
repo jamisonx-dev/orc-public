@@ -1,0 +1,1463 @@
+{
+ "sysex_prefix": "F0 00 20 6B 7F 42 02 00 41",
+ "note": "global params paramId 65; value follows globalParamId",
+ "sections": [
+  {
+   "group": "Behavior",
+   "params": [
+    {
+     "gp": 2,
+     "hex": "02",
+     "name": "Pad Poly Aftertouch",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 4,
+     "hex": "04",
+     "name": "User Knob Acceleration",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 0,
+       "label": "Slow (Off)"
+      },
+      {
+       "v": 1,
+       "label": "Medium"
+      },
+      {
+       "v": 2,
+       "label": "Fast"
+      },
+      {
+       "v": 3,
+       "label": "Fast2"
+      }
+     ]
+    },
+    {
+     "gp": 6,
+     "hex": "06",
+     "name": "User Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": false,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 7,
+     "hex": "07",
+     "name": "Transposition Latch",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 11,
+     "hex": "0B",
+     "name": "Pattern Link",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Absolute"
+      },
+      {
+       "v": 1,
+       "label": "Relative"
+      }
+     ]
+    },
+    {
+     "gp": 12,
+     "hex": "0C",
+     "name": "MCU/HUI",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "MCU"
+      },
+      {
+       "v": 1,
+       "label": "HUI"
+      }
+     ]
+    },
+    {
+     "gp": 13,
+     "hex": "0D",
+     "name": "Scene Mode",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 23,
+     "hex": "17",
+     "name": "Mode",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Looper"
+      },
+      {
+       "v": 1,
+       "label": "Roller"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "group": "Clock & Sync",
+   "params": [
+    {
+     "gp": 16,
+     "hex": "10",
+     "name": "Clock In/Out Settings",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "1step"
+      },
+      {
+       "v": 1,
+       "label": "24ppq"
+      },
+      {
+       "v": 2,
+       "label": "48ppq"
+      },
+      {
+       "v": 3,
+       "label": "2PPQ (Korg)"
+      }
+     ]
+    },
+    {
+     "gp": 17,
+     "hex": "11",
+     "name": "Auto-sync",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 18,
+     "hex": "12",
+     "name": "Tap Tempo",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 2,
+       "label": "2"
+      },
+      {
+       "v": 3,
+       "label": "3"
+      },
+      {
+       "v": 4,
+       "label": "4"
+      }
+     ]
+    },
+    {
+     "gp": 20,
+     "hex": "14",
+     "name": "Tempo",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "Global"
+      },
+      {
+       "v": 1,
+       "label": "Project"
+      }
+     ]
+    },
+    {
+     "gp": 21,
+     "hex": "15",
+     "name": "Wait to Load Project",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 22,
+     "hex": "16",
+     "name": "Wait to Load Pattern",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "group": "Touch Strip",
+   "params": [
+    {
+     "gp": 41,
+     "hex": "29",
+     "name": "MIDI Send/Receive",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "No"
+      },
+      {
+       "v": 1,
+       "label": "Yes"
+      }
+     ]
+    },
+    {
+     "gp": 40,
+     "hex": "28",
+     "name": "MIDI CC",
+     "kind": "range",
+     "default": 9,
+     "min": 0,
+     "max": 127
+    }
+   ]
+  },
+  {
+   "group": "Transposition",
+   "params": [
+    {
+     "gp": 8,
+     "hex": "08",
+     "name": "Seq Trans. Input channel",
+     "kind": "channel",
+     "default": 0,
+     "user": true,
+     "all": true,
+     "drum": false
+    },
+    {
+     "gp": 9,
+     "hex": "09",
+     "name": "Seq Trans. Input port",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 1,
+       "label": "USB"
+      },
+      {
+       "v": 2,
+       "label": "MIDI"
+      },
+      {
+       "v": 3,
+       "label": "USB&MIDI"
+      }
+     ]
+    },
+    {
+     "gp": 10,
+     "hex": "0A",
+     "name": "Seq Trans. Center Pitch",
+     "kind": "note",
+     "default": 60
+    }
+   ]
+  },
+  {
+   "group": "Metronome",
+   "params": [
+    {
+     "gp": 32,
+     "hex": "20",
+     "name": "Metronome On/Off",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 33,
+     "hex": "21",
+     "name": "Metronome Note",
+     "kind": "note",
+     "default": 37
+    },
+    {
+     "gp": 34,
+     "hex": "22",
+     "name": "Metronome Port",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 1,
+       "label": "USB"
+      },
+      {
+       "v": 2,
+       "label": "MIDI"
+      },
+      {
+       "v": 3,
+       "label": "USB&MIDI"
+      }
+     ]
+    },
+    {
+     "gp": 35,
+     "hex": "23",
+     "name": "Metronome Channel",
+     "kind": "channel",
+     "default": 9,
+     "user": true,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 36,
+     "hex": "24",
+     "name": "Bar Velocity",
+     "kind": "range",
+     "default": 127,
+     "min": 1,
+     "max": 127
+    },
+    {
+     "gp": 37,
+     "hex": "25",
+     "name": "Beat Velocity",
+     "kind": "range",
+     "default": 80,
+     "min": 1,
+     "max": 127
+    }
+   ]
+  },
+  {
+   "group": "Sequencer MIDI Channels",
+   "params": [
+    {
+     "gp": 64,
+     "hex": "40",
+     "name": "Seq1 Send MIDI Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": false,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 65,
+     "hex": "41",
+     "name": "Seq1 Rcv MIDI Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": true,
+     "all": true,
+     "drum": false
+    },
+    {
+     "gp": 66,
+     "hex": "42",
+     "name": "Seq2 Send MIDI Channel",
+     "kind": "channel",
+     "default": 1,
+     "user": false,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 67,
+     "hex": "43",
+     "name": "Seq2 Rcv MIDI Channel",
+     "kind": "channel",
+     "default": 1,
+     "user": true,
+     "all": true,
+     "drum": false
+    },
+    {
+     "gp": 68,
+     "hex": "44",
+     "name": "Drum Send MIDI Channel",
+     "kind": "channel",
+     "default": 9,
+     "user": false,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 69,
+     "hex": "45",
+     "name": "Drum Rcv MIDI Channel",
+     "kind": "channel",
+     "default": 9,
+     "user": true,
+     "all": true,
+     "drum": false
+    }
+   ]
+  },
+  {
+   "group": "CV / Gate Outputs",
+   "params": [
+    {
+     "gp": 70,
+     "hex": "46",
+     "name": "Seq1 Pitch",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "V/Oct"
+      },
+      {
+       "v": 1,
+       "label": "Hz/Volt"
+      }
+     ]
+    },
+    {
+     "gp": 71,
+     "hex": "47",
+     "name": "Seq1 Gate",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "V-trig"
+      },
+      {
+       "v": 1,
+       "label": "S-trig"
+      }
+     ]
+    },
+    {
+     "gp": 74,
+     "hex": "4A",
+     "name": "Seq1 0V MIDI Note",
+     "kind": "note",
+     "default": 24,
+     "cond": {
+      "gp": 70,
+      "vals": [
+       0
+      ]
+     }
+    },
+    {
+     "gp": 76,
+     "hex": "4C",
+     "name": "Seq1 1V MIDI Note",
+     "kind": "note",
+     "default": 33,
+     "cond": {
+      "gp": 70,
+      "vals": [
+       1
+      ]
+     }
+    },
+    {
+     "gp": 78,
+     "hex": "4E",
+     "name": "Seq1 Velocity Scaling",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "1"
+      },
+      {
+       "v": 1,
+       "label": "2"
+      },
+      {
+       "v": 2,
+       "label": "3"
+      },
+      {
+       "v": 3,
+       "label": "4"
+      },
+      {
+       "v": 4,
+       "label": "5"
+      },
+      {
+       "v": 5,
+       "label": "6"
+      },
+      {
+       "v": 6,
+       "label": "7"
+      },
+      {
+       "v": 7,
+       "label": "8"
+      },
+      {
+       "v": 8,
+       "label": "9"
+      },
+      {
+       "v": 9,
+       "label": "10"
+      }
+     ]
+    },
+    {
+     "gp": 92,
+     "hex": "5C",
+     "name": "Seq1 Randomize Octave",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    },
+    {
+     "gp": 72,
+     "hex": "48",
+     "name": "Seq2 Pitch",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "V/Oct"
+      },
+      {
+       "v": 1,
+       "label": "Hz/Volt"
+      }
+     ]
+    },
+    {
+     "gp": 73,
+     "hex": "49",
+     "name": "Seq2 Gate",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "V-trig"
+      },
+      {
+       "v": 1,
+       "label": "S-trig"
+      }
+     ]
+    },
+    {
+     "gp": 75,
+     "hex": "4B",
+     "name": "Seq2 0V MIDI Note",
+     "kind": "note",
+     "default": 24,
+     "cond": {
+      "gp": 72,
+      "vals": [
+       0
+      ]
+     }
+    },
+    {
+     "gp": 77,
+     "hex": "4D",
+     "name": "Seq2 1V MIDI Note",
+     "kind": "note",
+     "default": 33,
+     "cond": {
+      "gp": 72,
+      "vals": [
+       1
+      ]
+     }
+    },
+    {
+     "gp": 79,
+     "hex": "4F",
+     "name": "Seq2 Velocity Scaling",
+     "kind": "list",
+     "default": 1,
+     "options": [
+      {
+       "v": 0,
+       "label": "1"
+      },
+      {
+       "v": 1,
+       "label": "2"
+      },
+      {
+       "v": 2,
+       "label": "3"
+      },
+      {
+       "v": 3,
+       "label": "4"
+      },
+      {
+       "v": 4,
+       "label": "5"
+      },
+      {
+       "v": 5,
+       "label": "6"
+      },
+      {
+       "v": 6,
+       "label": "7"
+      },
+      {
+       "v": 7,
+       "label": "8"
+      },
+      {
+       "v": 8,
+       "label": "9"
+      },
+      {
+       "v": 9,
+       "label": "10"
+      }
+     ]
+    },
+    {
+     "gp": 93,
+     "hex": "5D",
+     "name": "Seq2 Randomize Octave",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "On"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "group": "Transport Output",
+   "params": [
+    {
+     "gp": 96,
+     "hex": "60",
+     "name": "Transports",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 0,
+       "label": "Off"
+      },
+      {
+       "v": 1,
+       "label": "MIDI"
+      },
+      {
+       "v": 2,
+       "label": "MMC"
+      },
+      {
+       "v": 3,
+       "label": "Both"
+      }
+     ]
+    },
+    {
+     "gp": 97,
+     "hex": "61",
+     "name": "Stop Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": true,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 98,
+     "hex": "62",
+     "name": "Rec Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": true,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 99,
+     "hex": "63",
+     "name": "Play Channel",
+     "kind": "channel",
+     "default": 0,
+     "user": true,
+     "all": false,
+     "drum": false
+    },
+    {
+     "gp": 100,
+     "hex": "64",
+     "name": "Stop CC",
+     "kind": "range",
+     "default": 51,
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 101,
+     "hex": "65",
+     "name": "Rec CC",
+     "kind": "range",
+     "default": 50,
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 102,
+     "hex": "66",
+     "name": "Play CC",
+     "kind": "range",
+     "default": 54,
+     "min": 0,
+     "max": 127
+    }
+   ]
+  },
+  {
+   "group": "Drums",
+   "params": [
+    {
+     "gp": 38,
+     "hex": "26",
+     "name": "Drum Gate Mode",
+     "kind": "list",
+     "default": 0,
+     "options": [
+      {
+       "v": 0,
+       "label": "Positive"
+      },
+      {
+       "v": 1,
+       "label": "Negative"
+      }
+     ]
+    },
+    {
+     "gp": 39,
+     "hex": "27",
+     "name": "Drum Map",
+     "kind": "list",
+     "default": 3,
+     "options": [
+      {
+       "v": 0,
+       "label": "Custom"
+      },
+      {
+       "v": 1,
+       "label": "Spark"
+      },
+      {
+       "v": 2,
+       "label": "General MIDI"
+      },
+      {
+       "v": 3,
+       "label": "Chromatic"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "group": "Drum Pad Notes",
+   "params": [
+    {
+     "gp": 48,
+     "hex": "30",
+     "name": "Pad #1 Note",
+     "kind": "range",
+     "default": 36,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 49,
+     "hex": "31",
+     "name": "Pad #2 Note",
+     "kind": "range",
+     "default": 44,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 50,
+     "hex": "32",
+     "name": "Pad #3 Note",
+     "kind": "range",
+     "default": 45,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 51,
+     "hex": "33",
+     "name": "Pad #4 Note",
+     "kind": "range",
+     "default": 46,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 52,
+     "hex": "34",
+     "name": "Pad #5 Note",
+     "kind": "range",
+     "default": 47,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 53,
+     "hex": "35",
+     "name": "Pad #6 Note",
+     "kind": "range",
+     "default": 48,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 54,
+     "hex": "36",
+     "name": "Pad #7 Note",
+     "kind": "range",
+     "default": 49,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 55,
+     "hex": "37",
+     "name": "Pad #8 Note",
+     "kind": "range",
+     "default": 50,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 56,
+     "hex": "38",
+     "name": "Pad #9 Note",
+     "kind": "range",
+     "default": 36,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 57,
+     "hex": "39",
+     "name": "Pad #10 Note",
+     "kind": "range",
+     "default": 37,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 58,
+     "hex": "3A",
+     "name": "Pad #11 Note",
+     "kind": "range",
+     "default": 38,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 59,
+     "hex": "3B",
+     "name": "Pad #12 Note",
+     "kind": "range",
+     "default": 39,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 60,
+     "hex": "3C",
+     "name": "Pad #13 Note",
+     "kind": "range",
+     "default": 40,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 61,
+     "hex": "3D",
+     "name": "Pad #14 Note",
+     "kind": "range",
+     "default": 41,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 62,
+     "hex": "3E",
+     "name": "Pad #15 Note",
+     "kind": "range",
+     "default": 42,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    },
+    {
+     "gp": 63,
+     "hex": "3F",
+     "name": "Pad #16 Note",
+     "kind": "range",
+     "default": 43,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "min": 0,
+     "max": 127
+    }
+   ]
+  },
+  {
+   "group": "Drum Pad Channels",
+   "params": [
+    {
+     "gp": 117,
+     "hex": "75",
+     "name": "Pad #1 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 118,
+     "hex": "76",
+     "name": "Pad #2 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 119,
+     "hex": "77",
+     "name": "Pad #3 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 120,
+     "hex": "78",
+     "name": "Pad #4 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 121,
+     "hex": "79",
+     "name": "Pad #5 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 122,
+     "hex": "7A",
+     "name": "Pad #6 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 123,
+     "hex": "7B",
+     "name": "Pad #7 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 124,
+     "hex": "7C",
+     "name": "Pad #8 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 109,
+     "hex": "6D",
+     "name": "Pad #9 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 110,
+     "hex": "6E",
+     "name": "Pad #10 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 111,
+     "hex": "6F",
+     "name": "Pad #11 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 112,
+     "hex": "70",
+     "name": "Pad #12 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 113,
+     "hex": "71",
+     "name": "Pad #13 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 114,
+     "hex": "72",
+     "name": "Pad #14 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 115,
+     "hex": "73",
+     "name": "Pad #15 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    },
+    {
+     "gp": 116,
+     "hex": "74",
+     "name": "Pad #16 Midi Ch",
+     "kind": "channel",
+     "default": 0,
+     "cond": {
+      "gp": 39,
+      "vals": [
+       0
+      ]
+     },
+     "user": false,
+     "all": false,
+     "drum": true
+    }
+   ]
+  },
+  {
+   "group": "User Scale",
+   "params": [
+    {
+     "gp": 81,
+     "hex": "51",
+     "name": "C#",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 82,
+     "hex": "52",
+     "name": "D",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 83,
+     "hex": "53",
+     "name": "D#",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 84,
+     "hex": "54",
+     "name": "E",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 85,
+     "hex": "55",
+     "name": "F",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 86,
+     "hex": "56",
+     "name": "F#",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 87,
+     "hex": "57",
+     "name": "G",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 88,
+     "hex": "58",
+     "name": "G#",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 89,
+     "hex": "59",
+     "name": "A",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 90,
+     "hex": "5A",
+     "name": "A#",
+     "kind": "toggle",
+     "default": 127
+    },
+    {
+     "gp": 91,
+     "hex": "5B",
+     "name": "B",
+     "kind": "toggle",
+     "default": 127
+    }
+   ]
+  }
+ ]
+}

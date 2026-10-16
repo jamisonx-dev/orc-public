@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · Module Matrix{% endblock %}
+{% block page_label %}MODULE MATRIX{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/matrix.css">{% endblock %}
+
+{% block content %}
+<div id="mtx">
+
+  <p class="lede">Each module plays on the channel you give it. Tap a module's channel
+    chip, then pick a free channel. The power button takes a module out and frees its
+    channel. <b>JOIN P2</b> on CHIP P1 makes one channel drive both pulse voices at an interval.</p>
+
+  <div class="banner">
+    <div class="b-t">Assigning <b id="arm-name">—</b> · pick a free channel on the bus</div>
+    <button class="cancel" id="cancel">CANCEL</button>
+  </div>
+
+  <div class="mpanel">
+    <div class="panel-h">
+      <span class="panel-t">Channel Bus · 1–16</span>
+      <span class="panel-n" id="bus-count"></span>
+    </div>
+    <div class="bus" id="bus"></div>
+    <div class="legend" style="margin-top:12px">
+      <span><i class="sw occ"></i> bound</span>
+      <span><i class="sw emp"></i> free</span>
+      <span><i class="sw res"></i> protected (see below)</span>
+    </div>
+  </div>
+
+  <div class="mpanel">
+    <div class="panel-h">
+      <span class="panel-t">Protected Channels</span>
+      <span class="panel-n" id="prot-count"></span>
+    </div>
+    <p class="lede" style="margin:0 0 10px">A protected channel can't be picked anywhere in the ORC: module
+      bindings here, pedal targets, BeatBuddy / chord / voice-thru outs, route rules, Fire knob and fader targets.
+      Tap a channel to switch it. Things already saved on it stay as they are. 13 is the ORC's own control
+      channel and is always protected.</p>
+    <div class="bus" id="prot"></div>
+    <div class="legend" style="margin-top:8px" id="prot-msg"></div>
+  </div>
+
+  <div class="mpanel">
+    <div class="panel-h">
+      <span class="panel-t">Modules</span>
+      <span class="panel-n" id="mod-count"></span>
+    </div>
+    <div class="mods" id="mods"></div>
+  </div>
+
+  <div class="foot">
+    <p>Audio outputs are set on <b>/patch</b>. This page sets each module's MIDI channel,
+      level and the P1/P2 join. The channel map is kept across reboots; the join resets
+      on restart. VISUALS has no sound, so its LVL is scene brightness.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/matrix.js"></script>{% endblock %}

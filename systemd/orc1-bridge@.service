@@ -1,0 +1,37 @@
+[Unit]
+# Generic on-demand ALSA<->JACK bridge, one instance per card+direction.
+#   sudo systemctl start orc1-bridge@M3.out
+#   sudo systemctl start orc1-bridge@PerformVE.in
+# Driven from the /patch page so the player can pull a card into the graph and
+# drop it again without touching a terminal.
+Description=ORC-1 ALSA<->JACK bridge for %i
+After=orc1-jackd.service
+BindsTo=orc1-jackd.service
+
+[Service]
+User=pibox
+Group=pibox
+Environment=HOME=/home/pibox
+
+# Never autostart a second jackd. Every jack client on this box sets this --
+# five clients each trying to start their own server is what caused the
+# cold-boot race that left the synth crash-looping for ~50 s.
+Environment=JACK_NO_START_SERVER=1
+
+ExecStart=/home/pibox/orc/orc1/orc1_bridge_start.sh %i
+
+# Same real-time budget as the other JACK clients. A bridge whose callback
+# runs late xruns the WHOLE graph, including the skipback ring -- the exact
+# trap that left the recorder at normal priority for weeks.
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=70
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+Restart=on-failure
+RestartSec=5
+
+# NO [Install] SECTION, DELIBERATELY. These are started on demand and must not
+# come back at boot on their own -- each one costs real CPU (~12% for an
+# 8-channel device) and adds a second clock domain to resample against.
+# Mounting every card at boot would quietly spend a third of the machine.

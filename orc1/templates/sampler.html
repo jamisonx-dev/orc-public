@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · SAMPLER{% endblock %}
+{% block page_label %}SAMPLER{% endblock %}
+
+{% block page_css %}<link rel="stylesheet" href="/static/css/sampler.css">
+<link rel="stylesheet" href="/static/css/voices.css">{% endblock %}
+
+{% block content %}
+  <div id="decks"></div>
+
+  <div class="card amber">
+    <div class="card-label">CROSSFADE A ↔ B</div>
+    <input type="range" min="0" max="127" value="64" style="width:100%"
+      oninput="cmd('SAMPLER_XFADE',{value:+this.value})">
+  </div>
+
+  <div class="card" id="oneshot-card">
+    <div class="card-label"><span>ONE-SHOT SAMPLE BANK</span>
+      <button class="rescan-btn" onclick="loadOneshot()">↻ REFRESH</button>
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:8px">
+      The first .wav files in samples/ (cymbal.wav excluded). Trigger and shape them here, or play them on CH&nbsp;<span id="os-ch">—</span> from note&nbsp;<span id="os-note">60</span>.
+    </div>
+    <div id="oneshot-slots"></div>
+  </div>
+
+  <div class="card blue" id="skipback-card">
+    <div class="card-label"><span>SKIPBACK · TRACK 0 INPUT</span>
+      <button class="rescan-btn" onclick="loadSkipback()">↻ REFRESH</button>
+    </div>
+    <div class="flags" style="margin-bottom:8px">
+      <button class="flag" onclick="skipbackPreset('l12')">L12 MASTER</button>
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:10px">
+      <span style="color:var(--label)">L</span>
+      <select id="sb-l" class="orc-select"></select>
+      <span style="color:var(--label)">R</span>
+      <select id="sb-r" class="orc-select"></select>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <button class="flag accent" onclick="applySkipback()">APPLY</button>
+      <span id="sb-status" style="font-size:9px;color:var(--muted)"></span>
+    </div>
+  </div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/sampler.js"></script>{% endblock %}

@@ -1,0 +1,5 @@
+flask
+mido[ports-rtmidi]
+numpy
+JACK-Client
+scipy

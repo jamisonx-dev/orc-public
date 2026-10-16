@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · Perform-VE{% endblock %}
+{% block page_label %}PERFORM-VE{% endblock %}
+{% block page_css %}
+<style>
+  #pve-page { max-width: 880px; }
+  .pve-help { font-size:12px; opacity:.72; margin:0 0 10px; line-height:1.45; }
+  .pve-presets { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
+  .pve-presets .btn { padding:12px 6px; font-size:16px; font-weight:700; }
+  .pve-blocks { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
+  .pve-blk { border:1px solid var(--accent-border); border-radius:8px; padding:10px 12px; }
+  .pve-blk-hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .pve-blk-hd .nm { font-size:12px; letter-spacing:.06em; font-weight:700; opacity:.85; }
+  .pve-en { min-width:48px; height:26px; padding:0 10px; border-radius:6px; font:inherit;
+    font-size:11px; font-weight:700; cursor:pointer; color:inherit; background:transparent;
+    border:1px solid rgba(128,128,128,.45); }
+  .pve-en.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .pve-ctl { margin:7px 0; }
+  .pve-ctl label { display:block; font-size:11px; opacity:.7; margin-bottom:2px; }
+  .pve-ctl .row { display:flex; align-items:center; gap:8px; }
+  .pve-ctl input[type=range] { flex:1; }
+  .pve-ctl .val { font-size:11px; opacity:.75; min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .pve-ctl select { font:inherit; font-size:12px; padding:3px 5px; width:100%;
+    border-radius:5px; border:1px solid rgba(128,128,128,.45); background:transparent; color:inherit; }
+  .pve-ctl select option { color:#000; }
+  .pve-trig { display:flex; flex-wrap:wrap; gap:6px; }
+  .pve-trig .btn { font-size:11px; padding:8px 10px; }
+  #pve-flash { font-size:12px; color:#0a7; margin-left:8px; }
+  #pve-flash.err { color:#c33; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="pve-page">
+
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+    <b>Perform-VE</b>
+    <span id="pve-flash"></span>
+  </div>
+  <p class="pve-help">Live control of the TC-Helicon Perform-VE over USB MIDI (ch&nbsp;1).
+    The box doesn't report its settings back, so these controls only <i>send</i> values and
+    don't show its current state. Audio sent to its USB&nbsp;in&nbsp;ch&nbsp;3 comes back processed,
+    so it works as an insert effect with no cables (INSERT card below).</p>
+
+  <section class="card" id="pve-insert-card">
+    <div class="card-label">INSERT · ROUTE A MODULE THROUGH THE PERFORM-VE (USB, CABLE-FREE)</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <label style="font-size:12px">Source
+        <select id="pve-ins-src" style="font:inherit;font-size:12px;padding:4px 6px;
+          border-radius:5px;border:1px solid rgba(128,128,128,.45);background:transparent;color:inherit">
+        </select></label>
+      <button class="pve-en" id="pve-ins-on" type="button" style="min-width:60px;height:30px">OFF</button>
+      <span id="pve-ins-note" style="font-size:12px;opacity:.7"></span>
+    </div>
+    <p class="pve-help" style="margin-top:8px">Sends the chosen module into USB-in ch3 and
+      returns the processed sound to the main out. It is <b>added</b> to the module's own
+      output; mute that on <code>/patch</code> to hear only the processed sound. To wire it by hand
+      on <code>/patch</code>: source&nbsp;&rarr;&nbsp;<b>PERFORMVE&nbsp;OUT&nbsp;3</b>,
+      <b>PERFORMVE&nbsp;IN&nbsp;1/2</b>&nbsp;&rarr;&nbsp;main.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-label">PRESET · PROGRAM CHANGE</div>
+    <div class="pve-presets" id="pve-presets"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">EFFECTS · ENABLE / STYLE / AMOUNTS</div>
+    <div class="pve-blocks" id="pve-blocks"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">LOOPER / SAMPLE TRIGGERS · MOMENTARY</div>
+    <div class="pve-trig" id="pve-trig"></div>
+    <p class="pve-help" style="margin-top:8px">Drum triggers fire a value of 127 on press.</p>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/performve.js"></script>
+{% endblock %}

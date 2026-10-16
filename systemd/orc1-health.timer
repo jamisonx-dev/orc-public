@@ -1,0 +1,24 @@
+[Unit]
+# The point of the timer: a check you have to remember to run is a check that
+# rots, and a rotted check is the next thing that quietly lies to you.
+Description=Run the ORC-1 health check periodically
+
+[Timer]
+# Two minutes after boot, so jackd, the synth and the recorder have settled
+# and the first report describes a running instrument rather than a booting
+# one.
+OnBootSec=2min
+
+# Every 15 minutes thereafter. Frequent enough that the /system card is never
+# meaningfully stale, rare enough that the ~10 s run is invisible.
+OnUnitActiveSec=15min
+
+# Spread the wake-up so it cannot land in lockstep with anything else.
+AccuracySec=30s
+
+# If the Pi was asleep or the timer was masked, run once on resume rather
+# than silently skipping until the next quarter hour.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

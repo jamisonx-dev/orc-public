@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · ROUTING{% endblock %}
+{% block page_label %}ROUTING{% endblock %}
+
+{% block page_css %}<link rel="stylesheet" href="/static/css/routes.css">{% endblock %}
+
+{% block content %}
+  <div class="section-label">CHORD ENGINE OUTPUT</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">The preset sets which channel each chord voice plays on. PORT (and CH) send all external chord voices to one output instead (RTP, DIN, etc).</div>
+      <div id="chord-presets" style="display:flex;flex-wrap:wrap;gap:4px;margin:8px 0 4px"></div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 8px;align-items:center;font-size:10px;margin-top:6px">
+        <span style="color:var(--label)">PORT</span>
+        <select id="co-port" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px"></select>
+        <span style="color:var(--label)">CH</span>
+        <select id="co-ch" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="">preset</option>
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+          <option>9</option><option>10</option><option>11</option><option>12</option>
+          <option>13</option><option>14</option><option>15</option><option>16</option>
+        </select>
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <button class="btn accent" onclick="applyChordOut()">SET PORT</button>
+        <button class="btn" onclick="clearChordOut()">CLEAR OVERRIDE</button>
+        <span id="co-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">PERFORM-VE · HARDTUNE KEY</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">Sends chords to the TC-Helicon Perform-VE (ch 1) so its HardTune <b>NaturalPlay</b> re-keys the lead to what you play. It follows major/minor only (not harmonic minor or pentatonic). <b>FOLLOW</b> mirrors the ORC chord engine. <b>SOURCE</b> takes an external USB/DIN chord stream for the box and <i>consumes</i> it (those notes won't also play a module or pass through). Send at least a root and a 3rd — a single note won't re-key it.</div>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="pve-feed-btn" onclick="togglePerformveFeed()">FOLLOW: —</button>
+        <span id="pve-feed-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 8px;align-items:center;font-size:10px;margin-top:8px">
+        <span style="color:var(--label)">SOURCE</span>
+        <select id="pve-src-port" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="">off</option>
+          <option value="usb">usb</option>
+          <option value="din">din</option>
+          <option value="both">both</option>
+        </select>
+        <span style="color:var(--label)">CH</span>
+        <select id="pve-src-ch" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="">any</option>
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+          <option>9</option><option>10</option><option>11</option><option>12</option>
+          <option value="13" disabled>13 (ORC ctrl)</option><option>14</option><option>15</option><option>16</option>
+        </select>
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <button class="btn accent" onclick="applyPerformveSrc()">SET SOURCE</button>
+        <span id="pve-src-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">CHORD VOICE MAP</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">Override the routing of individual voice slots on top of the active preset. <b>preset</b> = follow the preset; <b>off</b> = silence that slot. The PRESET ROUTING column shows what the active preset does for each slot.</div>
+      <table id="vm-grid" style="width:100%;border-collapse:collapse;margin:8px 0;font-size:10px"></table>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn accent" onclick="applyVoiceMap()">APPLY</button>
+        <button class="btn" onclick="clearVoiceMap()">CLEAR ALL</button>
+        <button class="btn" onclick="loadPresetIntoVoiceMap()">LOAD FROM PRESET</button>
+        <span id="vm-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:9px;color:var(--label);font-family:var(--fh);letter-spacing:.1em">SAVE AS</span>
+        <select id="vm-save-slot" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="USER_1">USER 1</option>
+          <option value="USER_2">USER 2</option>
+          <option value="USER_3">USER 3</option>
+          <option value="USER_4">USER 4</option>
+        </select>
+        <button class="btn accent" onclick="saveAsPreset()">SAVE SLOT</button>
+        <span id="vm-save-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+      <div style="margin-top:4px;font-size:8px;color:var(--muted)">Saves the current overrides plus the active preset as this slot. The slot becomes the active preset and is kept across restarts.</div>
+    </div>
+  </div>
+
+  <div class="section-label">MELODY SNAP OUTPUT</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">Melody-snap notes (played on CH15) go out the pisound on CH15 by default. Set a port and channel to send them elsewhere.</div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 8px;align-items:center;font-size:10px;margin-top:8px">
+        <span style="color:var(--label)">PORT</span>
+        <select id="mo-port" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px"></select>
+        <span style="color:var(--label)">CH</span>
+        <select id="mo-ch" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="">default (15)</option>
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+          <option>9</option><option>10</option><option>11</option><option>12</option>
+          <option>13</option><option>14</option><option>15</option><option>16</option>
+        </select>
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <button class="btn accent" onclick="applyMelodyOut()">SET</button>
+        <button class="btn" onclick="clearMelodyOut()">CLEAR</button>
+        <span id="mo-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">SYNTH BUS MIDI THRU</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">Copies a synth-bus channel to an external port, e.g. drums to the MPC on CH 10. Notes and CCs are forwarded. Changes apply immediately and are saved.</div>
+      <table id="vt-grid" style="width:100%;border-collapse:collapse;margin:8px 0;font-size:10px"></table>
+    </div>
+  </div>
+
+  <div class="section-label">DEVICE PROFILES</div>
+  <div id="devices"></div>
+
+  <div class="add-dev-card" id="add-dev-card">
+    <div class="section-label" style="padding-top:0;margin-bottom:8px">+ ADD DEVICE</div>
+    <div class="add-dev-grid">
+      <div><div class="rf-lbl">PROFILE NAME</div><input class="rf-inp" id="nd-name" placeholder="SP-404mk2"></div>
+      <div><div class="rf-lbl">PORT MATCH</div><input class="rf-inp" id="nd-match" placeholder="SP-404"></div>
+      <div style="grid-column:1/-1"><div class="rf-lbl">DESCRIPTION</div><input class="rf-inp" id="nd-desc" placeholder="optional"></div>
+    </div>
+    <label class="rf-lbl" style="display:flex;gap:6px;align-items:center;margin:6px 0;cursor:pointer" title="Rules in an ALWAYS ON profile apply no matter what is plugged in — e.g. 'DIN ch5 → Perform-VE' as a permanent input claim. Port match is not needed.">
+      <input type="checkbox" id="nd-always"> ALWAYS ON — global rules, active whatever is connected
+    </label>
+    <button class="btn accent" onclick="addDevice()">ADD DEVICE</button>
+  </div>
+
+  <div class="section-label">STATIC RULES</div>
+  <div class="card">
+    <div style="padding:9px 11px">
+      <div class="static-note">Static rules come from <code>MIDI_REMAP</code> in orc1_config.py and are always active. Edit that file to change them.</div>
+      <div id="static-rules"></div>
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <button class="btn" onclick="reloadFromDisk()">RELOAD FILE</button>
+    <button class="btn accent" onclick="saveAndReload()">SAVE & RELOAD</button>
+  </div>
+  <div class="toast" id="toast"></div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/routes.js"></script>{% endblock %}

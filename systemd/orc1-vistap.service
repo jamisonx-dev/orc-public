@@ -1,0 +1,35 @@
+[Unit]
+Description=ORC-1 VISUALS audio tap: a listen-only JACK client the visuals read (C, not Python)
+# Pulled in by orc1-visuals.service (Wants=) and stopped with it (PartOf=).
+# Input ports only: it cannot change the sound. The realtime callback just
+# copies each period into /dev/shm/orc1_vistap (see daw/orc_jacktap.c for
+# why this is C: a Python callback would wait on the renderer's GIL and
+# could make the whole graph -- skipback included -- miss a deadline).
+# If it is missing or fails, the visuals fall back to skipback's RAM ring.
+PartOf=orc1-visuals.service
+After=orc1-jackd.service
+# jackd restarting = the tap exits 1 and Restart= brings it back; keep trying.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox
+Environment=JACK_NO_START_SERVER=1
+Environment=JACK_NO_AUDIO_RESERVATION=1
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+# builds on the first start after a deploy of orc_jacktap.c, then exec's it
+# (exec: SIGTERM reaches the tap, which closes its JACK client cleanly --
+# a SIGKILLed JACK client can xrun the graph). A failed BUILD (no gcc, no
+# JACK headers, a bad source) exits 78 and is NOT retried: it would only
+# fail again every 3 s forever (StartLimitIntervalSec=0). Fix it, then
+# start the visuals again. ($$b = a literal $b: systemd expands $b itself.)
+ExecStart=/bin/bash -c 'b=$(/home/pibox/orc/orc1/daw/jacktap_build.sh) || exit 78; exec "$$b"'
+KillSignal=SIGTERM
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=3
+RestartPreventExitStatus=78
+MemoryMax=32M
+OOMScoreAdjust=900

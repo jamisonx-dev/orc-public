@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · SYSTEM{% endblock %}
+{% block page_label %}SYSTEM{% endblock %}
+
+{% block content %}
+
+  <div class="card" id="health-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>HEALTH CHECK</span>
+      <button class="rescan-btn" onclick="healthRun()">↻ RUN NOW</button>
+    </div>
+    <div id="health-body">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      DEAD = names something that does not exist, or reports working while
+      doing nothing. Accept one deliberately in
+      <code>~/.orc1_health_expect.json</code>.
+    </div>
+  </div>
+
+  <div class="card" id="sys-temp-card">
+    <div class="card-label">TEMPERATURE &amp; POWER</div>
+    <div id="sys-temp">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>RESOURCES</span>
+      <span id="sys-uptime" style="font-size:11px;color:var(--accent);font-family:var(--fs)"></span>
+    </div>
+    <div id="sys-gauges">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+  </div>
+
+  <div class="card" id="daw-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>DAW / DJ MODE</span><span id="daw-state" style="font-size:10px;font-family:var(--fs)">—</span>
+    </div>
+    <div class="flags" style="margin-bottom:6px">
+      <button class="flag daw-go" onclick="dawStart('reaper', true)"
+              title="REAPER fullscreen; the synth/drum/sampler engines stop meanwhile and come back when it quits">START DAW</button>
+      <button class="flag daw-go" onclick="dawStart('mixxx', true)"
+              title="Mixxx fullscreen with the Mixtrack; the engines stop meanwhile and come back when it quits">START DJ (MIXXX)</button>
+      <button class="flag daw-go" onclick="dawStart('reaper', false)" style="opacity:.7"
+              title="REAPER fullscreen; the engines keep running (uses more memory)">DAW · KEEP ENGINES</button>
+      <button class="flag daw-go" onclick="dawStart('mixxx', false)" style="opacity:.7"
+              title="Mixxx fullscreen; the engines keep running (uses more memory)">DJ · KEEP ENGINES</button>
+      <button class="flag" id="daw-stop" onclick="dawStop()">STOP</button>
+    </div>
+    <div id="daw-msg" style="font-size:11px;min-height:14px"></div>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5">
+      DAW = REAPER, DJ = Mixxx, fullscreen on the monitor on the Pi's HDMI port
+      (USB mouse + keyboard). In DJ mode the Mixtrack belongs to Mixxx; the ORC
+      takes it back when Mixxx quits. Skipback keeps recording either way.
+      The synths, drums and sampler stop while the app runs and restart when it
+      quits. KEEP ENGINES leaves them running, which uses more memory. STOP asks
+      the app to quit like its close box: unsaved edits (REAPER) or a playing
+      deck (Mixxx) get a question on the monitor first.
+    </div>
+  </div>
+
+  <div class="card" id="vis-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>VISUALS</span><span id="vis-state" style="font-size:10px;font-family:var(--fs)">—</span>
+    </div>
+    <div class="flags">
+      <button class="flag" id="vis-start" onclick="visQuick('start')">START</button>
+      <button class="flag" id="vis-stop" onclick="visQuick('stop')">STOP</button>
+      <a class="flag" href="/visuals">OPEN VISUALS ›</a>
+    </div>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+      Line scenes on the HDMI monitor that follow the music. Scenes, sliders,
+      the listening band and the spectrum live on the VISUALS page.
+    </div>
+  </div>
+
+  <div class="card" id="hud-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>HUD</span><span id="hud-state" style="font-size:10px;font-family:var(--fs)">—</span>
+    </div>
+    <div class="flags">
+      <button class="flag" id="hud-start" onclick="hudQuick('start')">START</button>
+      <button class="flag" id="hud-stop" onclick="hudQuick('stop')">STOP</button>
+      <a class="flag" href="/hud">OPEN PHONE HUD ›</a>
+    </div>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+      Live play-state on the HDMI monitor: tempo, bar / beat / step, the key and
+      chord, every sequencer track with its playhead, which modules are sounding,
+      held notes. Light on purpose (no browser). VISUALS, DAW and DJ share the
+      monitor: starting one of them replaces the HUD.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">SERVICES</div>
+    <div id="sys-services">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+  </div>
+
+  <div class="card blue" id="audio-card">
+    <div class="card-label"><span>AUDIO OUT</span>
+      <button class="rescan-btn" onclick="loadAudio()">↻ REFRESH</button>
+    </div>
+    <div class="flags" id="audio-list"><span style="font-size:10px;color:var(--muted)">scanning…</span></div>
+  </div>
+
+  <div class="card blue" id="bt-card">
+    <div class="card-label"><span>BLUETOOTH AUDIO</span>
+      <button class="rescan-btn" onclick="loadBt()">↻ REFRESH</button>
+    </div>
+    <div class="flags" style="align-items:center;gap:8px">
+      <button class="flag" id="bt-toggle" onclick="btToggle()">…</button>
+      <span id="bt-status" style="font-size:9px;color:var(--muted)">checking…</span>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:4px">Pair your phone to <b>pibox</b> to play its audio through the ORC.</div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">RECENT RECORDINGS</div>
+    <div id="sys-recs">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:var(--danger-border)">
+    <div class="card-label">SYSTEM CONTROLS</div>
+    <div class="flags" style="margin-bottom:8px">
+      <a class="flag warn" href="http://pibox.local:5002" target="_blank"
+         style="text-decoration:none">FULL DASHBOARD ↗</a>
+    </div>
+    <div style="font-size:9px;color:var(--muted)">
+      Reboot and shutdown are on the system dashboard (opens in a new tab).
+    </div>
+  </div>
+
+  <div class="card" id="config-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>CONFIG OVERRIDES</span>
+      <span style="font-size:9px;color:var(--muted);font-family:var(--fs)">~/.orc1_config_overrides.json</span>
+    </div>
+    <div id="config-body">
+      <span style="font-size:10px;color:var(--muted)">loading…</span>
+    </div>
+  </div>
+
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/system.js"></script>{% endblock %}

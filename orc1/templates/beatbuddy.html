@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · BEATBUDDY{% endblock %}
+{% block page_label %}BEATBUDDY{% endblock %}
+{% block page_css %}
+<style>
+  #bb-page { max-width: 860px; }
+  .bb-status { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+  .bb-lamp { font-weight:700; padding:4px 12px; border-radius:6px; font-size:14px; }
+  .bb-lamp.playing { color:#0a7; background:rgba(0,160,120,.10); }
+  .bb-lamp.stopped { color:#c33; background:rgba(200,60,60,.08); }
+  .bb-meta { font-size:13px; opacity:.8; }
+  .bb-meta b { opacity:1; }
+  .bb-tempo { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .bb-tval { font-size:13px; opacity:.85; }
+  .bb-tval b { opacity:1; font-size:15px; }
+  .bb-cmode { font-size:11px; opacity:.6; text-transform:uppercase; letter-spacing:.05em; }
+  .bb-toggle { font-size:13px; display:flex; align-items:center; gap:6px; margin-left:6px; }
+  .bb-tempo .btn.on { outline:2px solid #0a7; background:rgba(0,160,120,.10); }
+  .bb-pedals { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+  .bb-pedals .btn { min-height:64px; font-size:15px; font-weight:600; touch-action:none; }
+  .bb-pedals .btn.on { outline:2px solid #0a7; background:rgba(0,160,120,.14); }
+  .bb-sub { font-size:11px; opacity:.65; display:block; font-weight:400; margin-top:3px; }
+  .bb-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  .bb-filters select, .bb-filters input { font:inherit; padding:4px 7px; border-radius:5px;
+    border:1px solid rgba(128,128,128,.4); background:transparent; color:inherit; }
+  .bb-filters input.bpm { width:64px; }
+  .bb-filters input.search { flex:1; min-width:120px; }
+  #bb-count { font-size:12px; opacity:.6; margin-left:auto; }
+  .bb-genre-hd { grid-column:1/-1; font-size:11px; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; opacity:.55; margin:8px 0 2px; padding-top:4px;
+    border-top:1px solid rgba(128,128,128,.18); }
+  .bb-genre-hd:first-child { border-top:none; margin-top:0; }
+  .bb-songs { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:6px; }
+  .bb-song { text-align:left; display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+  .bb-song-nm { font-weight:600; }
+  .bb-song.cur { outline:2px solid #0a7; background:rgba(0,160,120,.10); }
+  .bb-kits { display:flex; flex-wrap:wrap; gap:6px; }
+  .bb-kit.cur { outline:2px solid #0a7; }
+  #bb-flash { font-size:12px; color:#0a7; }
+  .bb-note { font-size:12px; opacity:.7; margin-top:8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="bb-page">
+
+  <div class="bb-status">
+    <span id="bb-lamp" class="bb-lamp stopped">○ …</span>
+    <span class="bb-meta">song <b id="bb-song">—</b> · part <b id="bb-part">—</b> · <b id="bb-bpm">—</b> bpm</span>
+    <button class="btn" onclick="BB.refresh()">⟳</button>
+    <span id="bb-flash"></span>
+  </div>
+
+  <section class="card">
+    <div class="card-label">TEMPO</div>
+    <div class="bb-tempo">
+      <span class="bb-tval">clock <b id="bb-clock-bpm">—</b> bpm <span id="bb-clock-mode" class="bb-cmode"></span></span>
+      <button class="btn" onclick="BB.bpm(-1)" title="slower">−</button>
+      <button class="btn" onclick="BB.bpm(1)" title="faster">+</button>
+      <button class="btn" id="bb-match" onclick="BB.matchBpm()" title="set clock to the loaded song's native tempo">→ song <span id="bb-song-bpm2">—</span></button>
+      <label class="bb-toggle"><input type="checkbox" id="bb-follow" onchange="BB.tempoMode(this.checked)"> follow clock <span class="bb-sub" style="display:inline">(songs keep the current tempo instead of setting their own)</span></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">PEDAL</div>
+    <div class="bb-pedals">
+      <button class="btn accent" onclick="BB.cmd('BB_TAP')">TAP<span class="bb-sub">start · drum fill</span></button>
+      <button class="btn" onclick="BB.cmd('BB_NEXT')">NEXT PART<span class="bb-sub">transition, then advance</span></button>
+      <button class="btn" onclick="BB.cmd('BB_HOLD')">HOLD<span class="bb-sub">repeat transition</span></button>
+      <button class="btn" onclick="BB.cmd('BB_RELEASE')">RELEASE<span class="bb-sub">→ next part</span></button>
+      <button class="btn" onclick="BB.cmd('BB_DOUBLE')">DOUBLE<span class="bb-sub">outro, then stop</span></button>
+      <button class="btn" onclick="BB.cmd('BB_PAUSE')">PAUSE<span class="bb-sub">pause / resume</span></button>
+      <button class="btn" onclick="BB.cmd('BB_STOP')">STOP<span class="bb-sub">stop now</span></button>
+    </div>
+    <div class="bb-note"><b>TAP</b> starts a stopped song; while playing it triggers a drum
+      fill. <b>NEXT PART</b> plays a transition, then moves to the next part. <b>HOLD</b>
+      enters the transition and keeps repeating it until <b>RELEASE</b>, which moves to the
+      next part. <b>DOUBLE</b> plays the outro (if the song has one), then stops.
+      <b>PAUSE</b> pauses and resumes. <b>STOP</b> stops immediately.</div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">SONG</div>
+    <div class="bb-filters">
+      <select id="bb-genre"><option value="">All genres</option></select>
+      <input id="bb-search" class="search" type="search" placeholder="search name…" autocomplete="off">
+      <input id="bb-bpm-min" class="bpm" type="number" placeholder="min" min="0" title="min bpm">
+      <span style="opacity:.5">–</span>
+      <input id="bb-bpm-max" class="bpm" type="number" placeholder="max" min="0" title="max bpm">
+      <span style="opacity:.5">bpm</span>
+      <button class="btn" id="bb-clear" title="clear filters">✕</button>
+      <span id="bb-count"></span>
+    </div>
+    <div id="bb-songs" class="bb-songs"></div>
+    <div class="bb-note" id="bb-songs-empty" hidden>No songs staged. Put .BBS files in <code>~/.orc1_bbsongs</code> on the Pi.</div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">OUTPUT</div>
+    <div class="flags" id="bb-out">
+      <button class="flag" data-dest="bbkit" onclick="BB.setOutput('bbkit')">BBKIT</button>
+      <button class="flag" data-dest="909" onclick="BB.setOutput('909')">909</button>
+      <button class="flag" data-dest="port" onclick="BB.showPort()">MIDI OUT</button>
+    </div>
+    <div id="bb-out-port" style="display:none;margin-top:6px;gap:6px;align-items:center;flex-wrap:wrap">
+      <select id="bb-out-portsel"></select>
+      <select id="bb-out-ch"></select>
+      <button class="btn" onclick="BB.applyPort()">SET</button>
+    </div>
+    <div class="bb-note" id="bb-out-note" style="margin-top:4px"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">KIT</div>
+    <div id="bb-kits" class="bb-kits"></div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/beatbuddy.js"></script>{% endblock %}

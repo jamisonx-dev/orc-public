@@ -1,0 +1,21 @@
+[Unit]
+# TC-Helicon Perform-VE playback bridge (JACK -> device), 8ch @ 48k.
+# MUST be running before performve-in: the device only yields capture audio
+# while a USB playback stream is open (see performve_bridge_start.sh).
+Description=Perform-VE playback as JACK client (8ch)
+After=orc1-jackd.service
+BindsTo=orc1-jackd.service
+
+[Service]
+User=pibox
+Environment=JACK_NO_START_SERVER=1
+ExecStart=/home/pibox/orc/orc1/performve_bridge_start.sh out
+Restart=on-failure
+RestartSec=5
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=70
+LimitRTPRIO=70
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

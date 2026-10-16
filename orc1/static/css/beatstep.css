@@ -1,0 +1,216 @@
+/* ORC-1 · beatstep.css — BeatStep Pro config page */
+
+/* ── Connection banner ───────────────────────────────────────── */
+.bsp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.bsp-conn {
+  font-family: var(--fh);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  padding: 5px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border2);
+  background: var(--panel);
+}
+.bsp-conn.live { color: var(--live);   border-color: rgba(34,224,151,.4); background: rgba(34,224,151,.06); }
+.bsp-conn.dead { color: var(--danger); border-color: var(--danger-border); }
+
+.bsp-flash {
+  font-family: var(--fs);
+  font-size: 11px;
+  min-width: 120px;
+  text-align: right;
+  transition: opacity .3s;
+}
+.bsp-flash.ok  { color: var(--live); }
+.bsp-flash.err { color: var(--danger); }
+
+/* ── Page layout ─────────────────────────────────────────────── */
+.page { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Setting rows ────────────────────────────────────────────── */
+.bsp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.bsp-row:last-child { border-bottom: none; }
+
+.bsp-lbl {
+  font-family: var(--fh);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--label);
+  flex-shrink: 0;
+  min-width: 130px;
+}
+
+.bsp-right { flex: 1; display: flex; justify-content: flex-end; }
+
+/* ── Group sublabel (e.g. "SEQ 1" within CV/Gate) ────────────── */
+.bsp-group-lbl {
+  font-family: var(--fh);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--accent);
+  margin: 8px 0 2px;
+}
+
+.bsp-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+
+/* ── Number inputs ───────────────────────────────────────────── */
+.bsp-num-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bsp-num {
+  width: 52px;
+  background: var(--dim);
+  border: 1px solid var(--border);
+  color: var(--bright);
+  font-family: var(--fs);
+  font-size: 13px;
+  padding: 5px 6px;
+  border-radius: 3px;
+  text-align: center;
+}
+.bsp-num-sm { width: 44px; }
+.bsp-num:focus { outline: 1px solid var(--accent); }
+
+.bsp-note-lbl {
+  font-family: var(--fh);
+  font-size: 9px;
+  color: var(--accent);
+  min-width: 28px;
+  letter-spacing: .05em;
+}
+
+/* ── Selects ─────────────────────────────────────────────────── */
+.bsp-sel {
+  background: var(--dim);
+  border: 1px solid var(--border);
+  color: var(--bright);
+  font-family: var(--fs);
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+.bsp-sel-sm { font-size: 11px; padding: 4px 5px; }
+.bsp-sel:focus { outline: 1px solid var(--accent); }
+
+/* ── Seg buttons (override base to be smaller here) ──────────── */
+.bsp-row .seg { flex-shrink: 0; }
+.bsp-row .seg .btn {
+  font-size: 11px;
+  padding: 5px 9px;
+  flex: 1;
+}
+
+/* ── Drum pad grid ───────────────────────────────────────────── */
+.bsp-details { margin-top: 10px; }
+.bsp-summary {
+  font-family: var(--fh);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.bsp-summary:hover { color: var(--bright); }
+
+.bsp-pad-grid { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+.bsp-pad-hdr {
+  display: grid;
+  grid-template-columns: 52px 1fr 90px 42px;
+  gap: 4px;
+  font-family: var(--fh);
+  font-size: 8px;
+  letter-spacing: .1em;
+  color: var(--muted);
+  padding: 0 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bsp-pad-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 90px 42px;
+  gap: 4px;
+  align-items: center;
+}
+
+.bsp-pad-num {
+  font-family: var(--fh);
+  font-size: 9px;
+  color: var(--sub);
+  letter-spacing: .05em;
+}
+
+.bsp-set-sm {
+  font-size: 10px;
+  padding: 4px 6px;
+}
+
+.bsp-note {
+  font-size: .72em;
+  color: var(--muted);
+  margin-top: .5em;
+}
+
+/* ── User scale piano ────────────────────────────────────────── */
+.bsp-piano {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.bsp-piano-key {
+  font-family: var(--fh);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 8px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  flex: 1;
+  min-width: 38px;
+  text-align: center;
+}
+.bsp-piano-key:active { transform: scale(.92); }
+.bsp-piano-key.on {
+  color: var(--live);
+  border-color: rgba(34,224,151,.4);
+  background: rgba(34,224,151,.08);
+}
+
+/* ── Card sub/note helpers (local copy so control.css isn't required) ── */
+.card-sub  { font-size: .75em; color: var(--muted); margin: -.3em 0 .7em; }
+.card-note { font-size: .72em; color: var(--muted); margin-top: .5em; }

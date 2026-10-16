@@ -1,0 +1,44 @@
+[Unit]
+# Runs the read-only health check and publishes its JSON report for the web
+# UI. Deliberately NOT a dependency of anything -- this unit can fail, hang or
+# be masked and the instrument is unaffected. It only ever observes.
+Description=ORC-1 health check (read-only diagnostic)
+After=orc1-jackd.service
+
+[Service]
+Type=oneshot
+
+# User and HOME are pinned explicitly. Every path in the script resolves from
+# os.path.expanduser("~"); if this ever ran as another user, every state file
+# would appear "missing" and the report would be a wall of false DEAD
+# findings -- a checker lying loudly, which is worse than no checker.
+User=pibox
+Group=pibox
+Environment=HOME=/home/pibox
+
+# --out is the only file it writes, and it writes atomically, so the web UI
+# can never read a half-written report.
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_health.py --out /home/pibox/.orc1_health.json
+
+# The script exits 1 when it finds DEAD items. That is a successful RUN
+# reporting bad news, not a failed run -- without this, systemd would mark the
+# unit failed exactly when it is doing its job, and the timer's own status
+# would become another thing that lies.
+SuccessExitStatus=0 1
+
+# It samples each ring for 3 s and can wait on web pages; a hung check must
+# never accumulate.
+TimeoutStartSec=180
+
+# Strictly a diagnostic: it must never compete with the audio threads.
+Nice=10
+IOSchedulingClass=idle
+
+# NO [Install] SECTION, DELIBERATELY. This unit is triggered only by
+# orc1-health.timer. If it also had WantedBy=multi-user.target and someone
+# enabled both files -- the natural instinct when shipping a .service/.timer
+# pair -- multi-user.target would start it seconds after jackd comes up,
+# skipping the timer's deliberate 2-minute settle window, and the timer would
+# then run it AGAIN. Two runs stacked into the most fragile moment of boot.
+#
+# ENABLE ONLY THE TIMER:  sudo systemctl enable --now orc1-health.timer

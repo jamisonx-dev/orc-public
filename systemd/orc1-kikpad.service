@@ -1,0 +1,21 @@
+[Unit]
+Description=ORC-1 -> KIKPAD key link (sends the ORC's root + scale to the Midiplus SmartPad)
+After=orc1-web.service
+Wants=orc1-web.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_kikpad_link.py
+Restart=on-failure
+RestartSec=5
+# Tiny helper: it must never compete with the audio side (skipback comes first)
+Nice=10
+CPUSchedulingPolicy=idle
+MemoryMax=64M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

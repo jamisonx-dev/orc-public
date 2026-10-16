@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · PATCH{% endblock %}
+{% block page_label %}PATCH{% endblock %}
+
+{% block content %}
+
+  <div class="card" id="patch-head">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>PATCHBAY</span>
+      <button class="rescan-btn" onclick="patchLoad()">↻ RESCAN</button>
+    </div>
+    <div style="font-size:9px;color:var(--label)">
+      Lists the live JACK graph, so it only offers ports that exist right now.
+      Ports are named by <b>position</b>, not by what is plugged into them.
+    </div>
+    <div id="patch-msg" style="font-size:10px;margin-top:6px"></div>
+    <div id="patch-cpu" style="font-size:10px;margin-top:6px;color:var(--muted)">cpu…</div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">CARDS <span style="font-size:9px;color:var(--label);font-weight:normal">— the Pi's audio interfaces, and whether JACK can see them</span></div>
+    <div id="patch-cards"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      jackd owns one card directly; every other interface must be brought in
+      before it appears in the graph. Each one resamples against its own clock
+      and uses CPU — the figure beside it is live. Drop what you don't need.
+    </div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">MODULE OUTPUTS <span style="font-size:9px;color:var(--label);font-weight:normal">— where each module's audio goes; saved across restarts</span></div>
+    <div id="mod-outs"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+    <div id="mo-note" style="font-size:10px;margin-top:4px;color:var(--muted)"></div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      The first picker chooses a <b>card</b>: <b>main</b> is the main JACK server;
+      another card gives that module <b>its own jackd on that card</b>. The second
+      picker chooses the output <b>pair</b> on that server ("off" wires it nowhere).
+      A module routed to a pair no longer plays through the main outputs. These
+      wires are managed here, not in the patchbay below, and are re-applied when
+      the module restarts.
+    </div>
+  </div>
+  <script>
+  (function(){
+    function moRender(st){
+      var box=document.getElementById('mod-outs');
+      if(!st||!st.modules||!st.modules.length){ box.textContent='(no modules / jackd down)'; return; }
+      var opts=st.pairs||[];
+      var cards=st.cards||['main'];
+      var first=(opts[0]&&opts[0].id)||'';
+      var html='';
+      st.modules.forEach(function(m){
+        var onCard=(m.card&&m.card!=='main');
+        // CARD selector (own jackd per card) -- only for card-assignable modules.
+        var cardSel='';
+        if(m.card_assignable){
+          cardSel='<select title="which card’s own jackd" style="font-size:11px;padding:2px 4px" onchange="moCardSet(\''+m.key+'\',this.value)">';
+          cards.forEach(function(c){
+            var lbl=(c==='main')?'main':c;
+            cardSel+='<option value="'+pAttrJ(c)+'"'+((m.card===c)?' selected':'')+'>'+lbl+'</option>';
+          });
+          cardSel+='</select>';
+        }
+        // PAIR selector -- disabled while on a card (the pair follows the card,
+        // applied on that card’s server when the host restarts).
+        var sel='<select style="font-size:11px;padding:2px 4px"'+(onCard?' disabled':'')
+            +' title="'+(onCard?'on a card — route to main to change the pair here':'output pair')+'"'
+            +' onchange="moSet(\''+m.key+'\',this.value)">';
+        opts.forEach(function(p){
+          var isMain=(p.id===first&&p.id!=='none');
+          var seld=(m.dest===p.id||(!m.dest&&isMain))?' selected':'';
+          sel+='<option value="'+p.id+'"'+seld+'>'+p.label+(isMain?' (main)':'')+'</option>';
+        });
+        sel+='</select>';
+        var live=(m.live&&m.live.length)?m.live.map(function(x){return x.replace('system:playback_','out ');}).join(', '):'—';
+        var liveTxt=onCard?('on '+m.card+'’s own jackd'):('live: '+live);
+        // Its configured pair is not (fully) wired -- e.g. cut in the patchbay.
+        // Re-picking the SAME option fires no onchange, so offer an explicit
+        // re-apply (same endpoint; like any pick it clears extra wires too).
+        var missing=onCard?[]:(m.resolved||[]).filter(function(p){ return (m.live||[]).indexOf(p)<0; });
+        var fix=missing.length
+            ?'<span style="font-size:9px;color:#e66">⚠ not wired</span>'
+             +'<button class="btn" style="font-size:9px;padding:1px 6px" title="reconnect '+m.label+' to its chosen pair (also removes any extra wires from it)"'
+             +' onclick="moSet(\''+m.key+'\',\''+pAttrJ(m.dest||'')+'\')">RE-APPLY</button>'
+            :'';
+        html+='<div style="display:flex;align-items:center;gap:8px;margin:3px 0;flex-wrap:wrap">'
+            +'<span style="width:110px;font-size:11px;font-weight:bold">'+m.label+'</span>'
+            +cardSel
+            +sel
+            +'<span style="font-size:9px;color:var(--muted)">'+liveTxt+'</span>'
+            +fix
+            +'</div>';
+      });
+      box.innerHTML=html;
+    }
+    function pAttrJ(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+    window.moLoad=function(){ fetch('/api/module_outputs').then(function(r){return r.json();}).then(moRender).catch(function(){}); };
+    window.moSet=function(key,dest){
+      fetch('/api/module_outputs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({module:key,dest:dest})})
+        .then(function(r){return r.json();})
+        .then(function(res){
+          var note=document.getElementById('mo-note');
+          if(note){
+            var bad=(res&&res.failed&&res.failed.length)
+              ? res.failed.map(function(f){return f.dst+': '+f.error;}).join('; ')
+              : ((res&&res.error)||'');
+            note.style.color=(res&&res.ok)?'':'#e66';
+            note.textContent=(res&&res.ok)?'':(key+' output NOT fully wired — '+(bad||'unknown error')+
+              (res&&res.failed&&res.failed.length?' (choice saved; the module applies it when it restarts)':''));
+          }
+          if(res&&res.state){moRender(res.state);} else {moLoad();}
+        })
+        .catch(function(e){
+          var note=document.getElementById('mo-note');
+          if(note){ note.style.color='#e66'; note.textContent=key+' output request failed: '+e; }
+          moLoad();
+        });
+    };
+    // Route a module to a CARD's own jackd (or 'main'). This restarts the
+    // module host (a second or two), so show a transient state and reload after.
+    window.moCardSet=function(key,card){
+      var box=document.getElementById('mod-outs');
+      var note=document.getElementById('mo-note');
+      if(note){ note.textContent='routing '+key+' → '+card+'… (restarting the module)'; }
+      fetch('/api/module_card',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({module:key,card:card})})
+        .then(function(r){return r.json();})
+        .then(function(res){
+          if(note){ note.textContent=(res&&res.ok)?('routed '+key+' → '+card):('route FAILED: '+((res&&res.error)||'?')); }
+          setTimeout(moLoad,1200);   // give the host time to reattach
+        })
+        .catch(function(){ if(note){note.textContent='route request failed';} setTimeout(moLoad,1200); });
+    };
+    document.addEventListener('DOMContentLoaded', moLoad);
+  })();
+  </script>
+
+  <div class="card blue">
+    <div class="card-label">BLUETOOTH OUT <span style="font-size:9px;color:var(--label);font-weight:normal">— where phone audio goes, and stays</span></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <select id="bt-out" onchange="btOutSet(this.value)" style="font-size:11px;padding:2px 4px"></select>
+      <span id="bt-out-state" style="font-size:9px;color:var(--muted)"></span>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      Bluetooth audio can't be patched in the grid below, so pick its output here;
+      it stays there across reconnects. OUT-A follows whatever card jackd owns.
+    </div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">1 · SOURCE <span id="src-hint" style="font-size:9px;color:var(--label);font-weight:normal">— pick one for mono, two for a stereo pair</span></div>
+    <div id="patch-src"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">2 · DESTINATION <span id="dst-hint" style="font-size:9px;color:var(--label);font-weight:normal">— one or two</span></div>
+    <div id="patch-dst"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">3 · CONNECT</div>
+    <div class="flags" style="gap:8px;align-items:center">
+      <button class="flag" id="btn-conn" onclick="patchDo('connect')">CONNECT</button>
+      <button class="flag warn" id="btn-disc" onclick="patchDo('disconnect')">DISCONNECT</button>
+      <span id="patch-plan" style="font-size:9px;color:var(--muted)"></span>
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      One source into two destinations feeds both sides. Two sources into one
+      destination sums them. Both are plain JACK wires — nothing is processed.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">CURRENT PATCH <span id="conn-count" style="font-size:9px;color:var(--label);font-weight:normal"></span></div>
+    <div id="patch-list"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      ★ marks a wire in the saved patch; those come back by themselves.
+      Every other wire is live only and is gone after the next power cycle
+      or module restart.
+    </div>
+  </div>
+
+  <div class="card blue">
+    <div class="card-label">SAVED PATCH <span id="saved-count" style="font-size:9px;color:var(--label);font-weight:normal"></span></div>
+    <div style="font-size:9px;color:var(--label);margin-bottom:6px">
+      A wire you make above is saved <b>the moment it connects</b>. Saved wires
+      come back after a power cycle or a module restart.
+    </div>
+    <div style="font-size:9px;color:var(--label);margin-bottom:6px">
+      Restoring only <b>adds</b> wires. A wire cut elsewhere while its ports are
+      still there (for example by a <b>/skipback</b> source change) is left cut
+      and shown below. Press LOAD to put it back.
+    </div>
+    <div class="flags" style="gap:8px;align-items:center">
+      <button class="flag" onclick="savedDo('save')">SAVE CURRENT</button>
+      <button class="flag" onclick="savedDo('load')">LOAD</button>
+      <button class="flag warn" onclick="savedDo('reset')">RESET</button>
+    </div>
+    <div id="saved-list" style="margin-top:8px"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+    <div style="font-size:9px;color:var(--label);margin-top:6px">
+      <b>SAVE CURRENT</b> makes every audio wire in the graph right now the
+      saved patch, whoever made it. <b>LOAD</b> re-applies it, including
+      anything marked cut. <b>RESET</b> forgets the saved patch without
+      unplugging anything. A saved wire whose port has been gone for
+      <span id="saved-stale">24</span> hours is dropped.
+    </div>
+    <div id="saved-health" style="font-size:9px;color:var(--muted);margin-top:4px"></div>
+  </div>
+
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/patch.js"></script>
+{% endblock %}

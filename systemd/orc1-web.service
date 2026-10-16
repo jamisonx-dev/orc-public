@@ -1,0 +1,21 @@
+[Unit]
+Description=ORC-1 Web Status Display
+Documentation=https://github.com/your/orc1
+After=network.target orc1.service
+# Soft dependency — web UI starts even if orc1 isn't running
+Wants=orc1.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_web.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Give Flask time to bind before we declare it ready
+TimeoutStartSec=10
+
+[Install]
+WantedBy=multi-user.target

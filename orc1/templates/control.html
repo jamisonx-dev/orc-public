@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · CTRL{% endblock %}
+{% block page_label %}CTRL{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/control.css">{% endblock %}
+
+{% block content %}
+<div class="page" id="ctrl-page">
+
+  <!-- UNIVERSAL PADS ──────────────────────────────────────── -->
+  <section class="card" id="universal-card">
+    <div class="card-hdr">UNIVERSAL CONTROL SURFACE</div>
+    <p class="card-sub">4 rows × 16 columns · each pad sends a note, CC or program change</p>
+
+    <div class="ucs-toolbar">
+      <span class="km-label">BANK</span>
+      <span id="ucs-banks" title="Pad bank — the Fire pages between these with GRID &lt; &gt;"></span>
+      <span class="km-label" style="margin-left:12px">LAYER</span>
+      <button class="btn accent" onclick="UCS.setLayer('base')"  id="ucs-tab-base">BASE</button>
+      <button class="btn"        onclick="UCS.setLayer('shift')" id="ucs-tab-shift">SHIFT</button>
+      <button class="btn"        onclick="UCS.setLayer('alt')"   id="ucs-tab-alt">ALT</button>
+      <button class="btn" style="margin-left:auto"
+              onclick="UCS.scanPorts()" id="ucs-scan-btn"
+              title="Scan for newly-connected USB/RTP MIDI outputs">SCAN PORTS</button>
+      <button class="btn" onclick="UCS.clearAll()">CLEAR BANK</button>
+    </div>
+
+    <!-- 4×16 pad grid -->
+    <div class="ucs-grid" id="ucs-grid"></div>
+
+    <!-- inline editor (shown when a pad is selected) -->
+    <div class="ucs-editor" id="ucs-editor" style="display:none">
+      <div class="ucs-ed-hdr">
+        <span id="ucs-ed-title">PAD —</span>
+        <button class="btn" onclick="UCS.clearPad()">CLEAR PAD</button>
+        <button class="btn" onclick="UCS.closeEditor()">✕</button>
+      </div>
+      <div class="ucs-ed-fields">
+        <label class="ucs-lbl">TYPE</label>
+        <div class="ucs-seg">
+          <button class="btn" id="ucs-type-note" onclick="UCS.setType('note')">NOTE</button>
+          <button class="btn" id="ucs-type-cc"   onclick="UCS.setType('cc')">CC</button>
+          <button class="btn" id="ucs-type-pc"   onclick="UCS.setType('pc')">PC</button>
+        </div>
+        <label class="ucs-lbl">NUMBER <span class="ucs-hint">(note/CC/PC)</span></label>
+        <input class="ucs-num" id="ucs-number" type="number" min="0" max="127" value="60"
+               oninput="UCS.preview()">
+        <div id="ucs-value-row">
+        <label class="ucs-lbl">VALUE <span class="ucs-hint">(vel/CC val)</span></label>
+        <input class="ucs-num" id="ucs-value" type="number" min="0" max="127" value="100"
+               oninput="UCS.preview()">
+        </div>
+        <label class="ucs-lbl">CHANNEL</label>
+        <input class="ucs-num" id="ucs-channel" type="number" min="1" max="16" value="1"
+               oninput="UCS.preview()">
+        <label class="ucs-lbl">PORT</label>
+        <select class="ucs-sel" id="ucs-port"><!-- populated by UCS.loadPorts() --></select>
+        <label class="ucs-lbl">LATCH</label>
+        <input type="checkbox" id="ucs-latch">
+        <span class="ucs-hint">hold = toggle instead of gate</span>
+      </div>
+      <button class="btn accent ucs-save" onclick="UCS.savePad()">SAVE PAD</button>
+    </div>
+  </section>
+
+  <!-- KNOB MAP ────────────────────────────────────────────── -->
+  <section class="card" id="knobmap-card">
+    <div class="card-hdr">FIRE KNOB MAP</div>
+    <p class="card-sub">4 knobs × 3 layers per view</p>
+
+    <div class="km-controls">
+      <label class="km-label">VIEW</label>
+      <select id="km-view" onchange="CTRL.loadKnobmap()"></select>
+      <span id="km-bank-wrap" style="display:none;margin-left:8px">
+        <label class="km-label">PAGE</label>
+        <select id="km-bank" onchange="CTRL.onKmBankChange()"></select>
+      </span>
+      <div class="km-layers" id="km-layers">
+        <button class="btn accent" onclick="CTRL.setLayer('base')"  id="km-tab-base">BASE</button>
+        <button class="btn"        onclick="CTRL.setLayer('shift')" id="km-tab-shift">SHIFT</button>
+        <button class="btn"        onclick="CTRL.setLayer('alt')"   id="km-tab-alt">ALT</button>
+      </div>
+    </div>
+
+    <div class="km-grid" id="km-grid">
+      <!-- 4 knob cells rendered by control.js -->
+    </div>
+    <div id="km-cc-panel" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      <span style="font-size:9px;color:var(--label);font-family:var(--fh);letter-spacing:.1em">CC OUT</span>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:5px">
+        <select id="km-cc-knob" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="0">KNOB 1</option><option value="1">KNOB 2</option>
+          <option value="2">KNOB 3</option><option value="3">KNOB 4</option>
+        </select>
+        <select id="km-cc-port" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 5px;border-radius:2px">
+          <option value="synth">synth</option>
+          <option value="pisound">pisound</option>
+        </select>
+        <!-- channel: 1-16, or (synth port) a MODULE that the knob follows around /matrix -->
+        <select id="km-cc-ch"
+               style="max-width:160px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 4px;border-radius:2px"><option value="1">ch 1</option></select>
+        <span style="font-size:9px;color:var(--label)">CH</span>
+        <input id="km-cc-num" type="number" min="0" max="127" value="74"
+               style="width:40px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:3px 4px;border-radius:2px">
+        <span style="font-size:9px;color:var(--label)">CC#</span>
+        <button class="btn accent" onclick="CTRL.assignCCOut()">ASSIGN</button>
+        <span id="km-cc-status" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+      <div style="margin-top:3px;font-size:8px;color:var(--muted)">Assigns the chosen knob (in the current view and layer) to send a CC on any port and channel. synth = internal bus, pisound = DIN out. On the synth port the channel can be a module, which follows its /matrix channel.</div>
+    </div>
+    <!-- FADER ROWS (universal only) — a row of 16 pads as a horizontal CC fader -->
+    <div id="uk-fader-panel" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      <span style="font-size:9px;color:var(--label);font-family:var(--fh);letter-spacing:.1em">FADER ROWS (this page)</span>
+      <div id="uk-fader-rows" style="margin-top:5px"></div>
+      <div style="margin-top:3px;font-size:8px;color:var(--muted)">Turn a pad row into a horizontal CC fader (16 pads = one 0–127 level). While set, it replaces that row's per-pad assignments.</div>
+    </div>
+    <p class="card-note">Changes apply immediately and persist across restarts.</p>
+  </section>
+
+  <!-- CHORD ROWS ──────────────────────────────────────────── -->
+  <section class="card" id="chordrows-card">
+    <div class="card-hdr">CHORD ROW ROUTING</div>
+    <p class="card-sub">Row 0 = top (highest octave) · Row 3 = bottom</p>
+    <div id="chord-rows-ui"><!-- rendered by control.js --></div>
+    <button class="btn accent mt" onclick="CTRL.saveChordRows()">SAVE ROWS</button>
+  </section>
+
+  <!-- CONTROLLER STATUS ───────────────────────────────────── -->
+  <section class="card" id="ctrl-status-card">
+    <div class="card-hdr">CONTROLLERS</div>
+    <div id="ctrl-devices">—</div>
+    <button class="btn mt" onclick="cmd('MIDI_RESCAN')">RESCAN</button>
+    <p class="card-note">Controllers hot-plug automatically every 3 s. RESCAN forces an immediate check.</p>
+  </section>
+
+  <!-- VOICE MAP ───────────────────────────────────────────── -->
+  <section class="card" id="voicemap-card">
+    <div class="card-hdr">VOICE MAP</div>
+    <p class="card-sub">Per-slot MIDI routing overrides. When empty, the chord preset's own routing is used.</p>
+    <div id="vm-display" class="vm-display">—</div>
+    <button class="btn accent mt" onclick="CTRL.clearVoiceMap()">CLEAR OVERRIDES</button>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/control.js"></script>{% endblock %}

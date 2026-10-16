@@ -1,0 +1,205 @@
+/* ORC-1 — shared styles for SYNTH / CHIP / DRUMS pages */
+
+/* ── channel tag ─────────────────────────────────────────── */
+.ch-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+  font-family: var(--fh);
+}
+
+/* ── compact param row (label + range + value) ───────────── */
+.param-list { display: flex; flex-direction: column; gap: 8px; }
+.prow {
+  display: grid;
+  grid-template-columns: 60px 1fr 32px;
+  gap: 6px;
+  align-items: center;
+}
+.plab {
+  font-size: 9px;
+  font-family: var(--fh);
+  letter-spacing: .1em;
+  color: var(--label);
+  text-align: right;
+}
+.pval {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--fh);
+  text-align: right;
+  min-width: 28px;
+}
+
+/* ── voice panel (CHIP / DRUMS) ──────────────────────────── */
+.voice-panel {
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.voice-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.voice-hdr::-webkit-details-marker { display: none; }
+.voice-name {
+  font-family: var(--fh);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--bright);
+  flex: 1;
+}
+.trig-btn {
+  font-family: var(--fh);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 6px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--teal-border);
+  color: var(--teal);
+  background: var(--teal-bg);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+  flex-shrink: 0;
+}
+.trig-btn:active { filter: brightness(1.5); transform: scale(.9); }
+
+.voice-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* details-based accordion */
+details.voice-panel > summary { list-style: none; }
+details.voice-panel[open] > summary .voice-name::before { content: '▾ '; color: var(--accent); }
+details.voice-panel:not([open]) > summary .voice-name::before { content: '▸ '; color: var(--label); }
+
+/* ── drum voice grid ─────────────────────────────────────── */
+.drum-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── GB Wave bank picker ─────────────────────────────────── */
+.bank-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.bank-btn {
+  font-family: var(--fh);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 5px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--dim);
+  color: var(--muted);
+  background: var(--btn-bg);
+  cursor: pointer;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+}
+.bank-btn.active {
+  color: var(--teal);
+  border-color: var(--teal-border);
+  background: var(--teal-bg);
+}
+.bank-btn:active { transform: scale(.9); }
+
+/* ── couple mode picker ──────────────────────────────────── */
+.couple-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.couple-btn {
+  font-family: var(--fh);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 5px 2px;
+  border-radius: 3px;
+  border: 1px solid var(--dim);
+  color: var(--muted);
+  background: var(--btn-bg);
+  cursor: pointer;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .12s;
+}
+.couple-btn.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.couple-btn:active { transform: scale(.9); }
+
+/* ── sample slot list ────────────────────────────────────── */
+.sample-list { display: flex; flex-direction: column; gap: 4px; }
+.sample-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.sample-item:last-child { border-bottom: none; }
+.sample-slot {
+  font-family: var(--fh);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+.sample-name { flex: 1; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sample-loaded { font-size: 9px; color: var(--live); font-family: var(--fh); letter-spacing: .08em; }
+.sample-unloaded { font-size: 9px; color: var(--dead); font-family: var(--fh); letter-spacing: .08em; }
+
+/* ── MIDI channel picker rows ────────────────────────────────── */
+.ch-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.ch-sel {
+  background: var(--btn-bg);
+  color: var(--body);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  font-family: var(--fh);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 5px 8px;
+  width: 100%;
+  cursor: pointer;
+}
+.ch-sel:focus { outline: 1px solid var(--accent); }

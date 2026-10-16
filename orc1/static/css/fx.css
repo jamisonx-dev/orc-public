@@ -1,0 +1,95 @@
+/* FX page */
+.port-grid {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 3px 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.port-label {
+  font-size: 9px;
+  color: var(--label);
+  font-family: var(--fh);
+  letter-spacing: .1em;
+  text-align: right;
+}
+.port-inp {
+  background: var(--dim);
+  border: 1px solid var(--border);
+  color: var(--bright);
+  font-family: var(--fs);
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  width: 100%;
+  box-sizing: border-box;
+}
+.port-inp:focus { outline: 1px solid var(--accent); }
+
+.fx-chain {
+  margin-bottom: 6px;
+  transition: border-color .2s;
+}
+.fx-chain.fx-running {
+  border-color: var(--teal-border);
+  background: var(--teal-bg);
+}
+.chain-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.chain-name {
+  font-family: var(--fh);
+  font-size: 11px;
+  letter-spacing: .1em;
+  color: var(--bright);
+}
+.chain-slot {
+  font-size: 8px;
+  color: var(--accent);
+  font-family: var(--fh);
+  letter-spacing: .1em;
+  margin-left: 8px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.chain-desc {
+  font-size: 9px;
+  color: var(--muted);
+  margin: 4px 0 6px;
+}
+.btn-run {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+input[type="range"]:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+/* ── FX rack (3-slot series stack) ───────────────────────────────────────── */
+.rack-flow {
+  font-family: var(--fh, monospace);
+  font-size: 9px;
+  letter-spacing: .06em;
+  color: var(--muted);
+  background: var(--card-bg, rgba(255,255,255,.03));
+  border: 1px solid var(--accent-border, rgba(255,255,255,.08));
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.run-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal, #3ad);
+  box-shadow: 0 0 6px var(--teal, #3ad);
+  display: inline-block;
+}

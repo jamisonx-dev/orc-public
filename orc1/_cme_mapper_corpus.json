@@ -1,0 +1,590 @@
+{
+"source": "UxMIDI Tools 8.5 / U6MIDI Pro fw V7.0 writes, captured 2026-09-30 (_planning/cme_tools/MAPPER_FORMAT.md)",
+"entries": [
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 07 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 0F 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 2F 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 6F 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 6F 01 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 6B 01 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 63 01 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 43 01 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 01 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_inputs",
+"step": "?",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Note Off",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 04 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Ctrl Change",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 08 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Prog Change",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 0C 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Pitch bend",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 10 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Chann Aftertouch",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 14 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Key Aftertouch",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 18 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Filter message",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 1C 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Note On",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Note On",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 00 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Note Off",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 01 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Ctrl Change",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Prog Change",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 03 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Pitch bend",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 04 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Chann Aftertouch",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 05 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Key Aftertouch",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 06 70 03 00 00 07 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Notes transpose",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 05 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src type = Global channel update",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 08 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst type = Note On",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 2",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 71 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 3",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 72 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 5",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 74 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 9",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 78 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 16",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 7F 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch min = 1",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 15",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 60 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 14",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 50 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 12",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 30 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 8",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 02 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 1",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 00 02 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src ch max = 16",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 2",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 40 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 3",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 01 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 5",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 02 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 9",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 04 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 16",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 40 07 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst ch = 1",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Follow#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 05 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Transpose channel#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 10 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Transpose channel#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Keep original#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 08 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Keep original#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 1",
+"hex": "00 70 2F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 2",
+"hex": "00 70 4F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 4",
+"hex": "00 70 0F 41 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 8",
+"hex": "00 70 0F 42 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 16",
+"hex": "00 70 0F 44 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 32",
+"hex": "00 70 0F 48 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 64",
+"hex": "00 70 0F 50 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 min = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 max = 126",
+"hex": "00 70 0F 00 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 max = 64",
+"hex": "00 70 0F 00 20 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v1 max = 127",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v2 min = 1",
+"hex": "01 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v2 min = 64",
+"hex": "00 74 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v2 min = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v2 max = 126",
+"hex": "00 60 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "src v2 max = 127",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v1 min = 1",
+"hex": "00 70 0F 40 3F 00 70 2F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v1 min = 64",
+"hex": "00 70 0F 40 3F 00 70 0F 50 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v1 min = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v1 max = 126",
+"hex": "00 70 0F 40 3F 00 70 0F 00 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v1 max = 127",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Invert#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 02 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Invert#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Curve#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 20 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Curve#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Use input value 2#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 0C 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Compress/Expand#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 0C 08 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Compress/Expand#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 0C 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Use input value 2#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Follow#1 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 06 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Follow#2 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v2 min = 1",
+"hex": "00 70 0F 40 3F 01 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v2 min = 64",
+"hex": "00 70 0F 40 3F 00 74 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v2 min = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v2 max = 126",
+"hex": "00 70 0F 40 3F 00 60 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "dst v2 max = 127",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Invert#1 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 04 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Invert#1 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Curve#1 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 04 2D"
+},
+{
+"run": "sweep_full",
+"step": "Curve#1 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Use input value 1#0 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 01 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Compress/Expand#1 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 11 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Compress/Expand#1 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 01 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Use input value 1#0 = False",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 02 00 00 00 2D"
+},
+{
+"run": "sweep_full",
+"step": "Follow#2 = True",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 06 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "octave = -4",
+"hex": "00 70 0F 40 3F 00 70 0F 00 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "octave = -1",
+"hex": "00 70 0F 40 3F 00 70 6F 00 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "octave = +1",
+"hex": "00 70 0F 40 3F 00 70 2F 01 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "octave = +4",
+"hex": "00 70 0F 40 3F 00 70 0F 02 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "octave = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "semitone = -1",
+"hex": "00 70 0F 40 3F 00 70 0F 41 17 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "semitone = +1",
+"hex": "00 70 0F 40 3F 00 70 0F 41 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "semitone = +12",
+"hex": "00 70 0F 40 3F 00 70 0F 01 1E 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "semitone = +48",
+"hex": "00 70 0F 40 3F 00 70 0F 01 30 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "semitone = 0",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 1%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 20 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 2%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 40 00 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 4%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 01 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 8%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 02 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 16%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 04 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 32%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 08 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 64%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 10 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = Skip 100%",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 19 00 2D"
+},
+{
+"run": "sweep_transpose",
+"step": "random skip = None",
+"hex": "00 70 0F 40 3F 00 70 0F 01 18 07 70 03 00 00 04 00 00 00 2D"
+},
+{
+"run": "pilot4",
+"step": "dst type = Note On",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 01 00 00 07 00 00 00 2D"
+},
+{
+"run": "pilot4",
+"step": "input = USB In 1 (mouse)",
+"hex": "00 70 0F 40 3F 00 70 0F 40 3F 02 70 03 00 00 07 00 00 00 2D"
+}
+]
+}

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · PADS{% endblock %}
+{% block page_label %}PAD MAPS{% endblock %}
+{% block page_css %}
+<style>
+  #pm-page { max-width: 920px; }
+  .pm-status { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px; font-size:13px; }
+  #pm-flash { color:#0a7; font-size:12px; }
+  #pm-flash.err { color:#c33; }
+  .pm-help { font-size:12px; opacity:.7; margin:0 0 10px; line-height:1.45; }
+  .pm-tabs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px; }
+  .pm-tabs .btn.on { outline:2px solid var(--accent); background:var(--accent-bg); }
+  .pm-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
+  .pm-row .lbl { min-width:88px; font-weight:600; }
+  #pm-page select, #pm-page input { font:inherit; padding:4px 6px; border-radius:5px;
+    border:1px solid rgba(128,128,128,.4); background:transparent; color:inherit; max-width:100%; }
+  #pm-page input.num { width:58px; }
+  table.pm { width:100%; border-collapse:collapse; font-size:13px; }
+  table.pm th { text-align:left; font-size:11px; letter-spacing:.06em; opacity:.6; font-weight:600; padding:2px 6px 6px; }
+  table.pm td { padding:3px 6px; vertical-align:middle; }
+  table.pm td.key { white-space:nowrap; font-weight:700; }
+  table.pm td.key small { font-weight:400; opacity:.6; }
+  table.pm td.key small:not(:empty) { display:block; }   /* "row 1 · col 3" / "snare" under the pad: keeps the column narrow */
+  table.pm tr.hit td { background:var(--accent-bg); transition:none; }
+  table.pm tr td { transition:background .6s; }
+  .pm-what { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  #pm-learn.on { outline:2px solid #c33; color:#c33; }
+  #pm-last { font-size:12px; opacity:.8; }
+  .pm-pair { display:inline-flex; gap:8px; align-items:center; white-space:nowrap; }   /* a label never wraps away from its box */
+  .pm-pair[hidden] { display:none; }
+  #pm-match { width:220px; max-width:100%; }
+  .pm-col { display:flex; flex-wrap:nowrap; gap:5px; align-items:center; margin-top:4px; font-weight:400; }
+  .pm-sw { display:inline-block; flex:none; width:14px; height:14px; border-radius:3px; border:1px solid rgba(128,128,128,.5);
+    background:#000; vertical-align:middle; }
+  @media (max-width: 640px) { table.pm th.lab, table.pm td.lab { display:none; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page" id="pm-page">
+  <div class="pm-status">
+    <span id="pm-src">—</span>
+    <span id="pm-flash"></span>
+  </div>
+  <p class="pm-help">Give any MIDI device's pads (or notes / CCs) their own job: keep playing
+    what they play, play a different note on a <b>named module</b>, send a CC, or run an
+    <b>action</b> (the same list as the FCB pedal). Pads you don't list pass through untouched.
+    A device is matched by <b>name</b>. Turn on <b>LEARN</b> and hit a pad to add it.</p>
+  <p class="pm-help">Pads are <b>triggers</b>: an action fires on the hit, not on release,
+    and a second hit within 80 ms is ignored as a double-trigger. Hold-style actions aren't offered.</p>
+
+  <section class="card">
+    <div class="pm-tabs" id="pm-tabs"></div>
+    <div class="pm-row">
+      <span class="lbl">Add device</span>
+      <select id="pm-adddev"></select>
+      <button class="btn" id="pm-add" type="button">ADD</button>
+    </div>
+  </section>
+
+  <section class="card" id="pm-dev" hidden>
+    <div class="pm-row">
+      <span class="lbl">Matches</span>
+      <input id="pm-match" type="text" style="width:220px" title="Any input whose name contains this text">
+      <span class="pm-pair"><span class="lbl" style="min-width:auto">Min velocity</span>
+        <input class="num" id="pm-minvel" type="number" min="1" max="127"></span>
+      <button class="btn" id="pm-learn" type="button">LEARN</button>
+      <span id="pm-last"></span>
+      <button class="btn" id="pm-del" type="button" style="margin-left:auto">REMOVE DEVICE</button>
+    </div>
+    <div class="pm-row">
+      <label title="Only for owner's Fire firmware ('ORC FW ...'): the ORC draws the pads"><input type="checkbox" id="pm-surface">
+        <b>Surface</b>: the ORC draws on this device's pads</label>
+      <span id="pm-surfch-wrap" class="pm-pair">
+        <button class="btn" id="pm-show" type="button" title="Put the Fire in surface mode now">SHOW ON FIRE</button></span>
+    </div>
+    <p class="pm-help" id="pm-surfhelp">A <b>surface</b> (our Fire firmware, "ORC FW ...") gets this layout whenever it
+      shows up, but stays on its own sequencer until you ask: press <b>SHOW ON FIRE</b> here, or <b>BROWSER &gt; ORC
+      surface</b> on the Fire. Then each pad (pad 0 = top left .. 63) does what you set here and shows the colour you
+      pick; a held pad lights brighter. Pads you haven't listed are silent. The surface talks to the ORC directly and
+      uses <b>no MIDI channel</b>, so the Fire's own sequencer keeps every channel and its notes always pass through
+      untouched. Tick Surface first, then SHOW ON FIRE, LEARN and tap pads. On the Fire, any mode button (STEP / NOTE /
+      DRUM / PERFORM) goes back to the sequencer.</p>
+    <table class="pm">
+      <thead><tr><th>PAD</th><th class="lab">NAME</th><th>DOES</th><th></th></tr></thead>
+      <tbody id="pm-rows"></tbody>
+    </table>
+    <p class="pm-help" id="pm-empty">No pads yet. Turn on LEARN and hit one.</p>
+  </section>
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/pads.js"></script>
+{% endblock %}

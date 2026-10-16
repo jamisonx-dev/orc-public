@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · SEQ{% endblock %}
+{% block page_label %}SEQ{% endblock %}
+
+{% block page_css %}<link rel="stylesheet" href="/static/css/seq.css">{% endblock %}
+
+{% block content %}
+  <div class="transport">
+    <button class="tbtn" id="btn-stop"  onclick="cmd('SEQ_STOP')">◼ STOP</button>
+    <button class="tbtn" id="btn-play"  onclick="cmd('SEQ_PLAY')">▶ PLAY</button>
+    <button class="tbtn" id="btn-rec"   onclick="cmd('SEQ_TOGGLE_RECORD')">⏺ REC</button>
+    <div class="bpm" id="bpm-disp">—bpm</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;padding:4px 0 8px;border-bottom:1px solid var(--border)">
+    <button class="tbtn" style="flex:none;padding:6px 14px;font-size:8px" onclick="savePattern()">SAVE PATTERN</button>
+    <span id="save-note" style="font-size:9px;color:var(--muted)">saved patterns load on restart</span>
+  </div>
+  <div class="rec-bar">
+    <span class="rec-label">RECORD INTO TRACK</span>
+    <select class="rec-track-sel" id="rec-track-sel" onchange="setRecTrack(this.value)"></select>
+    <span id="rec-status" style="flex:1;text-align:right"></span>
+  </div>
+
+  <div class="section-label">TRACKS</div>
+  <div id="tracks"></div>
+  <div class="add-card" onclick="cmd('SEQ_ADD')">+ ADD TRACK</div>
+  <div class="toast" id="toast"></div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/seq.js"></script>{% endblock %}

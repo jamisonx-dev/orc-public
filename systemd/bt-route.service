@@ -1,0 +1,20 @@
+[Unit]
+Description=ORC1 Bluetooth output router (pins bluealsa-aplay to saved output)
+# Needs jackd up to be a client; follows a jackd restart (card switch) so it
+# reconnects to the fresh server. orc-bt-jack is what creates the clients we wire.
+After=orc1-jackd.service orc-bt-jack.service
+BindsTo=orc1-jackd.service
+Wants=orc-bt-jack.service
+
+[Service]
+Type=simple
+User=pibox
+Group=pibox
+Environment=JACK_NO_START_SERVER=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_bt_route.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

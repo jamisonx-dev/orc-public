@@ -1,0 +1,26 @@
+[Unit]
+# TC-Helicon Perform-VE capture bridge (device -> JACK), 8ch @ 48k.
+#
+# Requires performve-out because the device emits DIGITAL SILENCE on capture
+# unless a USB playback stream is open -- and alsa_in does NOT report an error
+# in that state, so a misordered start looks healthy and records nothing.
+# The start script additionally waits for performve-out's ports before opening
+# capture; Requires=/After= alone is not sufficient (started != streaming).
+Description=Perform-VE capture as JACK client (8ch)
+After=orc1-jackd.service performve-out.service
+BindsTo=orc1-jackd.service
+Requires=performve-out.service
+
+[Service]
+User=pibox
+Environment=JACK_NO_START_SERVER=1
+ExecStart=/home/pibox/orc/orc1/performve_bridge_start.sh in
+Restart=on-failure
+RestartSec=5
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=70
+LimitRTPRIO=70
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

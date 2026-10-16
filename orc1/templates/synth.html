@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · SYNTH{% endblock %}
+{% block page_label %}SYNTH{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/css/voices.css">
+{% endblock %}
+
+{% block content %}
+  <div class="section-lbl">POLY VOICE <span class="ch-tag" id="ch-tag-poly">CH —</span></div>
+
+  <div class="card">
+    <div class="card-label">WAVEFORM</div>
+    <div class="seg btn-row">
+      <button class="btn wave-btn" data-val="16"  onclick="setWaveform(16)">SINE</button>
+      <button class="btn wave-btn active" data-val="48" onclick="setWaveform(48)">SAW</button>
+      <button class="btn wave-btn" data-val="80"  onclick="setWaveform(80)">SQ</button>
+      <button class="btn wave-btn" data-val="112" onclick="setWaveform(112)">TRI</button>
+    </div>
+
+    <hr class="card-divider">
+    <div class="card-label">ENVELOPE</div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">ATK</span>
+        <input type="range" min="0" max="127" value="6"  id="sl-atk" oninput="onCC(POLY_CH,8,+this.value,'v-atk')">
+        <span class="pval" id="v-atk">6</span>
+      </div>
+      <div class="prow">
+        <span class="plab">DEC</span>
+        <input type="range" min="0" max="127" value="64" id="sl-dec" oninput="onCC(POLY_CH,9,+this.value,'v-dec')">
+        <span class="pval" id="v-dec">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">SUS</span>
+        <input type="range" min="0" max="127" value="89" id="sl-sus" oninput="onCC(POLY_CH,10,+this.value,'v-sus')">
+        <span class="pval" id="v-sus">89</span>
+      </div>
+      <div class="prow">
+        <span class="plab">REL</span>
+        <input type="range" min="0" max="127" value="78" id="sl-rel" oninput="onCC(POLY_CH,11,+this.value,'v-rel')">
+        <span class="pval" id="v-rel">78</span>
+      </div>
+    </div>
+
+    <hr class="card-divider">
+    <div class="card-label">FILTER</div>
+    <div class="seg btn-row" style="margin-bottom:10px">
+      <button class="btn fmode-btn active" data-val="21"  onclick="setFilterMode(21)">LP</button>
+      <button class="btn fmode-btn"        data-val="64"  onclick="setFilterMode(64)">HP</button>
+      <button class="btn fmode-btn"        data-val="106" onclick="setFilterMode(106)">BP</button>
+    </div>
+    <div class="param-list">
+      <div class="prow">
+        <span class="plab">CUTOFF</span>
+        <input type="range" min="0" max="127" value="64" id="sl-cut" oninput="onCC(POLY_CH,74,+this.value,'v-cut')">
+        <span class="pval" id="v-cut">64</span>
+      </div>
+      <div class="prow">
+        <span class="plab">RES</span>
+        <input type="range" min="0" max="127" value="0"  id="sl-res" oninput="onCC(POLY_CH,71,+this.value,'v-res')">
+        <span class="pval" id="v-res">0</span>
+      </div>
+    </div>
+
+    <hr class="card-divider">
+    <div class="card-label">OUTPUT</div>
+    <div class="param-list" style="margin-bottom:12px">
+      <div class="prow">
+        <span class="plab">LEVEL</span>
+        <input type="range" min="0" max="127" value="64" id="sl-lvl" oninput="onCC(POLY_CH,13,+this.value,'v-lvl')">
+        <span class="pval" id="v-lvl">64</span>
+      </div>
+    </div>
+    <div style="font-family:var(--fh);font-size:9px;letter-spacing:.1em;color:var(--label);margin-bottom:8px">OCTAVE</div>
+    <div class="seg btn-row">
+      <button class="btn oct-btn" data-val="0"   onclick="setOctave(0)">-2</button>
+      <button class="btn oct-btn" data-val="32"  onclick="setOctave(32)">-1</button>
+      <button class="btn oct-btn active" data-val="64" onclick="setOctave(64)">0</button>
+      <button class="btn oct-btn" data-val="96"  onclick="setOctave(96)">+1</button>
+      <button class="btn oct-btn" data-val="127" onclick="setOctave(127)">+2</button>
+    </div>
+
+    <hr class="card-divider">
+    <button class="btn accent" style="width:100%;padding:11px" onclick="audition(POLY_CH,60)">▶ AUDITION NOTE</button>
+  </div>
+
+  <div class="section-lbl" style="margin-top:10px">MIDI IN CHANNEL</div>
+  <div class="card">
+    <div style="font-size:10px;color:var(--label);line-height:1.5">
+      This page follows the channel the poly synth is bound to (shown next to
+      the title). To move POLY to another channel, use
+      <a href="/matrix" class="orc-link">MATRIX &rarr;</a>
+    </div>
+  </div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/synth.js"></script>{% endblock %}

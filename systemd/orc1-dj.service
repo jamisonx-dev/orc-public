@@ -1,0 +1,63 @@
+[Unit]
+Description=ORC-1 DJ mode: Mixxx fullscreen on the HDMI monitor, Mixtrack handed to Mixxx (on demand only)
+# Same kiosk shape as orc1-daw.service (read its notes): NO [Install] section,
+# own logind session on VT7. Start with `sudo ~/orc/orc1/daw/daw_mode.sh start
+# dj` (or the /system DJ buttons); quitting Mixxx ends the X session and the
+# unit stops by itself. It shares VT7 / display :0 with DAW mode, so the two
+# conflict (starting one stops the other).
+#
+# The Mixtrack: while /run/orc1-dj-active exists the brain ignores the
+# Mixtrack and closes its LED output (Mixxx drives it with its own
+# "Numark Mixtrack (Pro) 3" mapping). The marker is made before Mixxx starts
+# and removed however the unit ends, then the brain is poked to take the
+# Mixtrack back (it also re-checks every 3 s on its own).
+After=orc1-jackd.service systemd-user-sessions.service
+Wants=orc1-jackd.service
+Conflicts=getty@tty7.service orc1-daw.service orc1-visuals.service orc1-hud.service
+# Copy the memory caps onto the X session's logind scope from a SEPARATE,
+# tty-less unit -- NEVER an ExecStartPost here: it vhangups tty7 while xinit
+# starts and kills it (see orc1-kiosk-cap@.service).
+Wants=orc1-kiosk-cap@%N.service
+
+[Service]
+Type=simple
+User=pibox
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+WorkingDirectory=/home/pibox
+# Mixxx must join the ORC's JACK server, never start a competing one.
+Environment=JACK_NO_START_SERVER=1
+ExecStartPre=+/home/pibox/orc/orc1/daw/daw_mode.sh mixtrack release
+# X must start on the ACTIVE console: on an inactive VT logind hands Xorg a
+# PAUSED drm fd, it finds "no primary bus", falls back to fbdev + a modesetting
+# GPU screen and aborts (signal 6). Measured 2026-10-05: tty1 autologin was
+# active, every start died in 0.5 s; chvt 7 first = starts. "-" = never blocks.
+ExecStartPre=-+/usr/bin/chvt 7
+ExecStart=/usr/bin/xinit /home/pibox/orc/orc1/daw/dj_session.sh -- :0 vt7 -nolisten tcp -keeptty
+Restart=no
+# Hand the Mixtrack back, then bring the engines back if engines-off stopped
+# them (both no-ops when there is nothing to undo). `+` = run as root.
+ExecStopPost=+/home/pibox/orc/orc1/daw/daw_mode.sh mixtrack reclaim
+ExecStopPost=+/home/pibox/orc/orc1/daw/daw_mode.sh restore
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+# NEEDS the memory cgroup (cgroup_enable=memory in /boot/firmware/cmdline.txt,
+# added 2026-09-29; the RPi kernel disables it by default).
+# SKIPBACK COMES FIRST. MEASURED 2026-09-29: Mixxx's library scanner hit ~1 GB
+# RSS on ~900 MB of skipback grabs, MemAvailable fell to 455 MB and the Pi
+# swapped. Cap Mixxx (throttled above MemoryHigh, hard stop at MemoryMax) and
+# make it the OOM killer's first pick, never the recorder.
+# Loosened same day (was 700M/900M): squeezing a bloated Mixxx made ITS audio
+# thread late (14 graph xruns in 1 s when the cap was applied mid-scan; 0
+# skipback gaps). Since skipback-record now has MemoryMin/MemoryLow of its own
+# (70-memory-protect.conf), this cap only has to stop a runaway.
+MemoryHigh=900M
+MemoryMax=1100M
+OOMScoreAdjust=800

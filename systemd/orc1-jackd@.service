@@ -1,0 +1,30 @@
+[Unit]
+# Per-card JACK server, one instance per card (per-host-jackd model, 2026-09-22).
+#   sudo systemctl start orc1-jackd@M3
+# A NAMED jack server (jackd -n %i) that coexists with the sole default server
+# (orc1-jackd.service, the main card). Started ON DEMAND from /patch when a
+# module is routed to a non-main card; a module host attaches with
+# JACK_SERVER=%i. One ALSA device each, no bridging between them.
+Description=ORC-1 per-card JACK server for %i
+After=sound.target
+# Bound restart attempts: if the card is absent (a USB device unplugged), opening
+# hw:%i fails instantly and Restart=on-failure would otherwise loop forever every
+# 2s. Give up after 5 tries in 30s so an absent-card assignment cannot spin the
+# CPU; re-routing or replugging + a manual start brings it back.
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pibox
+Environment=JACK_NO_AUDIO_RESERVATION=1
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+ExecStart=/home/pibox/orc/orc1/orc1_jackd_card_start.sh %i
+Restart=on-failure
+RestartSec=2
+
+# NO [Install] SECTION, DELIBERATELY -- lazy, started on demand and torn down
+# when no module needs the card. Each server is a real ALSA device + clock
+# domain; mounting every card at boot would waste the machine (same rule as
+# orc1-bridge@.service).

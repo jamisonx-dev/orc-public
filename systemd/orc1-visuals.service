@@ -1,0 +1,42 @@
+[Unit]
+Description=ORC-1 VISUALS mode: line-drawing patterns on the HDMI monitor (on demand only)
+# Same kiosk shape as orc1-daw.service (read its notes): NO [Install] section,
+# own logind session on VT7, display :0. Control with
+# `sudo ~/orc/orc1/daw/visuals.sh start|stop|next|set <name>`.
+# DAW and DJ mode conflict with this unit, so starting either one replaces
+# the visuals (visuals.sh start refuses while one of them is running).
+# The renderer itself is not a JACK client. It hears the audio through
+# orc1-vistap.service (a tiny C listen-only client, pulled in here), or
+# skipback's RAM ring when the tap is missing.
+After=systemd-user-sessions.service
+Conflicts=getty@tty7.service orc1-daw.service orc1-dj.service orc1-hud.service
+# Copy the memory caps onto the X session's logind scope from a SEPARATE,
+# tty-less unit -- NEVER an ExecStartPost here: it vhangups tty7 while xinit
+# starts and kills it (see orc1-kiosk-cap@.service).
+Wants=orc1-kiosk-cap@%N.service
+Wants=orc1-vistap.service
+
+[Service]
+Type=simple
+User=pibox
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+WorkingDirectory=/home/pibox
+# X must start on the ACTIVE console: on an inactive VT logind hands Xorg a
+# PAUSED drm fd, it finds "no primary bus", falls back to fbdev + a modesetting
+# GPU screen and aborts (signal 6). Measured 2026-10-05: tty1 autologin was
+# active, every start died in 0.5 s; chvt 7 first = starts. "-" = never blocks.
+ExecStartPre=-+/usr/bin/chvt 7
+ExecStart=/usr/bin/xinit /home/pibox/orc/orc1/daw/visuals_session.sh -- :0 vt7 -nolisten tcp -keeptty
+Restart=no
+# SKIPBACK COMES FIRST: a screensaver never gets to crowd the recorder.
+MemoryHigh=200M
+MemoryMax=300M
+OOMScoreAdjust=900

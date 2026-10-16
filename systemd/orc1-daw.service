@@ -1,0 +1,43 @@
+[Unit]
+Description=ORC-1 DAW mode: REAPER fullscreen on the HDMI monitor (on demand only)
+# The ORC stays headless: this unit has NO [Install] section, so it never
+# starts at boot. Start it with `sudo systemctl start orc1-daw`; quitting
+# REAPER ends the X session and the unit stops by itself.
+#
+# Why a service and not `startx` over SSH: a rootless Xorg may only open the
+# monitor/input devices from a logind session that owns a VT on seat0.
+# PAMName=login + TTYPath gives this unit exactly that (the usual kiosk setup),
+# without installing the setuid Xorg wrapper.
+After=orc1-jackd.service systemd-user-sessions.service
+Wants=orc1-jackd.service
+Conflicts=getty@tty7.service orc1-dj.service orc1-visuals.service orc1-hud.service
+
+[Service]
+Type=simple
+User=pibox
+PAMName=login
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+WorkingDirectory=/home/pibox
+# REAPER must join the ORC's JACK server, never start a competing one.
+Environment=JACK_NO_START_SERVER=1
+# X must start on the ACTIVE console: on an inactive VT logind hands Xorg a
+# PAUSED drm fd, it finds "no primary bus", falls back to fbdev + a modesetting
+# GPU screen and aborts (signal 6). Measured 2026-10-05: tty1 autologin was
+# active, every start died in 0.5 s; chvt 7 first = starts. "-" = never blocks.
+ExecStartPre=-+/usr/bin/chvt 7
+ExecStart=/usr/bin/xinit /home/pibox/orc/orc1/daw/daw_session.sh -- :0 vt7 -nolisten tcp -keeptty
+Restart=no
+# Engines-off DAW mode (daw_mode.sh start engines-off) stopped the module
+# hosts; bring them back however the DAW ends. A no-op otherwise. `+` = run
+# as root (systemctl start needs it).
+ExecStopPost=+/home/pibox/orc/orc1/daw/daw_mode.sh restore
+# REAPER's audio thread wants RT scheduling, like the module hosts.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity

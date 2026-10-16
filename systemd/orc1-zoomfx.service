@@ -1,0 +1,20 @@
+[Unit]
+Description=ORC-1 Zoom MultiStomp handler (the "zoomfx" module: CCs on its channel -> pedal SysEx)
+After=orc1.service
+Wants=orc1.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_zoomfx.py
+Restart=on-failure
+RestartSec=5
+# Tiny helper, not a JACK client: it must never compete with the audio side (skipback comes first)
+Nice=10
+MemoryMax=64M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

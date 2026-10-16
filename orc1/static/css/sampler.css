@@ -1,0 +1,9 @@
+/* sampler.css — Phase 6 — ORC-1 SAMPLER page
+   All design tokens and component classes (card, flag, flags, orc-select, etc.)
+   come from shared.css loaded by base.html.
+   This file is intentionally minimal — only sampler-specific overrides live here. */
+
+/* Slightly taller waveform canvas on the sampler page vs. the compact main-page card */
+#decks canvas {
+  height: 52px;
+}

@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · DRUMS{% endblock %}
+{% block page_label %}DRUMS{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/css/voices.css">
+{% endblock %}
+
+{% block content %}
+  <div class="section-lbl">909 DRUM VOICES <span class="ch-tag" id="ch-tag-drums">CH —</span></div>
+  <div class="drum-grid" id="drum-panels">
+    <div style="color:var(--muted);font-size:10px;padding:8px">Loading…</div>
+  </div>
+
+  <div style="font-size:9px;color:var(--label);text-align:center;padding:4px 0">
+    Sample slots: <a href="/sampler" class="orc-link">SAMPLER →</a>
+  </div>
+
+  <div class="section-lbl" style="margin-top:10px">MIDI IN CHANNEL</div>
+  <div class="card">
+    <div style="font-size:10px;color:var(--label);line-height:1.5">
+      This page follows the channel the drums are bound to (shown next to
+      the title). To move DRUMS to another channel, use
+      <a href="/matrix" class="orc-link">MATRIX &rarr;</a>
+    </div>
+  </div>
+
+  <div style="font-size:9px;color:var(--label);text-align:center;padding:4px 0">
+    Pattern programming → <a href="/seq" class="orc-link">SEQ →</a>
+  </div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/drums.js"></script>{% endblock %}

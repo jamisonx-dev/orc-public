@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · BSP{% endblock %}
+{% block page_label %}BSP{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/beatstep.css">{% endblock %}
+
+{% block content %}
+<div class="page" id="bsp-page">
+
+  <div class="bsp-header">
+    <span id="bsp-conn" class="bsp-conn dead">○ CHECKING…</span>
+    <button class="btn accent" id="bsp-refresh" onclick="BSP.refresh()">⟳ REFRESH FROM DEVICE</button>
+    <span id="bsp-flash" class="bsp-flash"></span>
+  </div>
+
+  <p class="card-sub" style="margin:0 0 10px 2px">
+    All BeatStep&nbsp;Pro global settings, showing the device's <b>current
+    values</b> (read when the page loads; press REFRESH to read again). Segments and
+    dropdowns send on change; number fields send on SET.
+  </p>
+
+  <section class="card">
+    <div class="card-label">CONTROL ASSIGN</div>
+    <p class="card-sub" style="margin:0 0 8px 0">
+      Reassign any knob, pad or step encoder. Pick a control, set its mode, then
+      its parameters (CC number, channel, note, range). The fields depend on the mode.
+    </p>
+    <div id="bsp2"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">PROJECT FEEL</div>
+    <p class="card-sub" style="margin:0 0 8px 0">
+      Project-wide <b>Swing</b>, <b>Randomness</b> and <b>Probability</b>, read back
+      from the device. Per-sequencer settings (Scale, Transpose, Direction, Time
+      Division, Length…) and step content are edited on the unit.
+    </p>
+    <div id="bsp3"></div>
+  </section>
+
+  <div id="bsp-body"></div>
+
+</div>
+{% endblock %}
+
+{% block page_js %}<script src="/static/js/beatstep.js"></script>{% endblock %}

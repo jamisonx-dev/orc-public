@@ -1,0 +1,17 @@
+{
+  "_about": "Per-control ride-live map, MEASURED on this rig by fxprobe.py (2026-09-03): sweep each control through the real jalv+FIFO path while a tone runs through, score transients. 'ride' = smooth to sweep during performance; 'set' = clicks/zippers, set it while parked. LV2 control ports step once per audio block, so the host CANNOT smooth 'set' controls by writing faster -- the fix for dry/wet + level is an audio-rate host mix (see AUDIO_HOST_SPLIT / fx notes). Reverb size/decay is intrinsically un-rideable. Unprobed keepers (purestdrive, baxandall, Equalizer8Band, Compressor) are omitted until measured.",
+  "capacitor2":    {"category": "EQ/Filter",  "ride": ["lowpass", "highpass"], "set": ["drywet", "nonlin"]},
+  "vibrato":       {"category": "Modulation", "ride": ["speed", "depth", "fmspeed", "fmdepth"], "set": ["invwet"]},
+  "VintageDelay":  {"category": "Delay",      "ride": ["time_l", "time_r", "feedback", "amount", "hz", "width", "dry", "ms"], "set": ["subdiv", "level_in", "level_out", "mix_mode", "medium", "bpm"]},
+  "RotarySpeaker": {"category": "Modulation", "ride": ["shift", "am_depth", "mod_depth", "treble_speed", "bass_speed", "vib_speed", "mic_distance", "spacing", "reflection"], "set": ["level_in", "level_out"]},
+  "Reverb":        {"category": "Reverb",     "ride": ["decay_time", "hf_damp", "bass_cut", "treble_cut", "predelay"], "set": ["room_size", "diffusion", "dry", "amount", "level_in", "level_out"]},
+  "Saturator":     {"category": "Drive",      "ride": ["drive", "lp_pre_freq", "hp_pre_freq", "lp_post_freq", "hp_post_freq", "p_freq"], "set": ["pre", "post", "blend", "mix", "p_level", "p_q", "level_in", "level_out"]},
+  "MultiChorus":   {"category": "Modulation", "ride": ["stereo"], "set": ["mod_rate", "mod_depth", "min_delay", "freq", "freq2", "voices", "overlap", "vphase", "amount", "dry", "q", "lfo", "level_in", "level_out"], "note": "lush for stacking but zippers on rate/depth -- prefer vibrato/RotarySpeaker to ride a mod"},
+  "Flanger":       {"category": "Modulation", "ride": ["mod_rate", "mod_depth", "amount", "stereo", "lfo", "reset"], "set": ["feedback", "dry", "min_delay", "level_in", "level_out"]},
+  "Phaser":        {"category": "Modulation", "ride": ["mod_rate", "mod_depth", "reset"], "set": ["feedback", "stages", "stereo", "base_freq", "dry", "amount", "lfo", "level_in", "level_out"]},
+  "pressure5":     {"category": "Dynamics",   "ride": ["pressure", "mewiness", "output", "pawclaw"], "set": ["drywet", "speed"]},
+  "totape6":       {"category": "Tape/Lofi",  "ride": ["headbump"], "set": ["flutter", "soften", "drywet", "input", "output"]},
+  "kplatea":       {"category": "Reverb",     "ride": ["lowCut", "damping"], "set": ["wetness", "predelay", "inputPad"]},
+  "galactic":      {"category": "Reverb",     "ride": ["brightness", "detune", "replace"], "set": ["bigness", "drywet"], "note": "beautiful lush soundscape; bigness (size) GLITCHES on adjust -- confirmed by ear + probe, set while parked"},
+  "verbity":       {"category": "Reverb",     "ride": ["darkness"], "set": ["bigness", "longness", "wetness"]}
+}
