@@ -1,12 +1,8 @@
-# ORC-1 Architecture
-
-A developer-facing map of how ORC-1 is put together **as it exists today**. (User-facing operation lives in `ORC-1_OWNERS_MANUAL.md`.) This describes implemented reality; planned/forward-looking work is intentionally not here.
-
-> **Trust the code, not this file.** Per the project's prime directive: where this doc and the code on the Pi disagree, the code wins — say so and fix the doc. Two things below are easy to get wrong and are flagged inline: the audio engine is **not** one process (§ per-module hosts), and a second soundcard joins the **one** JACK graph via a bridge rather than a second server (§ audio output).
+**Trust the code, not this file.** here this doc and the code on the Pi disagree, the code wins — say so and fix the doc. Two things below are easy to get wrong and are flagged inline: the audio engine is **not** one process (§ per-module hosts), and a second soundcard joins the **one** JACK graph via a bridge rather than a second server (§ audio output).
 
 ## The shape: cooperating processes
 
-ORC-1 is not one program. It's a small system of cooperating processes, which is why it stays responsive (audio never blocks on control logic) and why each piece restarts independently.
+ORC-1 is not one program. It's a small system of cooperating processes, each restarts independently. Audio streams are kept completely separate from control methods everywhere - each new audio card, upon being assigned a sound module,spins up its own JACK server. Internal audio bridging is discouraged, thus dodging added latency and resampling altogether. At the time of writing, some of the below information is already out of date, so expect updates soon.
 
 ```
   Hardware controllers            ┌──────────────────────┐
