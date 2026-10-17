@@ -90,7 +90,7 @@ ssh pibox@pibox.local
 
 *These views belong to the Fire handler (`orc1_fire.py`), which the brain uses for a Fire on Akai's firmware or on the custom firmware's host mode. A Fire on the custom firmware's normal sequencer mode is a standalone instrument and does not use them.*
 
-Press **MODE** to cycle through the eight views (`seq, mixer, chord, chip, poly, faders, universal, fx`). The box **boots into `universal`** (Fire reorg, 2026-09-02). The top buttons are quick-jumps (current bindings): **STEP** toggles between `universal` and `seq`; **DRUM** toggles between `seq` and `mixer`; **PERFORM** jumps to `chord`; **PAT/SONG** jumps to `fx`; **NOTE** handles the poly/chip enable + cycle. The OLED always shows which view you're in. (Button bindings are data in `orc1_config.py` and can be changed.)
+Press **MODE** to cycle through the eight views (`seq, mixer, chord, chip, poly, faders, universal, fx`). The box **boots into `universal`** (Fire reorg, 2026-09-02). The top buttons are quick-jumps (current bindings): **STEP** toggles between `universal` and `seq`; **DRUM** toggles between `seq` and `mixer`; **PERFORM** jumps to `chord`; **PAT/SONG** jumps to `fx`; **NOTE** couples the chord engine to the poly synth (SHIFT: the chip voices, ALT: the arpeggiator). The OLED always shows which view you're in. (Button bindings are data in `orc1_config.py` and can be changed.)
 
 ### `seq` - Step sequencer
 
@@ -100,38 +100,44 @@ The main view. 4 rows x 16 columns = 64 steps visible at once. Each row is one t
 - **MUTE1-4**: mute/unmute the visible rows
 - **GRID LEFT/RIGHT**: page horizontally (steps 1-16, 17-32, etc.)
 - **PAT UP/DOWN**: scroll vertically through tracks
-- **SELECT turn**: change BPM (in seq, away from step-note edit mode)
-- **SELECT press**: enter step-note edit for the last-touched step
-- **PLAY/STOP/REC**: transport controls
-- **SHIFT + pad**: set track length at that step
+- **SELECT turn**: pick the selected track (SHIFT + turn moves it up or down the list). **Hold a step pad and turn SELECT** to give that step its own note; hold a step pad and press SELECT to clear it.
+- **SELECT press**: open the track editor (press again to close)
+- **PLAY / STOP**: transport. **REC** clears the visible tracks, **SHIFT+REC** adds a track, **ALT+REC** toggles velocity lock (every note goes out at 127).
+- **ALT + pad**: set the track length at that step
+- **Dials**: sculpt the selected drum voice (attack, decay, tune, level; with SHIFT the filter and tune/level). With ALT held: tempo, track velocity, track colour, track brightness.
 
 ### `mixer` - Per-track velocity mixer
 
-Dials control velocity for the 4 visible tracks. Pads show velocity bars.
+Dials control velocity for the 4 visible tracks. Pads show velocity bars. SELECT press solos the selected track.
 
-### `chord` - Chromatic chord surface
+### `chord` - Chord control and chromatic keyboard
 
-Plays chords into the engine. Pads are laid out chromatically.
+Plays chords into the engine. The left 4x4 block is the chord-engine control panel and the rest of the grid is a chromatic keyboard.
 
-- **Row 0**: chord type selector (MAJ, MIN, SUS, DIM)
-- **Rows 1-3**: chord root notes
-- **DIAL0**: root octave
-- **DIAL1**: chord voicing
+- **Control panel (columns 0-3)**: row 0 = chord base (MAJ, MIN, SUS, DIM); row 1 = extensions 6th / 7th / 9th / 11th (held while pressed; with SHIFT the chromatic 6 / m7 / M7 / 9); row 2 = INV- / INV+; row 3 = CLR, PREV, HOLD, ARP.
+- **Keyboard (columns 4-15)**: four octaves, lowest on the bottom row, one note per column starting at C. Each row plays where the chord-row map sends it (set on `/control`; by default top to bottom: the poly synth, chip pulse 1, the mono synth, and the chord engine).
+- **PAT UP/DOWN**: octave
+- **DIAL0 / DIAL1 / DIAL2**: chord spread, octave offset, tempo
+- **SELECT turn**: scroll the row stack (SHIFT: arp pattern). **SELECT press**: chord parameter menu.
 
 ### `chip` - NES/GameBoy voices
 
 Direct access to the chip voices: Pulse 1, Pulse 2, Triangle, Noise.
 
 - **Pads**: play notes
-- **DIAL0-3**: per-voice parameters
-- **SELECT turn**: cycle coupling mode (none / unison / detune / fifth / third / octave / octave_dn)
+- **DIAL0-3**: cutoff, resonance, attack, decay (with SHIFT: filter mode, release, timbre, octave), sent to the chip's first pulse voice
+- **BROWSER menu**: Coupling Mode (none / unison / detune / fifth / third / octave / octave_dn) and Detune Amount
+- **SELECT press**: voice summary
 
 ### `poly` - Internal poly synth
 
-Chromatic keyboard layout into the polyphonic synth.
+A keyboard in fourths (each row a perfect 4th above the one below) into the polyphonic synth.
 
-- **Pads**: play notes chromatically
-- **DIAL0-3**: filter, resonance, attack, release
+- **Pads**: play notes
+- **DIAL0-3**: cutoff, resonance, waveform, octave (with SHIFT: filter mode, release, attack, decay)
+- **SELECT press**: voice summary
+
+(The dial lists are the built-in defaults; a map you saved in `~/fire_knobmap.json` overrides them, see Encoder remapping.)
 
 ### `faders` - assignable fader bank
 
@@ -161,7 +167,7 @@ instrument's internal control surface.
   max 9). The OLED always shows which bank you are on. Each bank holds its own
   64 assignments and all of them persist.
 - **BROWSER menu** -> "Save Pads" / "Load Pads", "Save Knobs" / "Load Knobs",
-  "Clear This Bank" (scoped to the bank on screen, not all of them)
+  "Clear This Pad" and "Clear Bank" (scoped to the bank on screen, not all of them), "Toggle Latch"
 
 ### `fx` - FX chains
 
@@ -540,7 +546,7 @@ The very last step before the screen: **everything outside the shape is pure bla
 
 The **LOGO** picker on /visuals (folds out under SHOW; CC 52): CHORD SHAPE (no logo) or a drawing. It shows a preview and lets you **upload your own SVG line art** (2 MB max) into `~/orc1_logos/`, or delete your uploads. Shipped with the ORC (drawn for it, `orc1/daw/logos/`): an ORC-1 wordmark, a lightning bolt, a spiral eye. `orc1/daw/vis_logos.py` reads paths (every command, curves and arcs), lines, polylines, polygons, rects, circles, ellipses and transforms; fills become their outlines, and text, images, `<defs>` and scripts are ignored (nothing in an SVG is ever run, and the page's preview is drawn from the parsed lines, never the uploaded file). Big drawings are simplified to 4000 points. The logo scene uses the first drawing when LOGO is set to CHORD SHAPE.
 
-All four hold 60 fps on the Pi (measured). **Classic** = XScreenSaver's line patterns, drawn on the CPU (stock qix and vermiculate cost Xorg ~75% of a core, so qix runs as a single polygon and vermiculate is left out).
+The shape machines and the logo scene were measured holding 60 fps on the Pi. **Classic** = XScreenSaver's line patterns, drawn on the CPU (stock qix and vermiculate cost Xorg ~75% of a core, so qix runs as a single polygon and vermiculate is left out).
 
 ### Knobs (MIDI)
 
@@ -588,7 +594,7 @@ On the old skipback-ring path, skipback hands over new audio only every ~43 ms: 
 
 ### Shell and cost
 
-- **Shell:** `sudo ~/orc/orc1/daw/visuals.sh start|stop`; `visuals.sh next`, `set orc [secs]` (cycle), `set tunnel|mystify|tube|harmonograph|warp|hypercube|scope|ridgeline|rose|lorenz|chladni` (hold one), `set classic [secs]`, `set <XScreenSaver name>`, `fps 30|45|60`, `source <left port> [right port]` / `source ring` (what it listens to), `shot` (save the frame on the monitor to `/tmp/orc1_visuals_shot.png`: the renderer writes it itself, because an X screen grab of the GL window is stale), `list`, `status`.
+- **Shell:** `sudo ~/orc/orc1/daw/visuals.sh start|stop`; `visuals.sh next`, `set orc [secs]` (cycle), `set tunnel|mystify|tube|harmonograph|warp|hypercube|scope|ridgeline|rose|lorenz|chladni|knot|polytope|hopf|shape4d` (hold one), `set classic [secs]`, `set <XScreenSaver name>`, `fps 30|45|60`, `source <left port> [right port]` / `source ring` (what it listens to), `shot` (save the frame on the monitor to `/tmp/orc1_visuals_shot.png`: the renderer writes it itself, because an X screen grab of the GL window is stale), `list`, `status`.
 - **Cost (measured):** ~10-18% of one core at 30 fps, including the listening (~1 ms a frame); ~110 MB. It runs at the Pi's lowest CPU priority (`SCHED_IDLE`) and is memory-capped (200M / 300M) so it can never crowd skipback. It writes its frame timing to `/tmp/orc1_visuals_fps.log` every 30 s: fps, late frames, worst gap, `vsync N` (locked to every N-th refresh), and the frame's cost (`cpu` = the frame's own work, `swap` = waiting for the screen). The listener `orc1-vistap` costs 0.1-0.4% of one core and ~2 MB of its own memory; it starts and stops with the visuals, builds itself from `orc1/daw/orc_jacktap.c` on its first start (needs `gcc` and `libjack-jackd2-dev`), and rejoins by itself within ~5 s if JACK restarts.
 
 ---
