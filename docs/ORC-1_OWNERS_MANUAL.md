@@ -1,12 +1,12 @@
 # ORC-1 / PIBOX - Owner's Manual
 
-*Last substantive revision: 2026-09-21 (topology, FX/ROUTE, service model, and update workflow brought back in line with the code; see ARCHITECTURE.md for the authoritative system map.)*
+*Last checked against the code: 2026-10-16 (audio topology, controllers, skipback, services and file lists; see ARCHITECTURE.md for the authoritative system map).*
 
 ---
 
 ## What this thing is
 
-PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesizer engine. The Akai Fire is its brain-dead-simple control surface - 64 pads, 4 dials, a bunch of buttons. The Pisound HAT gives it stereo audio + DIN MIDI I/O. A Zoom L-12 (when present) is the usual master audio interface. The whole thing runs headless, boots in ~30 seconds, and connects to your gear like any other MIDI/audio device.
+PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesizer engine. The Akai Fire is its main control surface - 64 pads, 4 dials, a bunch of buttons (the Fire sections below describe the handler used with Akai's own firmware; with this project's custom Fire firmware the Fire runs its own sequencer and screens, see ARCHITECTURE.md). The Pisound HAT gives it stereo audio + DIN MIDI I/O. A Zoom L-12 (when present) is the usual master audio interface. The whole thing runs headless, boots in ~30 seconds, and connects to your gear like any other MIDI/audio device.
 
 **Hardware:**
 - Raspberry Pi (pibox) - hostname `pibox`, user `pibox`
@@ -15,11 +15,11 @@ PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesi
 - Zoom L-12 (USB audio interface - the usual master card; exposes `system:playback_1-4` + `system:capture_1-14` on the reference rig)
 
 **JACK audio topology (authoritative detail in `ARCHITECTURE.md`):**
-- **One** JACK server, owned by `orc1-jackd`, at 48 kHz. Master card is resolved `~/.orc1_audio.json` → L-12 → pisound → first real card. NOT fixed to the L-12.
+- One **default** JACK server, owned by `orc1-jackd`, at 48 kHz. The master card is resolved `~/.orc1_audio.json` → L-12 → pisound → (after waiting up to 90 s) the first real card. NOT fixed to the L-12.
 - Each voice runs in **its own host process** (2026-09 split) and publishes its own ports: `ORC1-Drum`, `ORC1-Poly`, `ORC1-Chip`, `ORC1-Sampler`, `ORC1-Mono`, `ORC1-BBKit`, each with `out_L`/`out_R`. **There is no `ORC1-Synth` client and no single summed-mix port** — the old `ORC1-Synth:out/drum/poly/chip/samp` names and `SYNTH.MAIN_MIX_BUSES` are gone.
 - Which physical pair each voice sounds out of is set per module on `/patch` (persisted `~/.orc1_module_outputs.json`).
-- A second card (Mixtrack `M3`, Perform-VE, …) joins the same graph via an on-demand `zita` bridge started from `/patch`, **not** a second jackd and **not** `alsa_in`/`alsa_out`.
-- Skipback capture: track 0 records `system:capture_13/14 -> skipback-rec:t0_L/t0_R` on the reference rig (owned by the recorder; change it on `/skipback`, not by hand).
+- A voice (all but BBKit) can be sent to **another card**: the CARD picker on `/patch` starts that card's own named JACK server (`orc1-jackd@<card>`) and moves the voice's host onto it. Such a voice is not in the default graph. An on-demand `zita` bridge (also from `/patch`) is what pulls a second card's *ports* into the default graph, e.g. to capture from it; it is never `alsa_in`/`alsa_out`.
+- Skipback capture: each track records a JACK source you choose on `/skipback`. With the source on `auto`, the recorder tries the L-12 master return (`system:capture_13/14`), then pisound's inputs, then the card's first stereo input. The recorder owns its own wiring, so change it on `/skipback`, not by hand.
 
 ---
 
@@ -87,6 +87,8 @@ ssh pibox@pibox.local
 ---
 
 ## Views
+
+*These views belong to the Fire handler (`orc1_fire.py`), which the brain uses for a Fire on Akai's firmware or on the custom firmware's host mode. A Fire on the custom firmware's normal sequencer mode is a standalone instrument and does not use them.*
 
 Press **MODE** to cycle through the eight views (`seq, mixer, chord, chip, poly, faders, universal, fx`). The box **boots into `universal`** (Fire reorg, 2026-09-02). The top buttons are quick-jumps (current bindings): **STEP** toggles between `universal` and `seq`; **DRUM** toggles between `seq` and `mixer`; **PERFORM** jumps to `chord`; **PAT/SONG** jumps to `fx`; **NOTE** handles the poly/chip enable + cycle. The OLED always shows which view you're in. (Button bindings are data in `orc1_config.py` and can be changed.)
 
@@ -245,7 +247,7 @@ Pi health: CPU temperature and power status, CPU/RAM/disk gauges, service status
 The **HUD** card on this page starts and stops the [HUD kiosk](#hud-mode-live-play-state-on-the-hdmi-monitor) on the monitor.
 
 ### MODULE MATRIX - `/matrix`
-One row per voice ("module"), where you decide **which MIDI channel each voice listens on** - voices have no fixed home channel. Tap a module's CH chip to arm it, then pick any free cell on the 1-16 channel bus to move it there (live, and it persists across reboots). The power button brings a module into the fold or takes it out (freeing its channel); the sampler is always in. Reserved channels (12 chord-in, 13 ctrl, 14 MPC) are struck out and can't be picked. Each row also has a live LEVEL fader (ephemeral - not saved) and a **params ▸** drawer listing that voice's CCs, and CHIP P1 carries a **JOIN P2** control that couples pulse 2 to pulse 1 at an interval (none / unison / detune / fifth / third / octave / octave-down) - the join is live and resets to none on restart. **CHIP NS2** is the second noise voice; it starts out of the fold, so give it a channel here if you want it on its own (or reach it through the noise channel's key split - see **Chip voices**). Audio routing stays on `/patch`; this page is MIDI binding + level + join.
+One row per voice ("module"), where you decide **which MIDI channel each voice listens on** - voices have no fixed home channel. Tap a module's CH chip to arm it, then pick any free cell on the 1-16 channel bus to move it there (live, and it persists across reboots). The power button brings a module into the fold or takes it out (freeing its channel); the sampler is always in. **Protected channels** (12 chord-in, 13 ORC control, 14 MPC by default) are struck out and can't be picked; the PROTECTED card on this page switches each one on or off (13 is locked on, because the brain consumes it). Protection is checked when you *choose* a channel, so a binding that already exists is never dropped. The setting is saved in `~/.orc1_protected_channels.json`. Each row also has a live LEVEL fader (ephemeral - not saved) and a **params ▸** drawer listing that voice's CCs, and CHIP P1 carries a **JOIN P2** control that couples pulse 2 to pulse 1 at an interval (none / unison / detune / fifth / third / octave / octave-down) - the join is live and resets to none on restart. **CHIP NS2** is the second noise voice; it starts out of the fold, so give it a channel here if you want it on its own (or reach it through the noise channel's key split - see **Chip voices**). Audio routing stays on `/patch`; this page is MIDI binding + level + join.
 
 ### ROUTES - `/routes`
 The full MIDI routing matrix editor, plus the chord-out and melody-out override cards. Reached from the "OUT" links on the sound pages rather than from the nav bar.
@@ -385,7 +387,7 @@ Stored in `~/fire_knobmap.json`, and arbitrary CC assignments survive a restart
 
 ## Skipback recorder
 
-A separate always-on service (`skipback-record`) that continuously buffers audio into per-track ring buffers, so you can keep something *after* it happened. Each track records a configurable JACK source, set on the **`/skipback`** web page (persisted to `~/.orc1_skipback_tracks.json`). On the reference rig, track 0 records the L-12's stereo master (`system:capture_13/14`), and the L-12 exposes 14 capture channels in total, all recordable. The source picker also lists each ORC module's own output (`Module: Poly`, …) whenever that module is running.
+A separate always-on service (`skipback-record`) that continuously buffers audio into per-track ring buffers, so you can keep something *after* it happened. Each track records a configurable JACK source, set on the **`/skipback`** web page (persisted to `~/.orc1_skipback_tracks.json`). A track can record any JACK port; on the reference rig the L-12 exposes 14 capture channels, all recordable (its stereo master is `system:capture_13/14`). Only tracks marked `armed` in the tracks file record. The source picker also lists each ORC module's own output (`Module: Poly`, …) whenever that module is running.
 
 **QUICK ADD** (the picker next to + ADD TRACK) makes a track in one pick, already named and wired. Pick a **stereo pair** (a named pair such as `Zoom Track 9-10`, or any `In n/n+1` input pair) for one stereo track, or a **mono channel** (`In 5`, a single module output) for a mono track. Then press SAVE.
 
@@ -409,7 +411,7 @@ How CARD tracks work:
 - **The ring file is reserved at full size when the track arms.** It can't run out of space mid-recording.
 - **Persistence:** once a second the recorder flushes each card ring and then records every head position in one file, `/mnt/skipring/checkpoint.json`. After a reboot, or even a power cut, a PERSIST track resumes where that checkpoint says, losing only the last second or so. Measured 2026-09-28: after a real reboot, 14/14 tracks resumed at their exact pre-reboot head, with the audio before it byte-identical.
 - **Card stalls are expected and absorbed.** SD cards pause for seconds while they reorganise internally: up to ~10.6 s measured on the reference card. Each CARD channel therefore gets a ~43 s memory buffer in front of the card (RAM tracks get ~11 s). The recorder also has memory reserved that no other program can take (256 MB guaranteed, protected up to 1 GB). RAM and CARD tracks have **separate writer threads**, so a card stall never touches a RAM track (measured 2026-09-29: with one shared writer, RAM tracks dropped audio during card stalls). `/skipback` status reports the slowest card checkpoint and writer passes since start (`ckpt_max_ms`, `writer_card_max_ms`, `writer_ram_max_ms`); the card figures are your margin against that 43 s.
-- **Sampler decks should grab from a RAM track.** A grab can only see audio already written to the ring, so during a card stall a grab from a CARD track would land early by the stall. The reference setup keeps the long history on CARD (t0 MAIN, t1) and small 60 s RAM tracks for the sampler (t2 SMP MAIN → deck A, t3 SMP IN3 → deck B). The Mixtrack's FX1-3 and the `/sampler` list offer RAM tracks first, and `/sampler` labels CARD tracks.
+- **Sampler decks should grab from a RAM track.** A grab can only see audio already written to the ring, so during a card stall a grab from a CARD track would land early by the stall. A typical setup keeps long history on CARD tracks and small 60 s RAM tracks for the sampler. Each deck's grab source defaults to t0 (deck A) and t1 (deck B) and is whatever you pick on `/sampler`; the choice is kept in `~/.orc1_sampler_deck_src.json`. The Mixtrack's FX1-3 and the `/sampler` list offer RAM tracks first, and `/sampler` labels CARD tracks.
 - **Safety:** a CARD track **refuses to arm while `/mnt/skipring` isn't mounted**, because it would otherwise silently fill the system partition. RAM tracks keep recording regardless.
 - **Switching a track between RAM and CARD rebuilds its ring**, so the audio it currently holds is lost. The page asks first.
 - **Trim.** Linux's weekly `fstrim.timer` is on. Run `sudo fstrim -v /` and `sudo fstrim -v /mnt/skipring` once after cloning or re-imaging a card, so the card knows which space is free.
@@ -434,7 +436,7 @@ How CARD tracks work:
 The ORC runs headless. For editing recordings (e.g. a GRAB ALL folder) there's an on-demand **DAW mode**: REAPER fullscreen on a monitor on the Pi's HDMI port, with a USB mouse and keyboard.
 
 - **Start/stop from the web:** the **DAW / DJ MODE** card on `/system` has START DAW, START DJ (MIXXX), the dimmer DAW · KEEP ENGINES / DJ · KEEP ENGINES, and STOP. It shows what's running, whether the engines are off, and whether a monitor is plugged in. From a shell: `sudo ~/orc/orc1/daw/daw_mode.sh start [dj] [engines-on] | stop [force] | status`. The unit has no `[Install]` section, so it never starts at boot.
-- **The engines go OFF by default** (owner, 2026-09-29, after Mixxx plus all six engines swapped the Pi and skipback itself dropped audio: 12 gaps). Starting either app stops the six module hosts (drums, sampler, poly, chip, mono, BBKit) one at a time, to give REAPER their CPU and RAM. They come back by themselves, one at a time, **however** the DAW ends (quit, crash, STOP), because the unit's `ExecStopPost` runs `daw_mode.sh restore`. Skipback, jackd and the brain are never touched. Measured 2026-09-29: 0 xruns, 0 gaps through a full cycle.
+- **The engines go OFF by default** (decided 2026-09-29, after Mixxx plus all six engines swapped the Pi and skipback itself dropped audio: 12 gaps). Starting either app stops the six module hosts (drums, sampler, poly, chip, mono, BBKit) one at a time, to give REAPER their CPU and RAM. They come back by themselves, one at a time, **however** the DAW ends (quit, crash, STOP), because the unit's `ExecStopPost` runs `daw_mode.sh restore`. Skipback, jackd and the brain are never touched. Measured 2026-09-29: 0 xruns, 0 gaps through a full cycle.
 - **Stop:** quit REAPER, or press STOP DAW. STOP **asks** REAPER to quit, exactly like its close box (`daw/daw_close.py` sends WM_DELETE_WINDOW). With unsaved edits, REAPER asks you on the monitor first, and the page says it's still open. REAPER is deliberately not killed: killing it mid-cycle costs one xrun on the whole graph (measured). `stop force` kills it anyway. Either way the X session ends and the unit stops by itself.
 - **What it runs** (`systemd/orc1-daw.service` → `orc1/daw/daw_session.sh`): a minimal X server (Xorg + `xinit`, no desktop) with Openbox and **REAPER 7.81 for Linux aarch64** (`/opt/REAPER`, installed 2026-09-28). It runs in its own logind session on VT7.
 - **Resolution:** set `DAW_RES` (e.g. `1280x720`) in the unit's environment to lower it.
@@ -460,7 +462,7 @@ The ORC runs headless. For editing recordings (e.g. a GRAB ALL folder) there's a
 
 ## VISUALS mode (line scenes on the HDMI monitor)
 
-Glowing geometric line scenes, full-screen on the HDMI monitor, that move with the music: the ORC's own drums and chords, and any audio in the rig you choose (the L-12 master by default, so Bluetooth and everything on the mixer counts; or one input, or one module). It's the third VT7 kiosk (`systemd/orc1-visuals.service` → `orc1/daw/visuals_session.sh`), and it brings its audio listener `orc1-vistap` with it; starting DAW or DJ mode takes the monitor over from it. Besides `/visuals` and any MIDI controller, it can be played from the SmartPad: bank 2, RIGHT = the [VISUALS page](#bank-2-the-orc-surface-sampler-skipback-visuals) (scenes, peephole, background, START/STOP, every knob on seven encoder banks).
+Glowing geometric line scenes, full-screen on the HDMI monitor, that move with the music: the ORC's own drums and chords, and any audio in the rig you choose (the L-12 master by default, so Bluetooth and everything on the mixer counts; or one input, or one module). It's one of the four VT7 kiosks (`systemd/orc1-visuals.service` → `orc1/daw/visuals_session.sh`), and it brings its audio listener `orc1-vistap` with it; starting DAW or DJ mode takes the monitor over from it. Besides `/visuals` and any MIDI controller, it can be played from the SmartPad: bank 2, RIGHT = the [VISUALS page](#bank-2-the-orc-surface-sampler-skipback-visuals) (scenes, peephole, background, START/STOP, every knob on seven encoder banks).
 
 ### The /visuals page (VIS in the nav)
 
@@ -478,7 +480,7 @@ Reorganised 2026-10-12. Every slider shows its value in real units (ms, Hz, ×, 
   - **GATE** (CC 54): anything quieter counts as silence (default −68 dBFS; all the way down = off). The auto gain keeps turning itself up in quiet passages to catch quiet Bluetooth, so without the gate hiss and the gaps between songs fired false beats: 8 s of hiss at −72 dBFS gave 13 beats, and with the gate none.
 
   The readout under it shows the delay from sound to picture (see below).
-- **LINES:** SIZE (the whole picture ×1/3 .. ×3) and ANGLE (turn it −180..+180°): a camera on the finished lines, every scene, line thickness kept. Then SPEED, BEAT (the scene's own built-in kick reaction), BRIGHT, WEIGHT (line thickness; up = the overloaded, blown-out glow owner liked on a first cut), COLOUR. The middle of each slider is the scene's own setting; CENTRE ALL resets the card.
+- **LINES:** SIZE (the whole picture ×1/3 .. ×3) and ANGLE (turn it −180..+180°): a camera on the finished lines, every scene, line thickness kept. Then SPEED, BEAT (the scene's own built-in kick reaction), BRIGHT, WEIGHT (line thickness; up = the overloaded, blown-out glow), COLOUR. The middle of each slider is the scene's own setting; CENTRE ALL resets the card.
 - **TRAILS:** TRAILS (how long the ghosts of past frames last), **TRAIL ZOOM** (the ghosts get sucked in or rush outward) and **TRAIL TWIST** (the ghosts spin). TRAIL ZOOM / TWIST move only the ghosts, never the shape, so they do almost nothing with TRAILS low: the page dims them and says so. (These were called ZOOM and TWIST on the old LOOK card; same CCs.)
 - **MOVEMENT:** background-style REACT + LFO for the shapes. One row each for SIZE, ROTATION, BRIGHTNESS, SWAY (a drift; the LFO draws a figure 8) and TRAILS, with a REACT slider (how much the beat moves it: drum kicks and the audio beat, shaped by LISTEN's ATTACK / RELEASE, plus loudness; separate from LINES' BEAT on purpose, so with BEAT at 0 only the MOVEMENT reactions follow the kick) and an LFO slider (how far the LFO swings it). All rest at 0 = off. One shared LFO: **SYNC** FREE (then RATE, 0.02-4 Hz) or 4 bars / 2 bars / 1 bar / 1/2 bar / 1/4 bar, locked to the ORC's bar while the sequencer runs (it glides onto the bar, never jumps) and at the ORC's tempo while it is stopped. The tempo comes from the brain's play-state feed. Live meters show the beat and the LFO.
 - **BACKGROUND** and **PEEPHOLE:** see below.
@@ -613,7 +615,7 @@ The feed behind it is `/dev/shm/orc1_playstate.json`, written by the brain whene
 
 ## SmartPad (Midiplus SmartPad running KIKPAD firmware)
 
-A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, customised; source in the private repo `jamisonx-dev/smartpad-kikpad`, **not** in this repo). Five banks (MODE1 cycles them): 0 = MPC1000 face controls, 1 = bass layout in 4ths, **2 = the ORC surface** (the sampler, skipback and VISUALS played from the pad, painted by the ORC: see [Bank 2](#bank-2-the-orc-surface-sampler-skipback-visuals) below), 3 = fader bank, and 4 = a **standalone step sequencer** that keeps its patterns in the pad's own flash: 8 patterns A-H of 8 rows x up to 64 steps, drum or melodic (rows = scale degrees), accents, per-step ratchets and probability, per-track loop lengths (polymeter), a one-track 64-step view, motion recording (the 8 encoders record CC moves per step) and song chaining (16 slots x 1-8 bars). **The full control reference is the pad's `USER_GUIDE.md`**; the short version:
+A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, customised; the firmware source is **not** in this repo). Five banks (MODE1 cycles them): 0 = MPC1000 face controls, 1 = bass layout in 4ths, **2 = the ORC surface** (the sampler, skipback and VISUALS played from the pad, painted by the ORC: see [Bank 2](#bank-2-the-orc-surface-sampler-skipback-visuals) below), 3 = fader bank, and 4 = a **standalone step sequencer** that keeps its patterns in the pad's own flash: 8 patterns A-H of 8 rows x up to 64 steps, drum or melodic (rows = scale degrees), accents, per-step ratchets and probability, per-track loop lengths (polymeter), a one-track 64-step view, motion recording (the 8 encoders record CC moves per step) and song chaining (16 slots x 1-8 bars). **The full control reference is the pad's `USER_GUIDE.md`**; the short version:
 
 | | |
 |---|---|
@@ -622,11 +624,13 @@ A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, cu
 | SETUP page (MODE2) | piano root viewer, the ORC's 25 scales, octave, MIDI channel 1-16, pattern TYPE (drum / melodic) and scale SOURCE (LOCAL / HOST), all in one page |
 | 64-step track | hold VOLUME + tap a pad: that track opens as 64 steps across all the pads; LEFT/RIGHT = previous / next track; tap VOLUME = back |
 
-**How it reaches the ORC.** The pad shows up as **two** USB-MIDI ports. Port `:0` (`KIKPAD:KIKPAD IN <n>:0`) carries the music banks: the brain hot-plugs it like any other controller (`hot-plug [usb engine]` in the journal). Port `:1` is bank 2's private wire, claimed by name as the ORC surface (`hot-plug [kikpad    ]`, see below). Each pattern has its own MIDI channel (set on the SETUP page), so a pattern on the **drums** channel (10 on owner's rig) plays the 909 drums and a melodic pattern on the poly / mono / chip channel plays those voices, whatever `/matrix` binds to them. Motion lanes send CCs on the same channel. The pad has no DIN output and makes no sound itself; it needs the Pi (or any USB host) to be heard. If the host sends MIDI Start / Stop / Clock the sequencer follows it, otherwise it runs on its own tempo. The ORC's MIDI clock output goes to `CLOCK_OUT_PORTS` (the pisound DIN by default, and off until toggled), so the pad is not a clock destination unless you add it there.
+**How it reaches the ORC.** The pad shows up as **two** USB-MIDI ports. Port `:0` (`KIKPAD:KIKPAD IN <n>:0`) carries the music banks: the brain hot-plugs it like any other controller (`hot-plug [usb engine]` in the journal). Port `:1` is bank 2's private wire, claimed by name as the ORC surface (`hot-plug [kikpad    ]`, see below). Each pattern has its own MIDI channel (set on the SETUP page), so a pattern on the **drums** channel (10 by default) plays the 909 drums and a melodic pattern on the poly / mono / chip channel plays those voices, whatever `/matrix` binds to them. Motion lanes send CCs on the same channel. The pad has no DIN output and makes no sound itself; it needs the Pi (or any USB host) to be heard. If the host sends MIDI Start / Stop / Clock the sequencer follows it, otherwise it runs on its own tempo. The ORC's MIDI clock output goes to `CLOCK_OUT_PORTS` (the pisound DIN by default, and off until toggled), so the pad is not a clock destination unless you add it there.
 
-**The ORC's key on the pad (`orc1-kikpad`).** A small service (`orc1/orc1_kikpad_link.py`, `systemd/orc1-kikpad.service`) reads the live root and scale from the web process (`GET /state`, every 3 s) and sends them to the pad on MIDI channel 16 (CC 10 = root 0-11, CC 11 = scale index). With the pad's scale SOURCE set to **HOST**, its melodic patterns play in whatever key the ORC is in (the SOURCE pad is orange until the first message arrives). The scale index is a position in the ORC's own `SCALE_ORDER`, and the pad's table is a copy of it, so the two must match (the pad repo has `tools/check_scale_table.py`; the link logs a warning if the ORC's list ever differs). The service sends on change and every ~10 s, runs at the lowest CPU priority (~0.4 % of a core), never opens the pad as an input, and reopens the pad's port by itself whenever the pad reboots or is replugged (an old handle to a rebooted pad drops messages silently). `journalctl -u orc1-kikpad` shows `[kikpad-link]` lines.
+**The ORC's key on the pad (`orc1-kikpad`).** A small service (`orc1/orc1_kikpad_link.py`, `systemd/orc1-kikpad.service`) reads the live root and scale from the web process (`GET /state`, every 3 s) and sends them to the pad on its private host port `:1` (any channel; CC 10 = root 0-11, CC 11 = scale index). Until 2026-10-14 this used MIDI channel 16 on the music port. With the pad's scale SOURCE set to **HOST**, its melodic patterns play in whatever key the ORC is in (the SOURCE pad is orange until the first message arrives). The scale index is a position in the ORC's own `SCALE_ORDER`, and the pad's table is a copy of it, so the two must match (the pad repo has `tools/check_scale_table.py`; the link logs a warning if the ORC's list ever differs). The service sends on change and every ~10 s, runs at the lowest CPU priority (~0.4 % of a core), never opens the pad as an input, and reopens the pad's port by itself whenever the pad reboots or is replugged (an old handle to a rebooted pad drops messages silently). `journalctl -u orc1-kikpad` shows `[kikpad-link]` lines.
 
-**Reflashing the pad from the Pi.** No button combo needed: send MIDI channel 16 CC 127 = 90 to the pad's port (it reboots into its bootloader), then run `~/tools/kikpad_flash.sh <firmware.bin>` (a retry loop around `tkg-flash`, built from the bootloader project's CLI source into `~/tools/`, outside the repo; it needs `libudev-dev`). Build the `.bin` on the PC with the exact command in the pad repo's `CUSTOM.md` (the wrong upload method builds a dead pad). The bootloader runs first on every power-up, so a bad flash can be recovered with the same loop.
+**Reflashing the pad from the Pi.** No button combo needed: run `~/tools/kik_reboot.py new` (it sends CC 127 = 90 on the pad's host port `:1`; the `old` argument is for firmware from before 2026-10-14), then **always** follow it with `~/tools/kikpad_flash.sh <firmware.bin>` (a retry loop around `tkg-flash`, built from the bootloader project's CLI source into `~/tools/`, outside the repo; it needs `libudev-dev`). Entered this way the bootloader waits until it is flashed. Build the `.bin` on the PC with the exact command in the pad repo's `CUSTOM.md` (the wrong upload method builds a dead pad). The bootloader runs first on every power-up, so a bad flash can be recovered with the same loop.
+
+**Remapping banks 0 and 1 and the encoders (`/kikpad`).** The maps for bank 0, bank 1 and the encoders are stored in the pad's flash, so they work with no Pi (for example when the pad drives an MPC). The `/kikpad` page (CONTROL group) is only the editor: the brain (`orc1_kikpad_map.py`) sends the pad a SysEx on port `:1`, and the page shows what the pad *replied*, never a copy of its own. Each pad can be off, a note, a CC or a toggle, on its own channel or the bank's, with a colour; each encoder has eight modes of CC + channel.
 
 ### Bank 2: the ORC surface (sampler, skipback, visuals)
 
@@ -692,7 +696,7 @@ Plug the pedal into the Pi's USB (it powers from the port). Bind **ZOOM FX** to 
 | 90 / 91 | tuner on/off (two tuner modes) |
 | 92 | store the current patch (each push) |
 
-The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 only answer on owner's patched firmware. The service is `orc1-zoomfx` (`journalctl -u orc1-zoomfx`); the live patch is in `/dev/shm/orc1_zoomfx.json`.
+The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 only answer on a pedal with the 2-byte firmware patch (stock firmware ignores edits to them). The service is `orc1-zoomfx` (`journalctl -u orc1-zoomfx`); the live patch is in `/dev/shm/orc1_zoomfx.json`.
 
 ## Persistent state files
 
@@ -702,6 +706,9 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
 | `~/fire_knobmap.json` | Encoder CC remaps |
 | `~/fire_presets.json` | Pad / fader / knob preset banks (8 slots each) |
 | `~/.orc1_bindings.json` | Module Matrix — which channel each voice listens on |
+| `~/.orc1_protected_channels.json` | Which MIDI channels are protected from being chosen (`/matrix`); written by the web process |
+| `~/.orc1_sampler_deck_src.json` | Which skipback track each sampler deck grabs from |
+| `~/.orc1_config_overrides.json` | Whitelisted config overrides set on `/system` |
 | `~/.orc1_module_outputs.json` | Per-module output destination (which physical pair each voice sounds out of) |
 | `~/.orc1_patch.json` | Saved `/patch` audio wiring (the current audio-routing persistence) |
 | `~/.orc1_skipback_tracks.json` | Skipback per-track source/config (incl. `store` ram/card, `persist`) |
@@ -743,8 +750,17 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
     orc1_mono_host.py       -> per-module JACK host: mono/lead         (service orc1-mono,    client ORC1-Mono)
     orc1_bbkit_host.py      -> per-module JACK host: BeatBuddy kit     (service orc1-bbkit,   client ORC1-BBKit)
     orc1_fire.py            -> Akai Fire controller handler (this is the big one)
+    orc1_mixtrack.py        -> Numark Mixtrack Pro 3 handler (decks, pads, LEDs, sampler)
+    orc1_surface_link.py    -> paints the ORC surface on a Fire running the custom firmware
+    orc1_padmap.py          -> per-device pad maps (/pads)
+    orc1_pedal.py / orc1_rc505.py / orc1_beatbuddy.py -> FCB1010 pedal, RC-505 looper control, BeatBuddy
+    orc1_cme.py             -> CME U6MIDI Pro patchbay (/cme)
+    orc1_zoomfx.py          -> the zoomfx module: Zoom MS-70CDR over CC (service orc1-zoomfx)
+    orc1_sampler.py         -> the sampler engine (decks, ring reader) used by the sampler host
+    orc1_health.py          -> read-only health check (orc1-health.timer)
     orc1_kikpad.py          -> SmartPad bank 2 = the ORC surface (SAMPLER + VISUALS pages), on the pad's port :1
     orc1_kikpad_link.py     -> sends the ORC's key to the SmartPad (service orc1-kikpad)
+    orc1_kikpad_map.py      -> edits the SmartPad's own maps from /kikpad
     orc1_fx_inserts.py      -> current FX: per-source wet/dry inserts manager (see FX_SYSTEM.md)
     orc1_fxmix.py           -> one insert instance (wet/dry+level DSP, audio-rate)
     orc1_fx_rack.py         -> legacy single-chain rack (still backs /fx page + Fire fx view)
@@ -752,7 +768,7 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
     orc1_seq.py             -> step sequencer logic
     orc1_arp.py             -> arpeggiator
     orc1_routes.py          -> MIDI message routing engine (RoutingEngine)
-    orc1_routes.json        -> MIDI routing rules for SP-404mk2, MPC1000 profiles
+    orc1_routes.json        -> MIDI routing rules (RoutingEngine profiles)
     orc1_config.py          -> hardware mappings, channel assignments, module-output helpers
     orc1_patterns.py        -> pattern library
     orc1_web.py             -> web interface (Flask)
@@ -760,6 +776,8 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
     templates/hud.html + static/js/hud.js -> the phone / desktop HUD page (/hud)
     orc1_jackd_start.sh     -> JACK SERVER startup (resolves the master card: L-12 -> pisound -> fallback)
     orc1_bridge_start.sh    -> on-demand ALSA<->JACK zita bridge for a second card (orc1-bridge@)
+    orc1_jackd_card_start.sh -> a named JACK server for one extra card (orc1-jackd@<card>)
+    orc1_assign_module_out.sh -> moves a module host onto a card's server (or back to the default)
     fire_oled.py            -> OLED display driver for the Fire
     samples/                -> default drum samples (.wav)
     skipback/
@@ -792,7 +810,7 @@ Because ORC-1 has no screen, updates come in over SSH. The current workflow (sup
 4. **Restart the right unit** — `orc1` for the brain/handlers (the voice hosts follow via `PartOf`), `orc1-jackd` for a card switch, `orc1-web` for web files. Not `orc1-synth` (retired).
 5. **Verify the rig, not the exit code** — `systemctl is-active`, `journalctl -p err`, xruns, `jack_lsp -c`.
 
-The reference toolkit for this lives on the dev machine as the **`deploy`** and **`test-orc`** skills, and `CLAUDE.md` in the project root is the authoritative working guide. Key auth (`ssh pibox@pibox.local`) is passwordless and bypasses the Pi's TOTP.
+
 
 ---
 
@@ -829,22 +847,3 @@ journalctl -fu orc1 --lines=50          # brain
 journalctl -fu orc1-poly --lines=50     # or whichever voice host
 ```
 Common causes: a syntax error from a bad deploy (run `python3 -m py_compile` before restarting), a missing dependency, or JACK not up yet (the voice hosts and skipback wait for `orc1-jackd`).
-
----
-
-## For a new Claude session
-
-**The authoritative working guide is `CLAUDE.md` in the project root, plus `ARCHITECTURE.md` (system map) and `FX_SYSTEM.md`. Read those first — this list is only a pointer.** Key context:
-
-- **SSH**: `ssh pibox@pibox.local` (key-based, passwordless, bypasses the Pi's TOTP).
-- **Deploy**: edit the local mirror → back up on the Pi → `scp` → verify size + `py_compile` → restart. The `deploy` and `test-orc` skills automate this. There is **no autosync** — pull before you edit.
-- **Main files**: `orc1.py` (the brain), `orc1_fire.py` (Fire handler, the big one), `orc1_synth.py` (shared DSP **library**, not a service), the six `orc1_*_host.py` (per-module audio hosts).
-- **Restart**: `sudo systemctl restart orc1` (brain; the voice hosts follow via `PartOf`), `orc1-jackd` (card switch), `orc1-web` (web files). **Do not use `orc1-synth` — it is retired.**
-- **Python version**: 3.13.
-- **MIDI routing vs audio routing**: `orc1_routes.json` = MIDI message rules; **audio patching is `/patch` → `~/.orc1_patch.json`** (the old `~/orc1_routing.json` Fire ROUTE table is defunct).
-- **Skipback** is a separate always-on service that owns/reconciles its own source — change it on `/skipback`, don't hand-wire it.
-- **Prime directive**: follow the code on the Pi, not any note (including this file). Where they disagree, the code wins.
-
----
-
-*Backups live in `~/backups/`. The session doc archive is `session_docs_20260703.zip`. The orc bak archive is `orc_baks_20260703.zip`.*

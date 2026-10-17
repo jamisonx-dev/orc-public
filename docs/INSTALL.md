@@ -2,7 +2,11 @@
 
 This guide covers installing ORC-1 on a fresh Linux machine. It documents **implemented reality** as verified on the reference Pi (2026-09-21). See `ARCHITECTURE.md` for how the pieces fit together once running.
 
-> **Known gap, read this first:** the repo's `orc/systemd/` directory is currently **out of date** — it still ships only `orc1`, `orc1-jackd`, `orc1-synth`, `orc1-web`, `orc1-system`, `skipback-record`. The units that the *current* architecture actually needs — the six per-module host services, the `orc1-bridge@` template, and `bt-route` — live only in `/etc/systemd/system/` on the reference Pi and have not been committed back. Until they are, a truly fresh install must copy those unit files off the reference machine. `orc1-synth` in the repo is **retired** and should not be enabled (see below).
+> **Read this first.** The unit files in `orc/systemd/` are current: the brain, `orc1-jackd`, the six module hosts, `orc1-web`, `orc1-system`, `skipback-record`, the `orc1-bridge@` and `orc1-jackd@` templates, `bt-route`, the monitor kiosks, `orc1-kikpad` and `orc1-zoomfx`. Two things are **not** in the repo:
+> - **The hosts' jackd coupling.** `orc1-drum`, `-poly`, `-chip`, `-mono` and `-sampler` get their `After=`/`BindsTo=orc1-jackd` from a drop-in, `50-jack-server.conf`, that `orc1_assign_module_out.sh` *generates* (it also points a host at another card's server). The repo ships no copy, so on a fresh install run `sudo ~/orc/orc1/orc1_assign_module_out.sh <drum|poly|chip|mono|sampler> main` once per host after copying the units. (Not tested on a fresh machine; `orc1-bbkit` carries its coupling in the unit itself.)
+> - **`orc1-firevu`** (the Fire's pad VU, for the custom Fire firmware only) runs a script from `~/fire_fw/`, outside this repo. Ignore it unless you have that firmware.
+>
+> `orc1-synth` is **retired**; the repo no longer ships it.
 
 ---
 
@@ -17,7 +21,7 @@ This guide covers installing ORC-1 on a fresh Linux machine. It documents **impl
 - Numark Mixtrack Pro 3 (its onboard `M3` soundcard can also serve as an audio output — see the bridge note below)
 
 **Supported audio interfaces**
-ORC-1 picks the master output card automatically in this order: user choice (set from the web UI, saved to `~/.orc1_audio.json`) → Zoom L-12 → pisound → the first other real ALSA playback card. HDMI, Loopback, and the onboard Headphones jack are excluded from auto-selection. A *second* card (e.g. the Mixtrack's `M3`, a Perform-VE) is not selected as master — it is pulled into the running graph on demand as a bridge (see ARCHITECTURE.md → "Audio output").
+`orc1-jackd` picks the master output card in this order: the user's choice (set from the web UI, saved to `~/.orc1_audio.json`) → Zoom L-12 (`L12`) → `pisound`. If none of those is present after waiting up to 90 s, it takes the first other real ALSA playback card (HDMI, Loopback and the onboard Headphones jack are excluded), and failing that it defaults to `L12`. A *second* card (e.g. the Mixtrack's `M3`, a Perform-VE) is not the master: a module sent to it runs against that card's own named JACK server, and a zita bridge pulls the card's ports into the main graph for capture (see ARCHITECTURE.md → "Audio output").
 
 ---
 
@@ -41,16 +45,12 @@ sudo apt install -y \
 - `jackd2` — the JACK audio server (`jackd`, started by `orc1-jackd`).
 - `jack-tools` — `jack_connect`, `jack_lsp`, `jack_disconnect` (routing + watchdog checks).
 - `alsa-utils` — `aplay`, `aconnect`, `amidi` (card enumeration, MIDI wiring).
-- `zita-ajbridge` — provides `zita-j2a` / `zita-a2j`, the adaptive resamplers used to bridge a second soundcard into the one JACK graph. **Required** if you want any card other than the jackd master (the Mixtrack's audio, a Perform-VE, pisound-as-second-card). The older `alsa_in`/`alsa_out` example tools are deliberately NOT used — their resampler drifts audibly.
+- `zita-ajbridge` — provides `zita-j2a` / `zita-a2j`, the adaptive resamplers that bridge a second soundcard's ports into the main JACK graph (capture from a Perform-VE or the Mixtrack, or wiring another card's audio in). Needed for those bridges; routing a *module* to another card uses a second jackd instead. The older `alsa_in`/`alsa_out` example tools are deliberately NOT used for bridges — their resampler drifts audibly.
 - `sox` + `libsox-fmt-mp3` — decodes audio files (wav/mp3/flac/ogg/aiff) for the file-deck feature and MP3 export.
 - `jalv` — LV2 plugin host (runs FX chain/insert plugins as JACK clients).
 - `python3-pip` / `python3-dev` — for the Python packages below.
 
-**ALSA Loopback module** (used by the legacy skipback path and available as a generic loopback):
-```bash
-sudo modprobe snd-aloop
-echo "snd-aloop" | sudo tee -a /etc/modules   # survive reboots
-```
+The ALSA Loopback module (`snd-aloop`) is **not required**: the old Loopback-based skipback path is retired, and the code only skips a `Loopback` card when choosing the master.
 
 **JACK real-time permissions** — add your user to `audio` and set RT limits:
 ```bash
@@ -73,7 +73,9 @@ From inside `orc/orc1/`:
 ```bash
 pip3 install -r requirements.txt
 ```
-This installs: `flask`, `mido[ports-rtmidi]` (MIDI I/O), `numpy` (all audio DSP), `JACK-Client` (Python JACK bindings), `scipy` (EQ/filter DSP).
+This installs: `flask`, `mido[ports-rtmidi]` (MIDI I/O), `numpy` (all audio DSP), `JACK-Client` (Python JACK bindings), `scipy` (WAV reading and resampling).
+
+One more package is **not** in `requirements.txt`: **Pillow** (`sudo apt install python3-pil`), which `fire_oled.py` imports to draw the Akai Fire's OLED. Only needed if you use the Fire.
 
 ### Kernel: enable the memory cgroup (skipback memory protection)
 
@@ -159,7 +161,7 @@ Out of the box ORC-1 makes sound entirely on its **internal voices** and can rec
 - **MIDI output destinations** live in `PORTS` in `orc1/orc1_config.py`. The shipped config defines only `pisound` (plus the always-available internal synth bus). Add a line per device — key = the name you reference in presets/row maps, value = a substring of the ALSA/JACK MIDI port name from `aconnect -l`.
 - **Audio output card** is auto-selected, but you can pick one explicitly from the web UI's **AUDIO OUT** card on `/system` (persisted to `~/.orc1_audio.json`).
 - **Per-module output routing** — which physical output pair each voice (drum/poly/chip/sampler/mono/bbkit) sounds out of is set on the `/patch` page and persisted to `~/.orc1_module_outputs.json` (card-agnostic; see ARCHITECTURE.md).
-- **Skipback / sampler capture** — each skipback track records a configurable JACK source, edited on the `/skipback` page (persisted to `~/.orc1_skipback_tracks.json`). The reference rig records track 0 from the L-12's stereo return (`system:capture_13/14`); the recorder's last-resort fallback is `system:capture_1/2`.
+- **Skipback / sampler capture** — each skipback track records a configurable JACK source, edited on the `/skipback` page (persisted to `~/.orc1_skipback_tracks.json`). With a track's source on `auto`, the recorder tries the L-12's master return (`system:capture_13/14`), then `pisound-in:capture_1/2`, then the card's first stereo input (`system:capture_1/2`). Only tracks marked `armed` in the tracks file record.
 
 All of these are runtime/`$HOME` state — **not** part of the repo, so personal routing never has to be committed.
 
@@ -177,18 +179,17 @@ The reference machine runs these units, all as user `pibox`:
 | `orc1-web` | `orc1_web.py` | Flask web UI on port 5000; **not** `PartOf=orc1` (restart separately when web files change) |
 | `orc1-system` | `orc-control/orc1_system.py` | Pi health stats on port 5002 (proxied by `/system`) |
 | `skipback-record` | `skipback/skipback_recorder.py` | Multitrack ring recorder; JACK client `skipback-rec` |
+| `orc1-jackd@<card>` | `orc1_jackd_card_start.sh` | On-demand named JACK server for one extra card, started when a module is assigned to it from `/patch`. No `[Install]` |
 | `orc1-bridge@<card>.<dir>` | `orc1_bridge_start.sh` | On-demand ALSA↔JACK zita bridge, started from `/patch`. No `[Install]` — never auto-starts at boot |
 | `bt-route` | Bluetooth output router | Pins the renaming `bluealsa-aplay` client |
+| `orc1-zoomfx` | `orc1_zoomfx.py` | **Optional** (only with a Zoom MS-70CDR): the `zoomfx` module. Unit file in `orc/systemd/` |
 | `orc1-kikpad` | `orc1_kikpad_link.py` | **Optional** (only with the Midiplus SmartPad / KIKPAD firmware): sends the ORC's key to the pad. Unit file in `orc/systemd/`; needs `mido` (already required) and the web process running |
 
-**`orc1-synth` is RETIRED** — disabled and inactive. `orc1_synth.py` is now a shared DSP *library* imported by the six hosts, not a service. Do **not** enable `orc1-synth`; its `inactive` state is correct, not a fault.
+**`orc1-synth` is RETIRED.** `orc1_synth.py` is now a shared DSP *library* imported by the six hosts, not a service. Do **not** install or enable an `orc1-synth` unit.
 
-> **Repo gap (2026-09-21):** the unit files for the six module hosts, `orc1-bridge@.service`, and `bt-route` are **not yet in `orc/systemd/`** — only the older set is. Until they're committed, copy them from `/etc/systemd/system/` on the reference Pi. The steps below assume the units are present in `/etc/systemd/system/`.
+**What each module host's unit carries:** `LimitRTPRIO=95` / `LimitMEMLOCK=infinity` (it renders on the JACK callback thread) and `PartOf=orc1.service` (follows a brain restart: a *MIDI* coupling) are in the unit itself. The *audio* coupling, `After=`/`BindsTo=orc1-jackd` (a soundcard switch = `restart orc1-jackd`, which cascades the hosts so they reconnect), comes from the generated `50-jack-server.conf` drop-in described at the top. `70-stagger.conf` (in the repo) delays each host's start so they don't all take JACK at once.
 
-**Critical drop-in for the module hosts (each `orc1-*` host):**
-- RT priority + memlock and the couplings `PartOf=orc1.service` (follows a brain restart — a *MIDI* coupling) and `BindsTo=orc1-jackd.service` (a soundcard switch = `restart orc1-jackd`, which cascades the hosts so they reconnect).
-
-**Critical drop-in for `skipback-record`:**
+**Drop-ins for `skipback-record`** (all in `orc/systemd/skipback-record.service.d/`: `realtime.conf`, `50-jackd-bind.conf`, `60-skipback-first.conf`, `70-memory-protect.conf`, `75-writer-fifo.conf`). The load-bearing one:
 - `realtime.conf` — RT priority + memlock, byte-identical to a host's. **Do not skip it.** Without it the unit inherits `LimitRTPRIO=0` / `LimitMEMLOCK=8388608`, JACK's `AcquireSelfRealTime` fails, and the always-on ring recorder runs its callback at `SCHED_OTHER` with unlocked memory. The tell is three lines at every recorder start:
   ```
   Cannot lock down 107350048 byte memory area (Cannot allocate memory)
@@ -253,7 +254,4 @@ Check the skipback track's source on `/skipback` — if it points at an L-12 cha
 jackd has wedged (running but rejecting new clients — can also be triggered by a large memory allocation elsewhere). `sudo systemctl restart orc1-jackd` reaps the stale server and starts fresh; `BindsTo` cascades the hosts.
 
 **A module won't come out of a second card**
-Bringing a card into the graph and routing a module to it are **two** steps on `/patch`: first start the card (CARDS section → an `orc1-bridge@<card>.<dir>` zita bridge), then route the module's output to it (module-outputs). Until the bridge is started the card has no JACK ports to target. `zita-ajbridge` must be installed.
-
-**Jog wheel on the Mixtrack moves samples wildly**
-Make sure you're running the deployed `orc1_mixtrack.py` with `_rel()` two's-complement decoding for relative CCs.
+Assign the module to the card from the CARD picker on `/patch`. That starts `orc1-jackd@<card>`, rebinds the module's host to it and restarts the host. If the card's server won't start, check `systemctl status orc1-jackd@<card>` and `journalctl -u orc1-jackd@<card>`: the card may be absent (the unit gives up after 5 tries in 30 s), or may not accept the rate the script chose. To get a card's *ports* into the main graph for patching or capture instead, start its zita bridge from the CARDS section of `/patch` (`zita-ajbridge` must be installed).
