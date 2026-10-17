@@ -2,14 +2,16 @@
 
 A headless Linux music instrument: a chord engine, a 909-style drum / chip /
 poly synth, a step sequencer, an arpeggiator, an FX-chain host, and a
-retroactive audio recorder ("skipback") with a live sampler — all driven by
-hardware controllers recognised by name (Akai Fire, Numark Mixtrack Pro 3) and
-playable through any ALSA/JACK audio interface.
+retroactive audio recorder ("skipback") with a live sampler — all driven and controllable via whatever one may have around: 
+hardware controllers recognised by name (eg Akai Fire, Numark Mixtrack Pro 3, Beatstep Pro, or add your own), any class-compliant midi controller,or the internal sequencer and arp interfaces in the built-in webserver it makes automatically and updates live. Everything internal is controllable via midi and playable through any class-compliant audio interface(s).
 
 ## Getting started
 See **docs/INSTALL.md** for a full install on a fresh Linux box, and
 **docs/ARCHITECTURE.md** for how the pieces fit together.
 
-Out of the box everything runs on the internal synth — no external gear or
-mixer required. Bring your own controllers and interface; edit `PORTS` in
-`orc1/orc1_config.py` to route to your own hardware.
+Out of the box everything runs on the internal synth and a self-contained web interface — no external gear or
+mixer required. Bring your own controllers and interface, the ORC should automatically detect them and have them show up in the routing matrix. 
+This project was designed to be hardware-agnostic: able to be installed and played with literally anything you have around that can run Linux. The web interface has everything you could need to operate, route, configure, and remap everything here, and if you forget something in that sea of info, there's a live-populated map of every cc assignment.
+Also included in the web interface is a section that lets you add your controller(s) to the list of internally-recognized devices, specialized profiles that map automatically when you plug it in next. This is also helpful for getting around unfortunate midi implementation on the part of certain manufacturers and can act as a translator between external devices.
+
+If you need something pretty to look at, there's a whole vector art meets Earthbound visualizer you can spin up, complete with the ability make it a pulsing spotlight or other shaped projection, etc etc etc
