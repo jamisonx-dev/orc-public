@@ -3,7 +3,7 @@
 A headless Linux music instrument: a chord engine, a 909-style drum / chip /
 poly synth, a step sequencer, an arpeggiator, an FX-chain host, and a
 retroactive audio recorder ("skipback") with a live sampler — all driven and controllable via whatever one may have around: 
-hardware controllers recognised by name (eg Akai Fire, Numark Mixtrack Pro 3, Beatstep Pro, or add your own), any class-compliant midi controller,or the internal sequencer and arp interfaces in the built-in webserver it makes automatically and updates live. Everything internal is controllable via midi and playable through any class-compliant audio interface(s).
+hardware controllers recognised by name (e.g. Akai Fire, Mixtrack Pro 3, Beatstep Pro, or add your own), any class-compliant midi controller,or the internal sequencer and arp interfaces in the built-in webserver it makes automatically and updates live. Everything internal is controllable via midi and playable through any class-compliant audio interface(s).
 
 ## Getting started
 See **docs/INSTALL.md** for a full install on a fresh Linux box, and
