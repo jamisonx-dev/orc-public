@@ -5,6 +5,8 @@ poly synth, a step sequencer, an arpeggiator, an FX-chain host, and a
 retroactive audio recorder ("skipback") with a live sampler — all driven and controllable via whatever one may have around: 
 hardware controllers recognised by name (e.g. Akai Fire, Mixtrack Pro 3, Beatstep Pro, or add your own), any class-compliant midi controller,or the internal sequencer and arp interfaces in the built-in webserver it makes automatically and updates live. Everything internal is controllable via midi and playable through any class-compliant audio interface(s).
 
+There's more here than can be communicated by my words, some absolutely astounding. These are essentially building blocks. Steal them and build your own.
+
 ## Getting started
 See **docs/INSTALL.md** for a full install on a fresh Linux box, and
 **docs/ARCHITECTURE.md** for how the pieces fit together.
