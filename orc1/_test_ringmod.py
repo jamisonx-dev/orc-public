@@ -37,7 +37,7 @@ if HERE not in sys.path:
 import numpy as np                                            # noqa: E402
 import orc1_synth as S                                        # noqa: E402
 
-EXPECTED = 63                    # see the note in __main__ -- a shrinking
+EXPECTED = 64                    # see the note in __main__ -- a shrinking
                                  # suite must go red, not quietly say "0 failed"
 
 SR      = S.SAMPLE_RATE
@@ -294,10 +294,25 @@ def test_note_on_resets_phase_and_snaps_depth():
     v, rm = make_voice(69, depth=1.0, ratio=2.0)
     render(v, 2)
     check(v.rm_phase != 0.0, "carrier phase advances while rendering")
+    # 2026-10-19: re-triggering a voice that is still SOUNDING (a steal) must
+    # NOT reset the carrier -- that was a gain step mid-sound, the pops owner
+    # heard playing fast (_test_poly_steal measures it). Only a note from
+    # silence starts at phase 0.
+    before = v.rm_phase
     v.note_on(72, 127, 'sine', 0.001, 0.1, 1.0, 0.1, 2)
-    check(v.rm_phase == 0.0, "note_on resets the carrier phase")
+    check(v.rm_phase == before,
+          "re-triggering a SOUNDING voice keeps the carrier running (no click)",
+          f"{before} -> {v.rm_phase}")
+    v.note_off()
+    for _ in range(2000):                 # let the 0.1 s release finish
+        if not v.active():
+            break
+        v.render(256)
+    v._rm_depth_cur = 0.25                # as if a knob ramp were mid-way
+    v.note_on(72, 127, 'sine', 0.001, 0.1, 1.0, 0.1, 3)
+    check(v.rm_phase == 0.0, "a note from SILENCE starts the carrier at phase 0")
     check(v._rm_depth_cur == 1.0,
-          "note_on snaps smoothed depth to target (no fade-in at note start)",
+          "note_on from silence snaps smoothed depth to target (no fade-in)",
           f"{v._rm_depth_cur}")
 
 

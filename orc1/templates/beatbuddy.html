@@ -38,6 +38,15 @@
   .bb-kit.cur { outline:2px solid #0a7; }
   #bb-flash { font-size:12px; color:#0a7; }
   .bb-note { font-size:12px; opacity:.7; margin-top:8px; }
+  .bb-mix { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 14px; }
+  .bb-mixrow { display:flex; flex-direction:column; gap:2px; }
+  .bb-mixrow .hd { display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:600; }
+  .bb-mixrow .hd .v { font-weight:400; opacity:.7; font-variant-numeric:tabular-nums; }
+  .bb-mixrow input[type=range] { width:100%; }
+  .bb-mixrow.muted { opacity:.45; }
+  .bb-mixrow .mute { font-size:11px; padding:1px 6px; }
+  .bb-mixrow .mute.on { outline:2px solid #c33; }
+  #bb-songs { max-height:60vh; overflow-y:auto; padding-right:4px; }
 </style>
 {% endblock %}
 
@@ -81,22 +90,6 @@
   </section>
 
   <section class="card">
-    <div class="card-label">SONG</div>
-    <div class="bb-filters">
-      <select id="bb-genre"><option value="">All genres</option></select>
-      <input id="bb-search" class="search" type="search" placeholder="search name…" autocomplete="off">
-      <input id="bb-bpm-min" class="bpm" type="number" placeholder="min" min="0" title="min bpm">
-      <span style="opacity:.5">–</span>
-      <input id="bb-bpm-max" class="bpm" type="number" placeholder="max" min="0" title="max bpm">
-      <span style="opacity:.5">bpm</span>
-      <button class="btn" id="bb-clear" title="clear filters">✕</button>
-      <span id="bb-count"></span>
-    </div>
-    <div id="bb-songs" class="bb-songs"></div>
-    <div class="bb-note" id="bb-songs-empty" hidden>No songs staged. Put .BBS files in <code>~/.orc1_bbsongs</code> on the Pi.</div>
-  </section>
-
-  <section class="card">
     <div class="card-label">OUTPUT</div>
     <div class="flags" id="bb-out">
       <button class="flag" data-dest="bbkit" onclick="BB.setOutput('bbkit')">BBKIT</button>
@@ -114,6 +107,28 @@
   <section class="card">
     <div class="card-label">KIT</div>
     <div id="bb-kits" class="bb-kits"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">MIX <span class="bb-sub" style="display:inline">level per drum, before any output (0 = mute)</span></div>
+    <div id="bb-mix" class="bb-mix"></div>
+    <div style="margin-top:6px"><button class="btn" onclick="BB.mixReset()">RESET ALL</button></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label">SONG</div>
+    <div class="bb-filters">
+      <select id="bb-genre"><option value="">All genres</option></select>
+      <input id="bb-search" class="search" type="search" placeholder="search name…" autocomplete="off">
+      <input id="bb-bpm-min" class="bpm" type="number" placeholder="min" min="0" title="min bpm">
+      <span style="opacity:.5">–</span>
+      <input id="bb-bpm-max" class="bpm" type="number" placeholder="max" min="0" title="max bpm">
+      <span style="opacity:.5">bpm</span>
+      <button class="btn" id="bb-clear" title="clear filters">✕</button>
+      <span id="bb-count"></span>
+    </div>
+    <div id="bb-songs" class="bb-songs"></div>
+    <div class="bb-note" id="bb-songs-empty" hidden>No songs staged. Put .BBS files in <code>~/.orc1_bbsongs</code> on the Pi.</div>
   </section>
 
 </div>

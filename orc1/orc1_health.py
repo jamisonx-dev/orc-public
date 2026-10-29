@@ -75,6 +75,7 @@ STATUS_JSON = os.path.join(HOME, ".orc1_skipback_status.json")
 AUDIO_JSON = os.path.join(HOME, ".orc1_audio.json")
 FX_IO_JSON = os.path.join(HOME, ".orc1_fx_io.json")
 FX_RACK_JSON = os.path.join(HOME, ".orc1_fx_rack.json")
+FX_RACK_STATUS_JSON = os.path.join(HOME, ".orc1_fx_rack_status.json")
 OVERRIDES_JSON = os.path.join(HOME, ".orc1_config_overrides.json")
 STATE_JSON = os.path.join(HOME, "orc1_state.json")
 EXPECT_JSON = os.path.join(HOME, ".orc1_health_expect.json")
@@ -125,7 +126,7 @@ NOT_A_DESTINATION = frozenset({"ve-watchdog"})
 # written -- it omitted /beatstep, so the check reported "12 of 12 pages OK"
 # while never looking at one of them. A checker with an incomplete list is a
 # checker that reports a clean bill of health it did not earn.
-WEB_PAGES = ["/", "/synth", "/chip", "/drums", "/seq", "/sampler", "/skipback",
+WEB_PAGES = ["/", "/chord", "/synth", "/chip", "/drums", "/seq", "/sampler", "/skipback",
              "/fx", "/control", "/matrix", "/patch", "/routes", "/system",
              "/beatstep", "/rc505", "/pedal", "/pads", "/kikpad", "/visuals", "/cme", "/performve", "/hud", "/screens"]
 
@@ -466,6 +467,26 @@ def sec_system():
                 pass
 
 
+def main_jackd_line(ps_text):
+    """The MAIN (default) jackd's command line from `ps -eo args`, or None.
+
+    A card's own server (orc1-jackd@<card>, the per-host-jackd model) is
+    `jackd -n <card> ... -dalsa -dhw:<card>`; the main one has no -n BEFORE
+    -dalsa (its `-n N` after -dalsa is the ALSA period count, not a name).
+    Taking the first jackd in ps read the pisound's server as the main one
+    whenever it booted first (it did, 2026-10-19: a false "config wants L12,
+    jackd is on hw:pisound"). Same rule as orc1_web._jackd_servers and
+    orc1_assign_module_out.sh default_card()."""
+    for l in ps_text.splitlines():
+        parts = l.split()
+        if not parts or not parts[0].endswith("jackd") or "-d" not in l:
+            continue
+        pre = re.split(r"\s-d\s*alsa\b", l, maxsplit=1)[0].split()
+        if "-n" not in pre:
+            return l
+    return None
+
+
 def sec_audio_engine(up):
     hdr("AUDIO ENGINE (jackd)")
     if not up:
@@ -476,8 +497,7 @@ def sec_audio_engine(up):
         return
 
     rc, out = run(["ps", "-eo", "args"])
-    line = next((l for l in out.splitlines() if "jackd " in l and "-d" in l
-                 and "grep" not in l), None)
+    line = main_jackd_line(out)
     if not line:
         dead("jack.missing",
              "jack_lsp answered but no jackd process found -- inconsistent")
@@ -854,67 +874,26 @@ def _reach_through_fx(have, side, conns, ports):
 
 
 def sec_module_outputs(ports, conns):
-    """Is each module host wired where its SAVED output says (added 2026-09-24)?
+    """Where does each module's audio go right now? INFORMATION ONLY.
 
-    Post audio-host split, this is the routing fact that matters: each module
-    owns one output pair, saved in ~/.orc1_module_outputs.json and applied by
-    the host at start (autoconnect_module_out). A module that is running but
-    not on its pair is silent where you expect it -- a status screen shows the
-    host 'active' and nothing else. Extra wires (fan-out added on /patch) are
-    the player's own and only noted."""
-    hdr("MODULE OUTPUTS -- is each module wired where its saved setting says?")
+    There are no predefined homes for modules (owner, 2026-10-19): every wire
+    on the /patch grid is the player's choice, so a module that is not on some
+    'saved' pair is not a fault and this never warns. Until then this compared
+    the live wiring with ~/.orc1_module_outputs.json and called any difference
+    DEAD, which fired on ordinary patching."""
+    hdr("MODULE OUTPUTS -- where each module's audio goes right now (information only)")
     try:
         sys.path.insert(0, ORC1_DIR)
         import orc1_config as _cfg
         keys, names = _cfg.MODULE_OUT_KEYS, _cfg.MODULE_JACK_NAMES
-    except Exception as e:
-        warn("modout.config", "could not read module output config: %s" % e)
+    except Exception:
         return
-    phys = _phys_playback()
     for key in keys:
         jk = names.get(key)
-        if not jk:
+        if not jk or (jk + ":out_L") not in ports:
             continue
-        L, R = jk + ":out_L", jk + ":out_R"
-        if L not in ports or R not in ports:
-            note("%-8s %s not in the graph (host not running -- see SERVICES)"
-                 % (key, jk))
-            continue
-        dest = _cfg.load_module_out(key)
-        pair = _cfg.resolve_module_out(dest, phys)
-        have_l, have_r = set(conns.get(L, [])), set(conns.get(R, []))
-        if pair is None:
-            if dest == "none":
-                ok("modout.%s" % key, "%s: output set to NONE (renders, wired "
-                   "nowhere) -- as saved" % key)
-            else:
-                warn("modout.%s" % key, "%s: no physical outputs to wire to" % key)
-            continue
-        label = dest or "default (main pair)"
-        # An fx INSERT or the /fx RACK may sit in the path (both cut the
-        # direct wire) -- correctly wired; follow them to where they land.
-        via_l = _reach_through_fx(have_l, "L", conns, ports)
-        via_r = _reach_through_fx(have_r, "R", conns, ports)
-        if pair[0] in via_l and pair[1] in via_r:
-            if (pair[0] not in have_l) or (pair[1] not in have_r):
-                ok("modout.%s" % key, "%s -> fx -> %s / %s as saved (%s)"
-                   % (key, pair[0], pair[1], label))
-                continue
-        if pair[0] in have_l and pair[1] in have_r:
-            ok("modout.%s" % key, "%s -> %s / %s as saved (%s)"
-               % (key, pair[0], pair[1], label))
-        else:
-            dead("modout.%s" % key,
-                 "%s is saved to %s (%s / %s) but is NOT wired there -- live: "
-                 "L->%s  R->%s. It is silent on its configured output. Fix: "
-                 "/patch MODULE OUTPUTS -> RE-APPLY, or restart %s"
-                 % (key, label, pair[0], pair[1],
-                    ", ".join(sorted(have_l)) or "nothing",
-                    ", ".join(sorted(have_r)) or "nothing", "orc1-" + key))
-        extra = (have_l - {pair[0]}) | (have_r - {pair[1]})
-        if extra:
-            note("%-8s also wired to %s (fan-out, player's own)"
-                 % (key, ", ".join(sorted(extra))))
+        dests = sorted(set(conns.get(jk + ":out_L", [])) | set(conns.get(jk + ":out_R", [])))
+        note("%-8s -> %s" % (key, ", ".join(dests) or "nothing (patch it on /patch if you want to hear it)"))
 
 
 def sec_midi():
@@ -1223,7 +1202,7 @@ def sec_fx(ports):
             warn("fx.io.return",
                  "FX INTERNAL on '%s', whose output is set to NONE -- the FX "
                  "return is wired nowhere, so the rack is unheard. Set an output "
-                 "on /patch MODULE OUTPUTS (or pick another module on /fx)"
+                 "on the /patch grid (or pick another module on /fx)"
                  % internal_mod)
         else:
             warn("fx.io.return",
@@ -1260,6 +1239,11 @@ def sec_fx(ports):
         note("rack: %d slot(s) configured, NONE enabled -- there are no "
              "effects in your signal path" % len(slots))
         return
+    # The rack manager's live status says which slots IT started this run
+    # ("running" = in its runtime list). Missing status = no information.
+    st = read_json(FX_RACK_STATUS_JSON) or {}
+    not_started = {sl.get("idx") for sl in st.get("slots", [])
+                   if isinstance(sl, dict) and sl.get("running") is False}
     for i, s in enumerate(slots):
         if not s.get("enabled"):
             continue
@@ -1269,8 +1253,16 @@ def sec_fx(ports):
             ok("fx.slot.%d" % i, "slot %d '%s' running (%d ports)"
                % (i, name, len(have)))
             note("slot %d: %s running" % (i, name))
+        elif i in not_started:
+            # 2026-10-19 (owner: "leave the FX rack off at boot, just stop
+            # health calling it DEAD"). Boot no longer restores the rack
+            # (orc1_fx_rack.RESTORE_AT_BOOT); a saved-ON slot the manager has
+            # not started yet is waiting by design, not broken.
+            _record("idle", "fx.slot.%d" % i,
+                    "slot %d '%s' is saved ON but not started since boot (by "
+                    "design: it starts when you touch it on /fx)" % (i, name))
         else:
-            # The desired-state file still says enabled even if jalv died.
+            # The manager started it (or we can't tell) and jalv is gone.
             dead("fx.slot.%d" % i,
                  "slot %d '%s' is enabled but has NO JACK ports -- jalv is "
                  "not running, the effect is not in the path" % (i, name))

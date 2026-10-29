@@ -27,6 +27,7 @@ case "$MOD" in
     drum)    UNIT="orc1-drum.service" ;;
     mono)    UNIT="orc1-mono.service" ;;
     sampler) UNIT="orc1-sampler.service" ;;
+    bbkit)   UNIT="orc1-bbkit.service" ;;   # 48 kHz servers only (the web checks; the host falls back)
     *) echo "unknown module: $MOD" >&2; exit 2 ;;
 esac
 DROPDIR="/etc/systemd/system/${UNIT}.d"

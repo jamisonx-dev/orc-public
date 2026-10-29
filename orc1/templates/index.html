@@ -1,25 +1,48 @@
 {% extends 'base.html' %}
 {% block title %}ORC-1{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/scenes.css">{% endblock %}
 
 {% block content %}
+  <!-- TEMPO: re-rendered from /state every 1.5 s by main.js -->
   <div id="content">
     <div class="offline-card"><div class="offline-icon">◈</div><div class="offline-msg">WAITING FOR ENGINE…</div></div>
   </div>
-  <div class="card" id="levels-card">
-    <div class="card-label">LEVELS</div>
-    <div id="levels-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  <div class="panic-row">
+    <button class="panic-btn" onclick="cmd('PANIC')" title="Stops the sequencer, arp and sampler loops; clears stuck notes">⚡ PANIC / STOP ALL</button>
   </div>
-  <div class="card" id="skipback-compact-card">
-    <div class="card-label">SKIPBACK</div>
-    <div id="skipback-compact-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+
+  <!-- SCENES: built by scenes.js -->
+  <div class="card blue" id="scenes-card">
+    <div class="card-label"><span>SCENES</span><span class="sc-chip" id="sc-src">—</span></div>
+    <div id="sc-status" class="sc-status">loading…</div>
+    <div id="sc-filled" class="sc-filled"></div>
+    <details class="fold" id="sc-grid-fold" data-fold="sc-slots">
+      <summary>PICK A SLOT NUMBER</summary>
+      <div id="sc-grid" class="sc-grid"></div>
+    </details>
+    <div id="sc-editor"></div>
+    <div class="sc-help">
+      A scene holds only the settings you tick. Recall sets them; nothing restarts and skipback keeps recording.
+      From MIDI: CC 42 on channel 13, value = scene number (1-127). Also from a /pads pad or an FCB page.
+    </div>
   </div>
-  <div class="card" id="sys-compact-card">
-    <div class="card-label">PI HEALTH</div>
-    <div id="sys-compact-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
-  </div>
+
+  <!-- Everything else PLAY used to hold, until its new page exists -->
+  <details class="fold card" id="more-fold" data-fold="play-more">
+    <summary>MORE: MOVING TO MIDI IN / LEVELS</summary>
+    <div id="more-midi"></div>
+    <div class="card" id="levels-card">
+      <div class="card-label">LEVELS</div>
+      <div id="levels-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+    </div>
+    <div class="sc-help">
+      Chord engine and arpeggiator: <a href="/chord">CHORD</a>. Skipback status: <a href="/skipback">SKIPBACK</a>.
+      Pi health and RESTART ORC: <a href="/system">SYS</a>.
+    </div>
+  </details>
 {% endblock %}
 
 {% block page_js %}
-<script src="/static/js/system.js"></script>
 <script src="/static/js/main.js"></script>
+<script src="/static/js/scenes.js"></script>
 {% endblock %}

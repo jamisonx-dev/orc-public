@@ -545,7 +545,7 @@ class KitEngine:
         if self.voices:
             self.voices = [v for v in self.voices if not v.done]
 
-        m = self.master * CEIL
+        m = S._synth_fader_gain(self.master, CEIL)   # squared taper like the other buses (2026-10-19)
         outL *= m
         outR *= m
         return self.lim.process([outL, outR])
@@ -640,9 +640,35 @@ def persist_thread(eng, stop_event, poll_s=1.5):
             S._bus_level_write({"bbkit": max(0, min(127, int(round(eng.master * 127.0))))})
 
 
+def _open_client(jack):
+    """Join the server named by JACK_SERVER (a card's own jackd, written by
+    orc1_assign_module_out.sh; unset = the main server), like the other hosts.
+    The kit is loaded at SR (48 kHz) at import, so a server at any other rate
+    would play it at the wrong pitch and speed: fall back to the main server
+    then, loudly, as for an unreachable one (better heard than silent)."""
+    srv = os.environ.get("JACK_SERVER") or None
+    if srv is None:
+        return jack.Client(JACK_NAME)
+    try:
+        client = jack.Client(JACK_NAME, servername=srv)
+    except Exception as e:
+        print(f"[bbkit] JACK server '{srv}' unreachable ({e}); "
+              f"falling back to the default server", flush=True)
+        return jack.Client(JACK_NAME)
+    if client.samplerate != SR:
+        print(f"[bbkit] JACK server '{srv}' runs at {client.samplerate} Hz, the "
+              f"kit is {SR} Hz only; falling back to the default server",
+              flush=True)
+        client.close()
+        return jack.Client(JACK_NAME)
+    print(f"[bbkit] JACK server '{srv}' sample rate {client.samplerate} Hz",
+          flush=True)
+    return client
+
+
 def run_jack(eng, stop_event):
     import jack
-    client = jack.Client(JACK_NAME)
+    client = _open_client(jack)
     out_L = client.outports.register("out_L")
     out_R = client.outports.register("out_R")
     eng._jack_ft = (lambda: int(client.frame_time))

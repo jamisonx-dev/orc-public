@@ -1,12 +1,12 @@
 # ORC-1 / PIBOX - Owner's Manual
 
-*Last checked against the code: 2026-10-16 (audio topology, controllers, skipback, services and file lists; see ARCHITECTURE.md for the authoritative system map).*
+*Last checked against the code: 2026-10-28 (scenes, the PLAY / CHORD split, /system power buttons, the lost-contact banner, /pads, /patch across servers, the L-12-gone fallback, /visuals tabs and the network page; see ARCHITECTURE.md for the authoritative system map).*
 
 ---
 
 ## What this thing is
 
-PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesizer engine. The Akai Fire is its main control surface - 64 pads, 4 dials, a bunch of buttons (the Fire sections below describe the handler used with Akai's own firmware; with this project's custom Fire firmware the Fire runs its own sequencer and screens, see ARCHITECTURE.md). The Pisound HAT gives it stereo audio + DIN MIDI I/O. A Zoom L-12 (when present) is the usual master audio interface. The whole thing runs headless, boots in ~30 seconds, and connects to your gear like any other MIDI/audio device.
+PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesizer engine. The Akai Fire is its main control surface - 64 pads, 4 dials, a bunch of buttons (the Fire sections below describe the handler used with Akai's own firmware; with this project's custom Fire firmware the Fire runs its own sequencer and screens, see ARCHITECTURE.md; that Fire's sequencer clock, START and STOP are passed on to the pisound DIN out, e.g. to drive an MPC, `CLOCK_THRU_USB_PORTS` in the config). The Pisound HAT gives it stereo audio + DIN MIDI I/O. A Zoom L-12 (when present) is the usual master audio interface. The whole thing runs headless, boots in ~30 seconds, and connects to your gear like any other MIDI/audio device.
 
 **Hardware:**
 - Raspberry Pi (pibox) - hostname `pibox`, user `pibox`
@@ -17,9 +17,10 @@ PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesi
 **JACK audio topology (authoritative detail in `ARCHITECTURE.md`):**
 - One **default** JACK server, owned by `orc1-jackd`, at 48 kHz. The master card is resolved `~/.orc1_audio.json` → L-12 → pisound → (after waiting up to 90 s) the first real card. NOT fixed to the L-12.
 - Each voice runs in **its own host process** (2026-09 split) and publishes its own ports: `ORC1-Drum`, `ORC1-Poly`, `ORC1-Chip`, `ORC1-Sampler`, `ORC1-Mono`, `ORC1-BBKit`, each with `out_L`/`out_R`. **There is no `ORC1-Synth` client and no single summed-mix port** — the old `ORC1-Synth:out/drum/poly/chip/samp` names and `SYNTH.MAIN_MIX_BUSES` are gone.
-- Which physical pair each voice sounds out of is set per module on `/patch` (persisted `~/.orc1_module_outputs.json`).
-- A voice (all but BBKit) can be sent to **another card**: the CARD picker on `/patch` starts that card's own named JACK server (`orc1-jackd@<card>`) and moves the voice's host onto it. Such a voice is not in the default graph. An on-demand `zita` bridge (also from `/patch`) is what pulls a second card's *ports* into the default graph, e.g. to capture from it; it is never `alsa_in`/`alsa_out`.
-- Skipback capture: each track records a JACK source you choose on `/skipback`. With the source on `auto`, the recorder tries the L-12 master return (`system:capture_13/14`), then pisound's inputs, then the card's first stereo input. The recorder owns its own wiring, so change it on `/skipback`, not by hand.
+- Which physical outputs each voice sounds out of is simply how it is wired on the `/patch` grid; no voice has a fixed home. A host wires itself to the first output pair when it starts, unless you patched it elsewhere: the pair it was last wired to is remembered (`~/.orc1_module_outputs.json`) and it goes back there.
+- A voice can be sent to **another card**: the MODULE SERVERS picker on `/patch` starts that card's own named JACK server (`orc1-jackd@<card>`) and moves the voice's host onto it (BBKit only to a 48 kHz server, because its kit is loaded at 48 kHz). The `/patch` grid shows the ports of **every running JACK server**, so such a voice stays patchable there, and wiring a voice's outputs to another server's ports moves the voice to that server. JACK can't wire across servers, so a card's own port can't be wired to the main server that way. An on-demand `zita` bridge (CARDS on `/patch`) is what pulls a second card's *ports* into the default graph, e.g. to capture from it; it is never `alsa_in`/`alsa_out`.
+- **When the L-12 goes away** (powered off, or switched to card-reader mode), the main server moves to the pisound in ~13 s and everything that depends on it, skipback included, comes back by itself; when the L-12 returns, the main server moves back (~10 s). See Troubleshooting.
+- Skipback capture: each track records a JACK source you choose on `/skipback`. With the source on `auto`, the recorder tries the L-12 master return (`system:capture_13/14`), then pisound's inputs, then the card's first stereo input. A track with a **manual** source that disappears records the pisound's inputs instead (while the main server is on the pisound) and goes back to its own source when it returns; `/skipback` status shows `fallback`. The recorder owns its own wiring, so change it on `/skipback`, not by hand.
 
 ---
 
@@ -28,8 +29,11 @@ PIBOX is a Raspberry Pi running **ORC-1**, a custom MIDI instrument and synthesi
 Everything runs as systemd services. You generally never need to touch them - the Pi auto-starts on boot.
 
 ```bash
-# Restart the brain (MIDI/chord/arp/seq). The six voice hosts follow it (PartOf).
-sudo systemctl restart orc1
+# Restart the brain (MIDI/chord/arp/seq) and the six voice hosts, one at a time,
+# so skipback doesn't glitch (the RESTART ORC button on /system does the same).
+sudo ~/orc/orc1/orc1_gentle_restart.sh
+# A plain `sudo systemctl restart orc1` also works (the hosts follow it, PartOf),
+# but stopping all six at once has made skipback miss a deadline (measured).
 
 # Restart the JACK server itself (soundcard switch, or jackd wedged).
 # This cascades the voice hosts automatically via BindsTo.
@@ -48,7 +52,7 @@ journalctl -fu orc1
 
 > **`orc1-synth` is retired** — it is disabled and inactive on purpose (`orc1_synth.py` is now a shared library the hosts import, not a service). Don't restart or enable it.
 
-**If the Zoom L-12 isn't on when the Pi boots:** turn it on, then run `sudo systemctl restart orc1-jackd`. The card is resolved by the JACK owner, so restarting a voice host alone will *not* switch cards. Give it ~5 seconds after restart for connections to appear.
+**If the Zoom L-12 isn't on when the Pi boots:** just turn it on. A udev rule (`orc/udev/99-zoom-l12.rules`) restarts `orc1-jackd` when the L-12 appears, so the main server moves onto it by itself. If it doesn't, run `sudo systemctl restart orc1-jackd` (restarting a voice host alone will *not* switch cards).
 
 **SSH access:** key-based, no password/TOTP for the key path:
 ```bash
@@ -198,13 +202,16 @@ read that before touching FX.
 
 ## Web control pages
 
-The Pi serves a phone-friendly web control surface at **http://pibox.local:5000**. It is one Flask app; every page shares the same dark theme, the live/stale/dead engine dot in the header, and a single ~1.5 s state poll. Editable fields are focus-guarded, so a value you are mid-edit is never overwritten by a poll refresh. As of 2026-09-15 the navigation is a **grouped expanding rail** at the bottom (category buttons — PLAY · SIGNAL · SAMPLE · VOICES · RHYTHM · CONTROL · SYS — that open a sub-row of pages; the current page's group auto-opens).
+The Pi serves a phone-friendly web control surface at **http://pibox.local:5000**. It is one Flask app; every page shares the same dark theme, the live/stale/dead engine dot in the header, and a single ~1.5 s state poll. Editable fields are focus-guarded, so a value you are mid-edit is never overwritten by a poll refresh. The navigation is a **grouped expanding rail** at the bottom: PLAY · CHORD · SIGNAL · SAMPLE · VOICES · RHYTHM · CONTROL · HUD · VIS · SYS. The five group buttons open a sub-row of pages (the current page's group auto-opens); the others go straight to their page.
+
+**NO CONTACT WITH THE ORC** (2026-10-28): if nothing from the Pi has answered for 5 seconds, every page shows a red bar saying so (presses are not arriving), and a green BACK IN CONTACT when it answers again. A tab in the background doesn't count. When it appears it is almost always the Wi-Fi between you and the Pi, not the ORC: the engine keeps playing.
 
 The table below lists the **main** pages; the live nav has more (per-controller pages such as `/beatstep`, `/rc505`, `/cc`, `/mono`, `/beatbuddy`). The two most important routing pages are **`/patch`** and **`/skipback`**:
 
 | Path | What it is |
 |------|-----------|
-| `/` (PLAY) | Everything you touch while playing |
+| `/` (PLAY) | Tempo, PANIC and **SCENES** (see [Scenes](#scenes)) |
+| `/chord` | The chord engine and the arpeggiator |
 | `/patch` | **Audio patchbay** — bring a card into the graph (CARDS), route each module's output, wire arbitrary JACK connections. This is where per-module output routing and second-card bridges live. |
 | `/matrix` | Per-voice **MIDI channel** binding, P1/P2 join, levels |
 | `/routes` | MIDI routing matrix + chord/melody-out overrides |
@@ -215,16 +222,21 @@ The table below lists the **main** pages; the live nav has more (per-controller 
 | `/chip` | NES + GameBoy chip voices |
 | `/mono` | Mono/lead voice |
 | `/drums` | 909 drums + sample slots |
+| `/beatbuddy` | The BeatBuddy module: songs, parts, and a MIX card (a level per drum, 0 = muted; `~/.orc1_bb_mix.json`) |
 | `/seq` | Step sequencer |
 | `/sampler` | Live-loop / DJ sampler decks (+ capture source per deck) |
 | `/fx` | FX chains (legacy rack; see `FX_SYSTEM.md` for the current insert model) |
 | `/control` | Fire knob map, pads, chord rows |
 | `/pads` | **Pad maps**: give any device's pads (a drum brain, a pad controller) their own job — a note on a named module, a CC, or an action. See [Pad maps](#pad-maps-drum-brains-and-other-pads) |
 | `/cc` | The CC map: every control-change number the instrument uses, generated from the code. It rebuilds itself (a ~3 s first load) whenever the code has changed since it was last built, so its "Generated" date is the date of the last code change you've viewed it after |
-| `/system` | Pi health, audio out, config |
+| `/visuals` | VISUALS mode, in six tabs (see [VISUALS mode](#visuals-mode-line-scenes-on-the-hdmi-monitor)) |
+| `/system` | Pi health, audio out, Wi-Fi, RESTART ORC / REBOOT / SHUT DOWN, config |
 
 ### PLAY - `/`
-The home page. A BPM block (tempo readout, -5/-1/+1/+5, TAP, clock source INT/EXT/DRIFT, CLK OUT), a MIDI + AUDIO card (connected external devices with RESCAN, DIN routing THRU/ENGINE, the POLY and CHIP chord-mirror toggles, STEREO mode with pan presets and per-bus pan sliders), and the chord/arp card. The chord card holds the root and scale pickers, voicing, STAGE ROOT / AUTO CHORD, DIAT LOCK, VL, MIRROR, NOTE THRU, the PANIC and RESTART buttons, and the full arpeggiator section (on/hold, pattern, rate, gate, swing, humanize). A compact PI HEALTH card at the bottom links to SYS.
+The home page (reorganised 2026-10-26). The tempo block (tempo readout, -5/-1/+1/+5, TAP, clock source INT/EXT/DRIFT, CLK OUT), **PANIC / STOP ALL** (stops the sequencer, arp and sampler loops and clears stuck notes), and the **SCENES** card (see [Scenes](#scenes)). A **MORE** fold-out at the bottom still holds what PLAY used to show until it gets its own page: connected external devices with RESCAN, DIN routing THRU/ENGINE, the chord mirror and NOTE THRU, STEREO mode with pan, and a LEVELS card. The chord engine and arp moved to **CHORD**; skipback status to the top of **/skipback**; RESTART ORC and Pi health to **SYS**.
+
+### CHORD - `/chord`
+The chord engine and the arpeggiator, moved off PLAY on 2026-10-26: the chord display, root and scale, voicing, STAGE ROOT, key lock, snap, quality, VL, **SEND CHORDS TO** (poly / chip), and the full arpeggiator (on/hold, pattern, rate, gate, swing, humanize).
 
 ### SYNTH - `/synth`
 Sliders for the poly voice on MIDI channel 8: waveform, attack, decay, sustain, release, level, filter cutoff / resonance / mode, and octave. Sliders read back the last value the engine forwarded to the synth bus from any source (web, Fire, or Mixtrack), so the page reflects hardware moves too.
@@ -242,13 +254,19 @@ The full step sequencer: tracks, steps, per-step note edit, track length, transp
 Both sampler decks with GRAB 8s and 1/2/4/8-bar capture, LOOP / REV / STOP / SAVE, the waveform view with the nudge row, speed and volume, and the crossfader. File decks let you browse `~/recordings` and the samples folder and load any audio file onto a deck. The skipback source card (SYNTH DIRECT / L12 MASTER presets plus free port pickers) lives here - it is what the sampler hears. Per-deck EQ and filter sliders mirror the Mixtrack's knobs.
 
 ### FX - `/fx`
-Lists the FX chains from `fx_chains.json` with a RUN toggle and parameter sliders per chain (labels and ranges come from the chain definition), and shows which chains the Mixtrack FX buttons are bound to. An FX I/O card switches the send/return between HARDWARE INSERT (the pisound loop) and INTERNAL (processes the synth output with no external cabling) and warns when the configured ports are not present on the active card.
+Lists the FX chains from `fx_chains.json` with a RUN toggle and parameter sliders per chain (labels and ranges come from the chain definition), and shows which chains the Mixtrack FX buttons are bound to. An FX I/O card switches the send/return between HARDWARE INSERT (the pisound loop) and INTERNAL (processes the synth output with no external cabling) and warns when the configured ports are not present on the active card. Since 2026-10-19 the rack does **not** restore itself at boot (it used to, before the card's ports were up, and left a module wired nowhere): a saved slot comes back when you touch it here.
 
 ### CTRL - `/control`
-The universal control surface editor: the Fire's four knobs across three layers (BASE/SHIFT/ALT) with a target dropdown, the chord-row routing editor (each of the four Fire pad rows to the chord engine, a direct port/channel, or off), the universal pad-grid editor, a live MIDI port scan, connected-controller status with RESCAN, and the voice map. Changes apply immediately and persist; the Fire's own on-hardware mapping stays in sync.
+The universal control surface editor: the Fire's four knobs across three layers (BASE/SHIFT/ALT) with a target dropdown, the chord-row routing editor (each of the four Fire pad rows to the chord engine, a direct port/channel, or off), a live MIDI port scan, connected-controller status with RESCAN, and the voice map. Changes apply immediately and persist.
+
+**FIRE UNIVERSAL PAGES** (2026-10-27, the custom Fire firmware v0.31 or later): the UNIVERSAL card edits the 8 pages of the Fire's own universal mode (PERFORM pressed twice on the Fire), which are **stored on the Fire** and work with no Pi. Each page has a BASE and a SHIFT layer of 64 pads (6 pad types, with colours) and 4x4 knob banks. SEND TO FIRE writes a page and reads it back to check it. The card refuses to send to older firmware.
 
 ### SYS - `/system`
-Pi health: CPU temperature and power status, CPU/RAM/disk gauges, service status, and recent recordings. The AUDIO OUT card picks the output card; the BLUETOOTH card makes the Pi discoverable as "pibox". A CONFIG OVERRIDES card edits whitelisted config keys (persisted to `~/.orc1_config_overrides.json`, with a per-key restart chip when needed). Reboot and shutdown live on the separate system dashboard at **http://pibox.local:5002**, linked from this page.
+Pi health: CPU temperature and power status, CPU/RAM/disk gauges, service status, and recent recordings. The AUDIO OUT card picks the output card; the BLUETOOTH card makes the Pi discoverable as "pibox". A CONFIG OVERRIDES card edits whitelisted config keys (persisted to `~/.orc1_config_overrides.json`, with a per-key restart chip when needed).
+
+**SYSTEM CONTROLS** (2026-10-25): **RESTART ORC** (the brain and the sound modules, one at a time so skipback doesn't glitch; the Pi stays on), **REBOOT** and **SHUT DOWN** for the whole Pi. REBOOT and SHUT DOWN ask on the page first (tap it, then the named button). They only work from the Pi itself, its hotspot, or the home network (`orc1_nettrust`; other sources get "not allowed"). The separate dashboard at **http://pibox.local:5002** is still linked here.
+
+The **WIFI & FILES** card is the network page (`:5003`, see [Away from home](#away-from-home-the-pis-own-wifi-hotspot)) embedded in this one.
 
 The **HUD** card on this page starts and stops the [HUD kiosk](#hud-mode-live-play-state-on-the-hdmi-monitor) on the monitor.
 
@@ -257,6 +275,28 @@ One row per voice ("module"), where you decide **which MIDI channel each voice l
 
 ### ROUTES - `/routes`
 The full MIDI routing matrix editor, plus the chord-out and melody-out override cards. Reached from the "OUT" links on the sound pages rather than from the nav bar.
+
+---
+
+## Scenes
+
+A **scene** (2026-10-26) is a numbered slot, 1-128, that holds **only the settings you tick for it**. Recalling it sets those settings and leaves everything else alone. Nothing restarts and skipback keeps recording.
+
+**What a scene can hold** (365 settings as of 2026-10-28, from a list generated from the code, `orc1_settings_registry.py`): tempo, harmony (key, scale ...), the arp, the bus levels, every poly / mono / chip voice CC including the GameBoy wave, the drum voices, the visuals knobs and scene, the FX rack, the BeatBuddy, the sampler, and the pattern on a Fire running the custom firmware. Settings that are never safe to recall are left out of the list, with the reason.
+
+**On PLAY, the SCENES card:**
+- Your filled slots appear as chips, plus **+ NEW SCENE**; PICK A SLOT NUMBER opens all 128.
+- For a slot: its name, its default timing, **RECALL** (with a one-off timing), **CAPTURE** (fills the ticked settings with what is in force now), **CLEAR** (asks first), and the settings grouped by thing, each with a tick box and an editable value. A value the ORC can't read back says "type a value" and is skipped by a recall until you do.
+- The status line shows where the bar comes from, any recall waiting, and the last result.
+
+**Timing:** IMMEDIATE, NEXT BEAT, NEXT BAR (the default), 2 BARS or 4 BARS from the press. Only one recall waits at a time; a newer one replaces it. With nothing playing there is no bar to wait for, so it lands at once. The bar comes from the Fire when it runs the custom firmware and is playing (it reports each bar), otherwise from the ORC's own clock (the sequencer, the BeatBuddy or the arp). A scene that changes the Fire's pattern sends it one bar early, so the Fire switches on the same bar as the rest (not in the Fire's song mode).
+
+**Recalling from anything:**
+- **MIDI:** CC 42 on channel 13, value = scene number (1-127; 0 is ignored).
+- **A pad:** "Recall scene N" on `/pads`.
+- **The FCB pedal:** a switch set to `scene:N`.
+
+A recall sends only the values that differ from what is in force, paced so a big scene (~300 CCs) can't overflow the MIDI bus. Scenes are saved by the brain in `~/.orc1_scenes.json`.
 
 ---
 
@@ -468,11 +508,19 @@ The ORC runs headless. For editing recordings (e.g. a GRAB ALL folder) there's a
 
 ## VISUALS mode (line scenes on the HDMI monitor)
 
-Glowing geometric line scenes, full-screen on the HDMI monitor, that move with the music: the ORC's own drums and chords, and any audio in the rig you choose (the L-12 master by default, so Bluetooth and everything on the mixer counts; or one input, or one module). It's one of the four VT7 kiosks (`systemd/orc1-visuals.service` → `orc1/daw/visuals_session.sh`), and it brings its audio listener `orc1-vistap` with it; starting DAW or DJ mode takes the monitor over from it. Besides `/visuals` and any MIDI controller, it can be played from the SmartPad: bank 2, RIGHT = the [VISUALS page](#bank-2-the-orc-surface-sampler-skipback-visuals) (scenes, peephole, background, START/STOP, every knob on seven encoder banks).
+Glowing geometric line scenes, full-screen on the HDMI monitor, that move with the music: the ORC's own drums and chords, and any audio in the rig you choose (the L-12 master by default, so Bluetooth and everything on the mixer counts; or one input, or one module). It's one of the four VT7 kiosks (`systemd/orc1-visuals.service` → `orc1/daw/visuals_session.sh`), and it brings its audio listener `orc1-vistap` with it; starting DAW or DJ mode takes the monitor over from it. Besides `/visuals`, every control is a MIDI CC, so any controller (or a scene) can play it; it is built to run a projector show hands-free.
 
 ### The /visuals page (VIS in the nav)
 
-Reorganised 2026-10-12. Every slider shows its value in real units (ms, Hz, ×, °) and a one-line hint; double-click any slider to reset it.
+**Six tabs** (2026-10-24), one per thing, each with everything that adjusts that thing:
+- **PLAY**: SHOW and LAYERS.
+- **LINES**: the lines, their colour + palette, TRAILS, MOVEMENT.
+- **BACKGROUND**: pattern, bend mode + its knobs, picture look, colour + palette.
+- **PEEPHOLE**: shape, size, position, FIT.
+- **LISTEN**: the audio source, the spectrum and the beat bands.
+- **SETUP**: MIDI and all 8 palettes. The palette editor also folds out under the lines' and the background's palette buttons; an edit in one copy shows in the others.
+
+Every slider shows its value in real units (ms, Hz, ×, °) and a one-line hint; double-click any slider to reset it. The cards are described below by name.
 - **SHOW:** START / STOP / NEXT, a button per scene (holds it), CYCLE with its time, CLASSIC (the old XScreenSaver patterns), and FRAME RATE 30 / 45 / 60 (60 = ~17 ms less delay for roughly twice the CPU). 30 and 60 are locked to the monitor's refresh, so motion is perfectly even; **45 can't divide a 60 Hz screen evenly and will show a slight regular stutter**, so prefer 30 or 60. A scene change lands at once, without a restart. The **LOGO** picker folds out underneath (it opens by itself when LOGO or SHAPE4D is held). `/system` keeps a small START / STOP card that links here.
 - **LISTEN:** **SOURCE** picks what the visuals listen to: any input pair (e.g. `system:capture_13 + capture_14` = the L-12 master on this rig), any single input (mono), any module's output (drums, poly, ...), or **skipback ring (the old way)**. A change takes effect within half a second, no restart. Below it, a live spectrum of what the visuals hear (streamed ~25 times a second; bars jump up and fall smoothly), scaled to the music's own level so a quiet stream still fills it. The frequency labels sit at their true places on the log scale. In the bass, neighbouring bands that come from the same measurement are drawn as one wide bar instead of repeats. **Drag across it to choose the BEAT BAND**, the frequencies that count as a beat (the lit band; drag an edge to adjust). Kicks live around 40-120 Hz (the default is 30-150 Hz), snares 150-300 Hz, hats 6-12 kHz. The dot lights on every beat it hears.
   - **Two bands: SHAPES and BACKGROUND** (2026-10-12). DRAG SETS THE BAND FOR picks which one a drag edits. Out of the box the background follows the shapes' band. Picking BACKGROUND gives it its **OWN BAND** (cyan, CC 59/60), starting as a copy of the shapes' band and SENS, so nothing changes until you move it. It also gets its own **SENS BG** (CC 61) and its own beat light. **BACKGROUND = SAME AS SHAPES** (CC 62 below 64) goes back to one band. Typical split: kick for the shapes (40-120 Hz), snare or hats for the background (150-300 Hz / 6-12 kHz). Two bands inside the low bass mostly hear the same thing (the ~47 Hz limit below). Both bands share ATTACK / RELEASE and the GATE; the background still also rises with kicks, notes and loudness, as before. Band 2 reads the same analysis as band 1, so it costs nothing measurable.
@@ -511,10 +559,16 @@ A repeating pattern behind the lines, bent the way the battle backgrounds in Ear
   - **built-in** (10, drawn by the ORC): checker, stripes, dots, truchet (random quarter-circle tiles), waves, diamonds, rings, plaid, bricks, zigzag.
   - **hero** (87): Hero Patterns by Steve Schoger, CC BY 4.0.
   - **monster 1 / 2 / 3** (330 in pages of 128, so every tile has its own knob value): Pattern Monster, MIT.
-  - **custom** (2026-10-12): your own tiles, always the last set (up to 128), kept in `~/orc1_patterns/`. With CUSTOM selected, an UPLOAD box appears under the gallery (and DELETE THIS ONE for the selected tile). A tile is an SVG drawing of ONE repeat (any canvas size: the drawing's width/height or viewBox only sets its shape; SCALE sets its size on screen). Draw it so it wraps seamlessly, in white or grey on black or transparent: the ORC adds the colour and reads only brightness, from the RED part of each colour, so a pure-blue drawing would show nothing. Every upload is checked before it is kept: 512 KB max; no DOCTYPE/ENTITY, scripts, embedded images or links to other files (the Pi renders it, so nothing in it may reach anything else); it must render; one that would draw nothing is refused with the reason, one with no black gaps is kept with a warning (it would cover the whole background). The same file name replaces your earlier one. New uploads appear in the running visuals within a second. (Adding this set moved every SET knob position's meaning, so a saved SET value is converted once to keep pointing at the same set; the state file now records the set count.)
+  - **custom** (2026-10-12): your own tiles (up to 128), kept in `~/orc1_patterns/`. With CUSTOM selected, an UPLOAD box appears under the gallery (and DELETE THIS ONE for the selected tile). A tile is an SVG drawing of ONE repeat (any canvas size: the drawing's width/height or viewBox only sets its shape; SCALE sets its size on screen). Draw it so it wraps seamlessly, in white or grey on black or transparent: the ORC adds the colour and reads only brightness, from the RED part of each colour, so a pure-blue drawing would show nothing. Every upload is checked before it is kept: 512 KB max; no DOCTYPE/ENTITY, scripts, embedded images or links to other files (the Pi renders it, so nothing in it may reach anything else); it must render; one that would draw nothing is refused with the reason, one with no black gaps is kept with a warning (it would cover the whole background). The same file name replaces your earlier one. New uploads appear in the running visuals within a second. (Adding this set moved every SET knob position's meaning, so a saved SET value is converted once to keep pointing at the same set; the state file now records the set count.)
+  - **pictures** (2026-10-24): your own art or images, always the LAST set (up to 128), kept in `~/orc1_pictures/`. With PICTURES selected, an UPLOAD box appears (and DELETE THIS ONE). It takes PNG, JPG, GIF, WebP, BMP or SVG, **up to 16 MB and 40 megapixels**; every picture is stored in grey (its brightness: unlike a tile, blue counts), **at most 2048 px on its longer side** (the background is drawn at half the screen, so 2048 still holds detail zoomed in ~5x), phone photos turned upright, transparent = black. All-black pictures and SVGs with scripts or links are refused; a very low-contrast one is kept with a hint to use CRISP. At the default SCALE a picture is as tall as the screen. Bold lines survive best when a picture is shrunk or far away. The renderer keeps the 4 most recent pictures in memory (each up to 4 MB) and shrinks any picture the GPU can't hold. Every bend mode, the raster bars and the depth blur work on pictures exactly as on tiles.
+- **Picture look** (any picture or tile): **REPEAT** (CC 84) = repeat (the old way; a picture shows its edge where copies meet) / mirror (every other copy flipped: no seam, but half the copies read backwards) / once (one copy centred, black around it; best with wave, spin, stretch). **CRISP** (CC 85): 0 = the picture's own greys, otherwise cut to pure black and white at that level; with CRISP on, a picture shrunk on screen keeps its thin lines whole instead of breaking into dots. **INVERT** (CC 86, 64 and up) = black <-> white. **THICKEN** (CC 87) fattens thin lines (with CRISP at 0 it cuts at the middle). All four at 0 = no change.
 
   The file tiles live in `orc1/daw/patterns/` (with `CREDITS.md` and the script that converted them), and are rasterised once into `~/.cache/orc1/patterns/` (needs `rsvg-convert`, Debian `librsvg2-bin`). All are seamless, grey on black, and **their gaps stay black**; multi-colour Pattern Monster tiles keep their layers as different greys, so the palette colours them differently. A tile keeps its own shape (not forced square), and SCALE sizes file tiles in proportion to their own size.
-- **Bend mode:** WAVE (bands slide sideways), INTERLACE (every other band the opposite way: the helix look), SQUEEZE (bands bunch up and stretch), TWO LAYERS (a wave layer and an interlaced layer blended), WAVE + SQUEEZE.
+- **Bend mode:** WAVE (bands slide sideways), INTERLACE (every other band the opposite way: the helix look), SQUEEZE (bands bunch up and stretch), TWO LAYERS (a wave layer and an interlaced layer blended), WAVE + SQUEEZE, SKEW WALLS and SKEW FLOOR (the Mega Drive's fake-3D scroll tricks, after *The Adventures of Batman & Robin*). SKEW WALLS: the pattern scrolls sideways as separate walls cut into 16 px columns; each column slides up or down so walls at the sides lean away and swing round as they pass the middle. WARP = how hard they lean, FREQ = how many walls, SPEED = the scroll. SKEW FLOOR: a floor and a ceiling running off to a black horizon in the middle; rows near you scroll fastest (parallax). SPEED = the scroll, WARP = how far the far end curves sideways, FREQ = how fast the curve wanders. SPIN: the whole background tilts and rocks in chunky steps (the same two scroll tricks done as a rotation); WARP = how far, FREQ = how fast it rocks, SPEED = a drift underneath. STRETCH: scanlines repeat toward the bottom so the pattern stretches down and pumps (the Batwing stage's buildings); WARP = how much, FREQ = how fast it pumps, SPEED = the scroll. FLOOR + SKYLINE: the floor without its ceiling, and a row of buildings (filled with the pattern as windows) on the horizon, scrolling at a quarter of the floor's speed: a second parallax layer.
+- **Raster bars** (any bend mode): RASTER BARS = how strong (0 = off), BAR SIZE = how tall, BAR ROLL = middle still, either side rolls them up or down; beats shove them on. Each bar gets its own colour, like the copper bars in old Amiga and Mega Drive games.
+- **Depth blur** (any bend mode): blurs the background behind the sharp lines. In the skew modes it follows the depth: the far floor rows and the far-leaning walls blur, what is near you stays sharp.
+- **Layers + colour** (2026-10-24; every one a CC, so a show can run itself): **LINES LEVEL** (CC 88) and **BACKGROUND LEVEL** (CC 89) fade each layer on its own; 0 = gone, so LINES LEVEL 0 leaves just the background (and the peephole). Each layer has its own **HUE** (lines CC 90, background CC 93; middle = as before) and **SATURATION** (CC 91 / 94; 0 = white lines / a grey background, middle = as before, up = more vivid); the lines also get **HUE CYCLE** (CC 92) like the background's (CC 43). COLOUR (CC 27) still turns both together.
+- **Palettes:** 8 slots of 1-4 colours, set up on `/visuals` (SETUP tab, or the fold-out under each layer's palette buttons; saved to `~/.orc1_visuals_palettes.json`), picked live by **LINES PALETTE** (CC 95) and **BACKGROUND PALETTE** (CC 96): the knob's first range = off (the scene's own colours / the rainbow), then one range per slot. A palette is a loop: the layer's colours blend from one to the next and back, each line keeps its own brightness, and HUE turns the layer round the palette.
 - A beat swells the sway gently (over ~150 ms) while the brightness still punches at once; a 40 ms yank read as a hitch.
 - **LEVEL** = how much shows when nothing plays. **It starts at 0: black.** **REACT** = how much the music brings it in: kicks, notes, the audio beat and loudness. It rises quickly and fades back to black over ~0.7 s, and a hit also swells the bend. **LFO** = a slow breath on top (0 = off, else 0.02-1 Hz).
 - **WARP / FREQ / SPEED** shape the wave, **SCALE** the tile size, **CYCLE** how fast the colours turn. The colours follow the chord (the same hue as the lines, shifted by COLOUR).
@@ -562,8 +616,8 @@ Every slider is a CC on the channel the **visuals** module is bound to (on `/mat
 | 31 | sens |
 | 32 / 33 | beat band low / high (log, 20 Hz-16 kHz) |
 | 34 | background pattern (the range is split evenly over the chosen set's tiles) |
-| 50 | pattern set (built-in, hero, monster 1-3) |
-| 35 | background bend mode (split over the 5 modes) |
+| 50 | pattern set (built-in, hero, monster 1-3, custom, pictures) |
+| 35 | background bend mode (split over the 10 modes: wave, interlace, squeeze, two layers, wave + squeeze, skew walls, skew floor, spin, stretch, floor + skyline) |
 | 36-43 | background level, react, lfo, warp, freq, speed, scale, cycle |
 | 44 | peephole shape (split over off + the 6 shapes) |
 | 45-49 | peephole size, soft, x, y, fit |
@@ -578,6 +632,13 @@ Every slider is a CC on the channel the **visuals** module is bound to (on `/mat
 | 57 | MOVEMENT LFO rate when FREE (0.02-4 Hz) |
 | 58 | MOVEMENT LFO sync (split over FREE, 4 bars, 2 bars, 1 bar, 1/2 bar, 1/4 bar) |
 | 70-79 | MOVEMENT react / LFO pairs: size 70/71, rotation 72/73, brightness 74/75, sway 76/77, trails 78/79 (0 = off) |
+| 80 / 81 / 82 | RASTER BARS strength (0 = off) / BAR SIZE / BAR ROLL (64 = still) |
+| 83 | DEPTH BLUR (0 = sharp) |
+| 84-87 | picture look: REPEAT (repeat / mirror / once), CRISP, INVERT (64+), THICKEN |
+| 88 / 89 | LINES LEVEL / BACKGROUND LEVEL (0 = that layer off) |
+| 90 / 91 / 92 | lines HUE (64 = as drawn) / SATURATION / HUE CYCLE |
+| 93 / 94 | background HUE / SATURATION (its HUE CYCLE is CC 43) |
+| 95 / 96 | LINES PALETTE / BACKGROUND PALETTE (first range = off, then slots 1-8) |
 
 CC 64-69 are skipped on purpose (sustain and the other pedal numbers that gear may send). Positions survive a restart.
 
@@ -595,7 +656,7 @@ On the old skipback-ring path, skipback hands over new audio only every ~43 ms: 
 ### Shell and cost
 
 - **Shell:** `sudo ~/orc/orc1/daw/visuals.sh start|stop`; `visuals.sh next`, `set orc [secs]` (cycle), `set tunnel|mystify|tube|harmonograph|warp|hypercube|scope|ridgeline|rose|lorenz|chladni|knot|polytope|hopf|shape4d` (hold one), `set classic [secs]`, `set <XScreenSaver name>`, `fps 30|45|60`, `source <left port> [right port]` / `source ring` (what it listens to), `shot` (save the frame on the monitor to `/tmp/orc1_visuals_shot.png`: the renderer writes it itself, because an X screen grab of the GL window is stale), `list`, `status`.
-- **Cost (measured):** ~10-18% of one core at 30 fps, including the listening (~1 ms a frame); ~110 MB. It runs at the Pi's lowest CPU priority (`SCHED_IDLE`) and is memory-capped (200M / 300M) so it can never crowd skipback. It writes its frame timing to `/tmp/orc1_visuals_fps.log` every 30 s: fps, late frames, worst gap, `vsync N` (locked to every N-th refresh), and the frame's cost (`cpu` = the frame's own work, `swap` = waiting for the screen). The listener `orc1-vistap` costs 0.1-0.4% of one core and ~2 MB of its own memory; it starts and stops with the visuals, builds itself from `orc1/daw/orc_jacktap.c` on its first start (needs `gcc` and `libjack-jackd2-dev`), and rejoins by itself within ~5 s if JACK restarts.
+- **Cost (measured):** ~10-18% of one core at 30 fps, including the listening (~1 ms a frame); ~110 MB. It runs at `nice 10` (below ordinary programs, far below the audio; until 2026-10-24 it ran at `SCHED_IDLE`, which let any ordinary burst such as the health check stall a frame by 50-220 ms) and is memory-capped (200M / 300M) so it can never crowd skipback. It writes its frame timing to `/tmp/orc1_visuals_fps.log` every 30 s: fps, late frames, worst gap, `vsync N` (locked to every N-th refresh), and the frame's cost (`cpu` = the frame's own work, `swap` = waiting for the screen). The listener `orc1-vistap` costs 0.1-0.4% of one core and ~2 MB of its own memory; it starts and stops with the visuals, builds itself from `orc1/daw/orc_jacktap.c` on its first start (needs `gcc` and `libjack-jackd2-dev`), and rejoins by itself within ~5 s if JACK restarts.
 
 ---
 
@@ -621,7 +682,7 @@ The feed behind it is `/dev/shm/orc1_playstate.json`, written by the brain whene
 
 ## SmartPad (Midiplus SmartPad running KIKPAD firmware)
 
-A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, customised; the firmware source is **not** in this repo). Five banks (MODE1 cycles them): 0 = MPC1000 face controls, 1 = bass layout in 4ths, **2 = the ORC surface** (the sampler, skipback and VISUALS played from the pad, painted by the ORC: see [Bank 2](#bank-2-the-orc-surface-sampler-skipback-visuals) below), 3 = fader bank, and 4 = a **standalone step sequencer** that keeps its patterns in the pad's own flash: 8 patterns A-H of 8 rows x up to 64 steps, drum or melodic (rows = scale degrees), accents, per-step ratchets and probability, per-track loop lengths (polymeter), a one-track 64-step view, motion recording (the 8 encoders record CC moves per step) and song chaining (16 slots x 1-8 bars). **The full control reference is the pad's `USER_GUIDE.md`**; the short version:
+A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, customised; the firmware source is **not** in this repo). Five banks (MODE1 cycles them): 0 = MPC1000 face controls, 1 = bass layout in 4ths, **2 = the ORC surface** (the sampler and skipback played from the pad, painted by the ORC: see [Bank 2](#bank-2-the-orc-surface-sampler-skipback) below), 3 = fader bank, and 4 = a **standalone step sequencer** that keeps its patterns in the pad's own flash: 8 patterns A-H of 8 rows x up to 64 steps, drum or melodic (rows = scale degrees), accents, per-step ratchets and probability, per-track loop lengths (polymeter), a one-track 64-step view, motion recording (the 8 encoders record CC moves per step) and song chaining (16 slots x 1-8 bars). **The full control reference is the pad's `USER_GUIDE.md`**; the short version:
 
 | | |
 |---|---|
@@ -638,9 +699,9 @@ A Midiplus SmartPad reflashed with custom firmware (the open KIKPAD firmware, cu
 
 **Remapping banks 0 and 1 and the encoders (`/kikpad`).** The maps for bank 0, bank 1 and the encoders are stored in the pad's flash, so they work with no Pi (for example when the pad drives an MPC). The `/kikpad` page (CONTROL group) is only the editor: the brain (`orc1_kikpad_map.py`) sends the pad a SysEx on port `:1`, and the page shows what the pad *replied*, never a copy of its own. Each pad can be off, a note, a CC or a toggle, on its own channel or the bank's, with a colour; each encoder has eight modes of CC + channel.
 
-### Bank 2: the ORC surface (sampler, skipback, visuals)
+### Bank 2: the ORC surface (sampler, skipback)
 
-Bank 2 decides nothing on the pad. Its presses, encoder turns and buttons go to the Pi on the pad's second port, and **the ORC paints the bank back**, so the lights show the ORC's real state. The brain recognises that port **by name**, so no MIDI channel or CC is used up, and the pages live entirely on the Pi: a new page needs no reflash. **LEFT = SAMPLER page, RIGHT = VISUALS page** (the lit one is showing). SET is a shift on both.
+Bank 2 decides nothing on the pad. Its presses, encoder turns and buttons go to the Pi on the pad's second port, and **the ORC paints the bank back**, so the lights show the ORC's real state. The brain recognises that port **by name**, so no MIDI channel or CC is used up, and the pages live entirely on the Pi: a new page needs no reflash. It has one page, the SAMPLER (LEFT is lit). SET is a shift.
 
 **SAMPLER page.** Deck A = rows 1-3, deck B = rows 4-6:
 
@@ -654,17 +715,7 @@ Bank 2 decides nothing on the pad. Its presses, encoder turns and buttons go to 
 
 MS1 / MS2 = the encoders work on deck A / deck B. Encoders: speed, gain, filter, EQ low, EQ mid, EQ high (that deck), crossfade, sampler master. LOOP/STOP/REVERSE/PLAY/JUMP light up once a deck holds audio; nothing shows whether a deck is playing (the ORC doesn't track that). The encoders keep their own positions: a control moved from the web or the Mixtrack doesn't show on them.
 
-**VISUALS page** (controls the visuals renderer):
-
-| Row | Pads |
-|---|---|
-| 1-2 | the 16 scenes (white = playing; tap = switch) |
-| 3 | CYCLE scenes, then the peephole: off, circle, rounded, hexagon, diamond, triangle, star |
-| 4 | background bend: wave, interlace, squeeze, two layers, wave + squeeze; last pad = FIT on/off |
-| 5 | background pattern set (built-in, hero, monster 1..) |
-| bottom-right | **START** visuals (blinks while starting, green = running); **SET + tap = STOP** |
-
-Encoder banks on MS1-MS7: **MS1 motion** (speed, trail twist, trails, trail zoom, bright, beat, colour, weight), **MS2 audio** (audio amount, attack, release, sensitivity, gate, beat band low / high, background react), **MS3 background** (level, LFO, warp, frequency, speed, scale, palette cycle, pattern), **MS4 peephole + picks** (size, softness, x, y, room, fit, logo, pattern set), **MS5 camera + LFO** (size, angle, LFO rate, LFO sync, size react / LFO, rotation react / LFO), **MS6 movement** (brightness, sway, trails: react / LFO each; encoders 7-8 do nothing), **MS7 background beat band** (own-band switch, low, high, SENS BG; encoders 5-8 do nothing). The encoders start from the renderer's saved positions and follow changes made on `/visuals`. With the visuals stopped only START works (the rest is dim). Rows 6-7 are free for a pad-sized picture of the visuals later.
+**One page.** LEFT is lit; RIGHT does nothing. (Until 2026-10-24 RIGHT showed a VISUALS page; it was removed: the KIKPAD only stood in as a test controller for the visuals once, and the two are not meant to go together. The visuals take CCs from any controller.)
 
 **If bank 2 stays dark:** `journalctl -u orc1 | grep kikpad` should show `surface on KIKPAD:KIKPAD IN <n>:1`. Leaving bank 2 and coming back makes the ORC repaint it.
 
@@ -681,8 +732,13 @@ Any class-compliant USB-MIDI drum brain or pad controller just works when plugge
 | pass through | the pad plays what it always played (the same as not listing it) |
 | ignore | the hit is dropped |
 | play note | a note on a **named module** (drums, poly, chip voices, sampler ...), looked up from `/matrix` at the moment you hit, so moving modules around never sends it to the wrong place; an unbound module stays silent. Velocity = as hit, or fixed |
-| send CC | (CC inputs, e.g. a hi-hat pedal) the value goes out as a CC of your choice on a named module |
-| action | anything the FCB pedal can do: chords I-VII (latch / stab per the `/pedal` setting), RC-505 buttons, BeatBuddy, sequencer play/stop/record, tap tempo, panic, plus skipback **GRAB ALL**, arp, FX and CME preset |
+| send CC | a CC of your choice. From a CC input (e.g. a hi-hat pedal) its value passes through. From a **pad** (2026-10-19) the value is the hit's velocity or a fixed number, sent as **press** (on the hit), **momentary** (the value on the hit, 0 on release; Fire only, the one device that sends a real release) or **toggle** (the value, then 0, on alternate hits) |
+| skipback grab | (2026-10-19) save skipback from this pad: **all tracks** (the armed ones, or a chosen few) or **one track**, for the last N **bars**, the last **m:ss**, **everything** the ring holds, or **while held** (Fire only: press to release, optionally snapped to whole bars). Bars / time / everything end at the press |
+| action | anything the FCB pedal can do: chords I-VII (latch / stab per the `/pedal` setting), RC-505 buttons, BeatBuddy, sequencer play/stop/record, tap tempo, panic, plus skipback **GRAB ALL**, arp, FX, CME preset and **Recall scene N** |
+
+**Where a note or CC goes:** a **named module** (above), or an **output port + channel** (a port from `PORTS` in the config, e.g. the pisound DIN, and channel 1-16 except 13, the ORC's control channel) for real gear.
+
+**The Fire as a pad surface** (custom firmware): a profile marked as a surface paints the Fire's pads in the colour each entry names (unlisted pads stay dark and silent); SHOW ON FIRE on `/pads` puts it up, and clicking a Fire pad on the page adds it. A grab pad lights while held. A **Tap tempo** pad blinks the ORC clock's beat (beat 1 white; grey = following an outside clock).
 
 **Pads are triggers.** Drum brains send their note-off on a timer, not when you lift the stick (the SD350: right before the next hit, or ~2.4 s after the last one), so an action fires on the **hit** and the note-off is ignored. A second hit on the same pad within 80 ms is treated as a double-trigger (measured: two note-ons 10 ms apart from one hit) and doesn't fire again, so a toggle like RC-505 rec/play can't cancel itself. Hold-style actions (the BeatBuddy footswitch, page flips) aren't offered. **Min velocity** (per device, and per action pad) stops a ghost tap firing something; a CC action fires when the value rises past its threshold.
 
@@ -704,6 +760,34 @@ Plug the pedal into the Pi's USB (it powers from the port). Bind **ZOOM FX** to 
 
 The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 only answer on a pedal with the 2-byte firmware patch (stock firmware ignores edits to them). The service is `orc1-zoomfx` (`journalctl -u orc1-zoomfx`); the live patch is in `/dev/shm/orc1_zoomfx.json`.
 
+## Away from home (the Pi's own WiFi hotspot)
+
+The Pi has one WiFi radio, so it is EITHER on a WiFi network OR a hotspot, never both. Away from your
+WiFi, let it be the hotspot: join the `pibox` network from your phone or laptop and open
+`http://172.24.1.1:5000` (a `.local` name may not resolve on Android). The password is stored in the
+`pb-hotspot` NetworkManager profile (`sudo nmcli -s -g 802-11-wireless-security.psk con show pb-hotspot`);
+change it with `sudo nmcli con modify pb-hotspot wifi-sec.psk <new>`. The ORC web pages have no login of
+their own, so anyone who can join the hotspot can control the instrument.
+
+- **At boot:** if neither WiFi nor Ethernet connects within about a minute, the Pi starts the hotspot by
+  itself (`orc1-netfallback`).
+- **Pisound button:** hold 3-5 seconds and release to toggle between the hotspot and your known WiFi (the
+  pisound LED flashes 3 times for hotspot, once for WiFi). Holding 5-7 seconds still shuts the Pi down;
+  clicks 1/2/3 still grab 1/5/10 minutes of skipback.
+- **Losing the network while running:** `orc1-netwatch` waits 2 minutes with no network, then tries every saved
+  WiFi (best priority first; a phone hotspot saved at low priority counts) and falls back to the hotspot.
+- **From a shell:** `sudo ~/orc/orc1/orc1_netmode.sh ap|client|toggle|status`. Its log is `~/orc1_netmode.log`.
+  Going back to WiFi rescans and joins the best known network; if none is in range it stays a hotspot.
+- **The network page, `http://<pi>:5003`** (also the WIFI & FILES card on `/system`; its own small service,
+  `orc1-net`, so it works when the main web page is down): scan, join and forget WiFi networks, set the hotspot
+  password, and browse and download files (recordings, the ORC folder, backups). A join that fails is rolled back
+  by itself. It answers only to the Pi itself, its hotspot, and the local network while the Pi is on a network
+  marked as home (`~/.orc1_net.json`); anything else gets "forbidden". The Pi's Samba shares and the power
+  buttons follow the same rule.
+- **Strange interface at a studio?** `~/orc/orc1/orc1_probe_cards.sh` lists every USB audio card with its
+  channels and sample rates (read-only, safe while the rig plays). The rig's audio server runs at 48000 Hz on
+  the card named in `~/.orc1_audio.json`; pick another from the web audio-device control.
+
 ## Persistent state files
 
 | File | Purpose |
@@ -715,7 +799,11 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
 | `~/.orc1_protected_channels.json` | Which MIDI channels are protected from being chosen (`/matrix`); written by the web process |
 | `~/.orc1_sampler_deck_src.json` | Which skipback track each sampler deck grabs from |
 | `~/.orc1_config_overrides.json` | Whitelisted config overrides set on `/system` |
-| `~/.orc1_module_outputs.json` | Per-module output destination (which physical pair each voice sounds out of) |
+| `~/.orc1_module_outputs.json` | The output pair each voice goes back to when its host starts; kept in step with the `/patch` grid |
+| `~/.orc1_scenes.json` | Scenes 1-128: name, timing and the ticked settings; written by the brain only |
+| `~/.cache/orc1/settings_registry.json` | The list of scene-able settings, rebuilt when the code changes (derived, safe to delete) |
+| `~/.orc1_bb_mix.json` | BeatBuddy MIX: a level per drum |
+| `~/.orc1_net.json` | Network page settings, incl. which WiFi networks count as home (the trust rule) |
 | `~/.orc1_patch.json` | Saved `/patch` audio wiring (the current audio-routing persistence) |
 | `~/.orc1_skipback_tracks.json` | Skipback per-track source/config (incl. `store` ram/card, `persist`) |
 | `~/.orc1_skipback_status.json` | Skipback live status (written by the recorder; read-only for everything else) |
@@ -726,6 +814,8 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
 | `~/.orc1_visuals` | VISUALS mode choice: line 1 scene mode (`orc`, `orc:<scene>`, `classic`, or an XScreenSaver name), line 2 cycle seconds, line 3 frame rate |
 | `~/.orc1_visuals_state.json` | VISUALS knob positions (every knob CC, by name, incl. the background, peephole, camera and movement) + current scene; written by the renderer, read back by `/visuals` |
 | `/dev/shm/orc1_playstate.json` (tmpfs) | The live play-state feed for the HUD (transport, step, chord, tracks, held notes, per-module hit counters); written by the brain only when something changes, read by the HUD kiosk and `/api/hud`. Gone on reboot, rebuilt at once |
+| `~/.orc1_visuals_palettes.json` | VISUALS palette slots 1-8 |
+| `~/orc1_patterns/`, `~/orc1_pictures/`, `~/orc1_logos/` | Your uploaded VISUALS tiles, pictures and logos |
 | `~/.orc1_vistap` | What the VISUALS listen to: line 1 = left JACK port, line 2 = right (blank = mono), or `ring` = skipback's RAM ring. No file = `system:capture_1` + `_2` |
 | `~/.orc1_cme.json` | What the brain last read off the CME U6MIDI Pro (preset, names, router, filters/mappers in use); written by the brain, read by `/cme` |
 | *(none)* | The SmartPad's patterns, motion, songs and settings live in **the pad's own flash**, not on the Pi; `orc1-kikpad` keeps no state |
@@ -759,12 +849,20 @@ The pedal's own knobs keep working, and the ORC keeps track of them. Slots 4-6 o
     orc1_mixtrack.py        -> Numark Mixtrack Pro 3 handler (decks, pads, LEDs, sampler)
     orc1_surface_link.py    -> paints the ORC surface on a Fire running the custom firmware
     orc1_padmap.py          -> per-device pad maps (/pads)
+    orc1_scenes.py          -> SCENES: store, capture, recall timing (owned by the brain)
+    orc1_settings_registry.py -> every setting a scene can hold, generated from the code
+    orc1_fire_pages.py      -> reads / writes the universal pages stored on the custom-firmware Fire (/control)
+    orc1_gentle_restart.sh  -> restart the brain + hosts one at a time (RESTART ORC)
+    orc1_net.py             -> the network + files page on :5003 (service orc1-net)
+    orc1_nettrust.py        -> who may use the network page, power buttons and Samba
+    orc1_netmode.sh / orc1_netwatch.sh -> hotspot <-> WiFi switching / the no-network watchdog
+    gen_cc_map.py + cc_surfaces.py -> build the /cc map from the code
     orc1_pedal.py / orc1_rc505.py / orc1_beatbuddy.py -> FCB1010 pedal, RC-505 looper control, BeatBuddy
     orc1_cme.py             -> CME U6MIDI Pro patchbay (/cme)
     orc1_zoomfx.py          -> the zoomfx module: Zoom MS-70CDR over CC (service orc1-zoomfx)
     orc1_sampler.py         -> the sampler engine (decks, ring reader) used by the sampler host
     orc1_health.py          -> read-only health check (orc1-health.timer)
-    orc1_kikpad.py          -> SmartPad bank 2 = the ORC surface (SAMPLER + VISUALS pages), on the pad's port :1
+    orc1_kikpad.py          -> SmartPad bank 2 = the ORC surface (sampler + skipback), on the pad's port :1
     orc1_kikpad_link.py     -> sends the ORC's key to the SmartPad (service orc1-kikpad)
     orc1_kikpad_map.py      -> edits the SmartPad's own maps from /kikpad
     orc1_fx_inserts.py      -> current FX: per-source wet/dry inserts manager (see FX_SYSTEM.md)
@@ -813,7 +911,7 @@ Because ORC-1 has no screen, updates come in over SSH. The current workflow (sup
 1. **Pull before you edit** — there is no autosync, so a stale local copy will clobber newer Pi work.
 2. **Back up on the Pi** into `~/backups/<label>_<date>/` (its own step, before the transfer).
 3. **Upload with `scp`**, verify `stat -c%s` matches on both ends, then `python3 -m py_compile` (and `bash -n` for shell).
-4. **Restart the right unit** — `orc1` for the brain/handlers (the voice hosts follow via `PartOf`), `orc1-jackd` for a card switch, `orc1-web` for web files. Not `orc1-synth` (retired).
+4. **Restart the right unit** — the brain/handlers with `sudo ~/orc/orc1/orc1_gentle_restart.sh` (rather than a plain `restart orc1`), `orc1-jackd` for a card switch, `orc1-web` for web files. Not `orc1-synth` (retired).
 5. **Verify the rig, not the exit code** — `systemctl is-active`, `journalctl -p err`, xruns, `jack_lsp -c`.
 
 
@@ -823,7 +921,7 @@ Because ORC-1 has no screen, updates come in over SSH. The current workflow (sup
 ## Troubleshooting
 
 **No audio from L-12:**
-The Pi probably booted before the Zoom was powered on and fell back to Pisound.
+The main server is probably on the pisound: the L-12 was off at boot, or went away (power-off, card-reader mode). Turning it on should move the server back by itself within ~10 s (the udev rule). If it doesn't:
 ```bash
 sudo systemctl restart orc1-jackd
 ```
@@ -833,9 +931,13 @@ Wait ~5 seconds, then verify with `jack_lsp` that the voice-host outputs appear 
 X must start on the console that is in front. The units switch to console 7 themselves (`ExecStartPre=chvt 7`, added 2026-10-05: before that, with the tty1 auto-login in front, X got a paused graphics handle and crashed on every start). If it still fails, `~/.local/share/xorg/Xorg.0.log` says why; `sudo chvt 7` by hand and start again.
 
 **Fire pads not responding:**
+Unplug and replug it first: the brain picks a replugged Fire up by itself. If that doesn't help:
 ```bash
-sudo systemctl restart orc1
+sudo ~/orc/orc1/orc1_gentle_restart.sh
 ```
+
+**A page shows NO CONTACT WITH THE ORC:**
+Your device can't reach the Pi; the instrument is almost certainly still playing. Check the Wi-Fi on your phone / laptop first. If another device still reaches the Pi, the problem is between yours and the router.
 
 **OLED blank:**
 Normal when idle for >30s. Turn any knob or press any pad to wake it. If it stays blank after interaction, restart orc1.

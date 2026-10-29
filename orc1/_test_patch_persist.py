@@ -40,13 +40,20 @@ import orc1_web as W                                        # noqa: E402
 VERBOSE = "-v" in sys.argv
 PASS = FAIL = 0
 REAL_PATCH_FILE = W.PATCH_FILE          # captured before anything repoints it
+# The grid endpoint keeps ~/.orc1_module_outputs.json in step with module wiring
+# (_mo_sync_from_graph). Any test that POSTs /api/patch would otherwise rewrite the
+# LIVE file from a fake graph (it wrote drum="none" once, 2026-10-19), so the whole
+# run gets a temp file and __main__ checks the real one is untouched.
+import orc1_config as _cfg_suite                              # noqa: E402
+REAL_MO_FILE = _cfg_suite.MODULE_OUT_FILE
+_cfg_suite.MODULE_OUT_FILE = os.path.join(tempfile.mkdtemp(prefix="mo_suite_"), "mo.json")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # EXPECTED is itself a check. A suite that silently SHRINKS still prints
 # "0 failed" -- that is how three nets went missing from _test_fire.py for a
 # month while every run looked green (157 -> 154, and nobody compared). Rename
 # or lose a test and the total assertion in __main__ goes red.
-EXPECTED = 126
+EXPECTED = 136
 
 # ISSUED is per-test scratch and IS cleared. ALL_ISSUED is the standing record
 # and is NEVER cleared. See the docstring.
@@ -786,68 +793,99 @@ def test_connect_endpoint_records_intent():
         check("a wire removed here is forgotten", r.rows() == [])
 
 
-def test_module_outputs_are_protected():
-    """Each module's CONFIGURED output pair is guarded against a patchbay
-    misclick; a fan-out wire the player added is not; skipback still is.
-    (Until 2026-09-23 the guard named only the retired ORC1-Synth, so after
-    the audio host split no module output was protected at all.)"""
-    import orc1_config as cfg
+def test_module_outputs_are_not_protected():
+    """A module's output wires are the player's own like any other (2026-10-19,
+    owner: no predefined homes, nothing to 'agree' with): the patchbay lets them
+    be cut or moved without a force flag. Skipback's source wiring is still guarded.
+    (Replaces the 2026-09-23 test that required the opposite.)"""
     P = ["system:playback_%d" % i for i in (1, 2, 3, 4)]
     DL, DR = "ORC1-Drum:out_L", "ORC1-Drum:out_R"
     PL, PR = "ORC1-Poly:out_L", "ORC1-Poly:out_R"
-    tmp = tempfile.mkdtemp(prefix="modout_")
-    old_file = cfg.MODULE_OUT_FILE
-    cfg.MODULE_OUT_FILE = os.path.join(tmp, "mo.json")   # NEVER the live file
-    try:
-        with open(cfg.MODULE_OUT_FILE, "w") as f:
-            json.dump({"poly": "out-3-4"}, f)             # drum = default pair
-        conns = [(DL, P[0]), (DR, P[1]), (PL, P[2]), (PR, P[3]),
-                 (PL, P[0]),                              # player's fan-out
-                 ("system:capture_3", "skipback-rec:t1_M")]
-        prot = W._patch_protected(conns=conns, phys=P)
-        check("module guard: default-pair module (drum) protected",
-              (DL, P[0]) in prot and (DR, P[1]) in prot, repr(sorted(prot)))
-        check("module guard: module on a chosen pair (poly 3-4) protected",
-              (PL, P[2]) in prot and (PR, P[3]) in prot, repr(sorted(prot)))
-        check("module guard: a player-added fan-out wire is NOT protected",
-              (PL, P[0]) not in prot)
-        check("module guard: the reason names MODULE OUTPUTS",
-              "MODULE OUTPUTS" in prot.get((DL, P[0]), ""))
-        check("module guard: skipback wiring still protected",
-              ("system:capture_3", "skipback-rec:t1_M") in prot)
-        # A graph with no module wires never pays for a phys-port lookup.
-        calls = []
-        old_phys = W._mo_phys_ports
-        W._mo_phys_ports = lambda: calls.append(1) or P
+    conns = [(DL, P[0]), (DR, P[1]), (PL, P[2]), (PR, P[3]),
+             (PL, P[0]),
+             ("system:capture_3", "skipback-rec:t1_M")]
+    prot = W._patch_protected(conns=conns, phys=P)
+    check("no module guard: a module on the first pair is NOT protected",
+          (DL, P[0]) not in prot and (DR, P[1]) not in prot, repr(sorted(prot)))
+    check("no module guard: a module on another pair is NOT protected",
+          (PL, P[2]) not in prot and (PR, P[3]) not in prot, repr(sorted(prot)))
+    check("no module guard: a fan-out wire is NOT protected", (PL, P[0]) not in prot)
+    check("no module wire is protected at all",
+          not any(src.startswith("ORC1-") for (src, _d) in prot), repr(sorted(prot)))
+    check("skipback wiring still protected",
+          ("system:capture_3", "skipback-rec:t1_M") in prot)
+    check("module guard is gone: no jack port lookup is needed",
+          not hasattr(W, "_module_owned_wires"))
+    W.app.config["TESTING"] = True
+    client = W.app.test_client()
+    del ISSUED[:]
+    with Rig(ports=[DL, P[0]], conns=[(DL, P[0])]):
+        W._patch_ports = lambda: [{"name": DL, "dir": "out", "audio": True},
+                                  {"name": P[0], "dir": "in", "audio": True}]
+        resp = client.post("/api/patch", json={"op": "disconnect",
+                                               "src": [DL], "dst": [P[0]]})
+        check("an unforced disconnect of a module's output goes through (no 409)",
+              resp.status_code != 409 and not (resp.get_json() or {}).get("protected"),
+              repr(resp.status_code))
+        check("...and jackd was asked to disconnect it", bool(ISSUED), repr(ISSUED))
+
+
+def test_grid_changes_keep_startup_pair_in_step():
+    """The grid is the memory (2026-10-19): after a wire change on a module's outs, the
+    startup file holds the lowest clean physical pair it is on (no entry for the first
+    pair, 'none' when wired to no physical out, untouched for half wiring)."""
+    import orc1_config as cfg
+    P = ["system:playback_%d" % i for i in (1, 2, 3, 4)]
+    tmp = tempfile.mkdtemp(prefix="modsync_")
+    old = (cfg.MODULE_OUT_FILE, W._mo_phys_ports, W._patch_conns)
+    cfg.MODULE_OUT_FILE = os.path.join(tmp, "mo.json")      # NEVER the live file
+    W._mo_phys_ports = lambda: P
+    state = {"c": []}
+    W._patch_conns = lambda ports=None: list(state["c"])
+    def read():
         try:
-            W._patch_protected(conns=[("system:capture_3",
-                                       "skipback-rec:t1_M")])
-        finally:
-            W._mo_phys_ports = old_phys
-        check("module guard: no jack lookup when no module wire is present",
-              not calls)
-        # End to end: an unforced disconnect of a module's output is refused
-        # (409) and NOTHING is issued to jackd.
-        W.app.config["TESTING"] = True
-        client = W.app.test_client()
-        del ISSUED[:]
-        with Rig(ports=[DL, P[0]], conns=[(DL, P[0])]):
-            W._patch_ports = lambda: [{"name": DL, "dir": "out", "audio": True},
-                                      {"name": P[0], "dir": "in", "audio": True}]
-            old_phys = W._mo_phys_ports
-            W._mo_phys_ports = lambda: P
-            try:
-                resp = client.post("/api/patch", json={"op": "disconnect",
-                                                       "src": [DL], "dst": [P[0]]})
-            finally:
-                W._mo_phys_ports = old_phys
-            check("module guard: unforced disconnect is refused with 409",
-                  resp.status_code == 409 and resp.get_json().get("protected"))
-            check("module guard: refused disconnect issued no jack call",
-                  not ISSUED, repr(ISSUED))
+            return json.load(open(cfg.MODULE_OUT_FILE))
+        except Exception:
+            return {}
+    DL, DR = "ORC1-Drum:out_L", "ORC1-Drum:out_R"
+    try:
+        state["c"] = [(DL, P[2]), (DR, P[3])]
+        W._mo_sync_from_graph([DL, DR])
+        check("sync: moved to 3-4 is recorded", read().get("drum") == "out-3-4", repr(read()))
+        state["c"] = [(DL, P[0]), (DR, P[1]), (DL, P[2]), (DR, P[3])]
+        W._mo_sync_from_graph([DL])
+        check("sync: on both pairs records the lowest, and the first pair = no entry",
+              "drum" not in read(), repr(read()))
+        state["c"] = [(DL, "fx-rack-0:inL"), (DR, "fx-rack-0:inR")]
+        W._mo_sync_from_graph([DL])
+        check("sync: wired to no physical output = none", read().get("drum") == "none", repr(read()))
+        state["c"] = [(DL, P[2])]
+        W._mo_sync_from_graph([DL])
+        check("sync: half wiring leaves the file alone", read().get("drum") == "none", repr(read()))
+        before = repr(read())
+        W._mo_sync_from_graph(["system:capture_1", "ORC1-Nothing:out_L"])
+        check("sync: a non-module source changes nothing", repr(read()) == before)
     finally:
-        cfg.MODULE_OUT_FILE = old_file
+        cfg.MODULE_OUT_FILE, W._mo_phys_ports, W._patch_conns = old
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_grid_endpoint_calls_the_sync():
+    import inspect
+    src = inspect.getsource(W.api_patch_set)
+    check("the patch endpoint keeps the startup pair in step (wiring net)",
+          "_mo_sync_from_graph([a for a, _b in done])" in src)
+
+
+def test_patch_labels_name_the_module():
+    """CURRENT PATCH read 'OUT L' for every module's port; now it says whose."""
+    check("label: module port names the module",
+          W._patch_label("ORC1-Drum:out_L", "L12", {}) == "DRUM OUT L",
+          W._patch_label("ORC1-Drum:out_L", "L12", {}))
+    check("label: other clients keep their name",
+          W._patch_label("fx-rack-0:outL", "L12", {}) == "FX-RACK-0 OUTL")
+    check("label: card ports unchanged",
+          W._patch_label("system:playback_3", "L12", {}) == "L12 OUT 3")
 
 
 def test_failed_connect_is_not_saved():
@@ -932,7 +970,8 @@ def net_never_disconnects():
     bad = [x for x in ALL_ISSUED if x[0] != "jack_connect"]
     # The one deliberate exception is the /api/patch disconnect endpoint, which
     # is the player explicitly asking. It is driven by exactly one test.
-    allowed = [("jack_disconnect", A, B)]
+    allowed = [("jack_disconnect", A, B),
+               ("jack_disconnect", "ORC1-Drum:out_L", "system:playback_1")]   # module wires are free to cut (2026-10-19)
     unexpected = [x for x in bad if list(x) not in [list(a) for a in allowed]]
     check("no unexpected jack_disconnect was ever issued", not unexpected,
           "issued %r" % (unexpected,))
@@ -950,6 +989,8 @@ TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 NETS = [net_never_disconnects, net_live_file_untouched]
 
 if __name__ == "__main__":
+    mo_before = (os.path.exists(REAL_MO_FILE),
+                 os.path.getmtime(REAL_MO_FILE) if os.path.exists(REAL_MO_FILE) else None)
     live_before = (os.path.exists(REAL_PATCH_FILE),
                    os.path.getmtime(REAL_PATCH_FILE)
                    if os.path.exists(REAL_PATCH_FILE) else None)
@@ -966,6 +1007,10 @@ if __name__ == "__main__":
     live_after = (os.path.exists(REAL_PATCH_FILE),
                   os.path.getmtime(REAL_PATCH_FILE)
                   if os.path.exists(REAL_PATCH_FILE) else None)
+    mo_after = (os.path.exists(REAL_MO_FILE),
+                os.path.getmtime(REAL_MO_FILE) if os.path.exists(REAL_MO_FILE) else None)
+    check("live module-outputs file unchanged on disk", mo_before == mo_after,
+          "%r -> %r" % (mo_before, mo_after))
     check("live saved-patch file unchanged on disk", live_before == live_after,
           "%r -> %r" % (live_before, live_after))
     # A suite that quietly shrinks still prints "0 failed".

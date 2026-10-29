@@ -1,19 +1,7 @@
 /* fonts: self-hosted @font-face in shared.css (2026-09-23) */
-:root{
-  --bg:#0a0a0a;--panel:#111;--border:#1e1e1e;--dim:#2a2a2a;
-  --muted:#444;--label:#556;--body:#8a9aaa;--bright:#c8dae8;
-  --accent:#00c8a0;--accent2:#e05a00;--warn:#e0a000;
-  --rec:#e00040;--on:#00e87a;--off:#111;
-  --fs:'Share Tech Mono',monospace;--fh:'Orbitron',monospace;
-}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{background:var(--bg);color:var(--body);font-family:var(--fs);font-size:14px;min-height:100dvh;overflow-x:hidden}
-body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);pointer-events:none;z-index:1000}
-.shell{max-width:480px;margin:0 auto;padding:0 10px 60px;display:flex;flex-direction:column;gap:8px}
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 0 8px;border-bottom:1px solid var(--border)}
-.logo{font-family:var(--fh);font-weight:900;font-size:17px;letter-spacing:.15em;color:var(--bright)}
-.logo span{color:var(--accent)}
-.back{font-family:var(--fh);font-size:8px;font-weight:700;letter-spacing:.15em;color:var(--muted);text-decoration:none;padding:4px 8px;border:1px solid var(--dim);border-radius:3px}
+/* Site tokens, reset, shell and header come from shared.css. Only the
+   tokens this page uses that shared.css lacks are defined here. */
+:root{--accent2:var(--amber);--on:var(--live);--off:var(--panel);--rec:var(--danger)}
 /* Transport */
 .transport{display:flex;align-items:center;gap:6px;padding:8px 0 4px}
 .tbtn{font-family:var(--fh);font-size:9px;font-weight:700;letter-spacing:.1em;padding:8px 12px;border-radius:3px;border:1px solid var(--dim);color:var(--muted);background:var(--off);cursor:pointer;-webkit-tap-highlight-color:transparent;flex:1;transition:all .15s;text-align:center}

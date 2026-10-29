@@ -214,6 +214,49 @@ AUTO_PAIRS = [
     ("system:capture_1", "system:capture_2"),
 ]
 
+# MANUAL-source fallback (2026-10-23, owner: "the pisound is the onboard
+# audio. it is the one thing you know will be connected, so it's the fallback").
+# A manual track whose ports are gone (the L-12 left: its capture_13/14 vanish
+# when the main jackd falls back to the pisound) used to record SILENCE until
+# they came back. Now it records the pisound's inputs meanwhile and returns to
+# its own source the moment those ports exist again. Reachable only when the
+# pisound is on the MAIN graph: the main jackd itself on hw:pisound (its inputs
+# are system:capture_1/2) or the pisound-in bridge.
+PISOUND_BRIDGE = ("pisound-in:capture_1", "pisound-in:capture_2")
+PISOUND_MAIN = ("system:capture_1", "system:capture_2")
+
+
+def _main_jackd_card(proc="/proc"):
+    """The card the MAIN (nameless) jackd drives, from its command line (same
+    test as orc1_jackd_start.sh / orc1_assign_module_out.sh), or ''."""
+    for d in os.listdir(proc):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"{proc}/{d}/cmdline", "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if not args or os.path.basename(args[0]) != b"jackd":
+            continue
+        args = [a.decode(errors="replace") for a in args if a]
+        pre = args[:args.index("-dalsa")] if "-dalsa" in args else args
+        if "-n" in pre:
+            continue                            # a named per-card server
+        for a in args:
+            if a.startswith("-dhw:"):
+                return a[5:]
+    return ""
+
+
+def pisound_inputs(names, main_card):
+    """The pisound's stereo input pair as seen from the main graph, or None."""
+    if all(p in names for p in PISOUND_BRIDGE):
+        return PISOUND_BRIDGE
+    if main_card == "pisound" and all(p in names for p in PISOUND_MAIN):
+        return PISOUND_MAIN
+    return None
+
 
 def log(msg):
     print(f"[skipback-rec] {msg}", flush=True)
@@ -430,6 +473,7 @@ class Track:
         self.gaps = 0               # stamped periods that didn't follow on
         self.resolved = []          # last-resolved source port names
         self.connected = False
+        self.fallback = False       # manual source missing -> recording the pisound
         # Drain-failure accounting (P0.4 review item 18): last exception
         # string + total count survive recovery (visible in status); the
         # consecutive-failure streak drives recording:false + log throttling.
@@ -1319,6 +1363,8 @@ class Recorder:
                                   and trk._drain_streak < DRAIN_FAIL_LIMIT),
                 "resolved": list(trk.resolved) if trk else [],
                 "connected": bool(trk and trk.connected),
+                # true = its own (manual) source is gone, recording the pisound
+                "fallback": bool(trk and trk.fallback),
                 "fill_secs": (round(min(trk.written, trk.buffer_bytes)
                                     / trk.bytes_per_sec, 1) if trk else 0),
                 "ring_bytes": trk.buffer_bytes if trk else 0,
@@ -1418,8 +1464,22 @@ class Recorder:
             names = set(p.name for p in self.client.get_ports())
         except jack.JackError:
             names = set()
+        main_card = None                        # read /proc only if needed
         for trk in self.tracks.values():
-            trk.resolved = self._resolve(self._effective_cfg(trk), names)
+            cfg = self._effective_cfg(trk)
+            res = self._resolve(cfg, names)
+            fb = None
+            if cfg["mode"] == "manual" and names and not all(p in names for p in res):
+                if main_card is None:
+                    main_card = _main_jackd_card()
+                fb = pisound_inputs(names, main_card)
+                if fb:
+                    res = list(fb) if cfg["stereo"] else [fb[0]]
+            if bool(fb) != trk.fallback:
+                trk.fallback = bool(fb)
+                log(f"t{trk.id}: {'source gone -> the pisound inputs' if fb else 'own source back'}"
+                    f" ({', '.join(res)})")
+            trk.resolved = res
             self._wire(trk, names)
 
         self._publish_rt()

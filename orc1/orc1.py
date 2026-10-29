@@ -24,6 +24,8 @@ Edit ~/orc1_config.py and ~/orc1_patterns.py. Restart to apply.
 import mido
 import time
 import threading
+import contextlib
+import heapq
 import sys
 import os
 import json
@@ -40,6 +42,9 @@ import orc1_cme      as _orc1_cme     # CME U6MIDI Pro config over SysEx (stdlib
 import orc1_kikpad   as _orc1_kikpad  # KIKPAD bank 2 = sampler + skipback surface (stdlib; mido lazily)
 import orc1_kikpad_map as _orc1_kikpad_map  # the KIKPAD's own pad/encoder maps, edited from /kikpad (stdlib)
 import orc1_playstate as _orc1_playstate  # live play-state feed for the HUD / kiosk (stdlib only)
+import orc1_scenes   as _orc1_scenes   # SCENES: store / capture / recall timing (stdlib only)
+import orc1_fire_pages as _orc1_fire_pages  # the Fire's UNIVERSAL pages, stored on the Fire (stdlib only)
+import orc1_settings_registry as _orc1_settings  # every setting a scene can hold (stdlib, lazy)
 from orc1_arp import ArpEngine, CLOCK_EXTERNAL, CLOCK_INTERNAL, CLOCK_DRIFT, PPQN
 from orc1_arp import SUBDIVISION_LIST, ARP_SILENT
 from orc1_routes import RoutingEngine, build_consumed_set
@@ -434,8 +439,17 @@ _bb_follow_clock = False  # False: loading a song sets the ORC tempo to the song
 # the MPC etc. -- on a chosen channel, notes untranslated). Persisted.
 _BB_OUT = {"dest": "bbkit", "port": None, "channel": 10}
 _BB_OUT_DESTS = ("bbkit", "909", "port")
+_BB_MIX = {}                  # drum group -> level 0..2 (missing = 1.0); ~/.orc1_bb_mix.json
 _BB_PORT_OFF_S = 0.1          # external gear gets a note-off this long after the hit
 _bb_pending_offs = []         # [(deadline_monotonic, port_key, ch0, note)]
+_bb_offs_lock = threading.Lock()   # guards _bb_pending_offs (tick thread + the delayed-hit worker + web cmd)
+_bb_pulse_s = 0.0208          # seconds per MIDI-clock pulse (EMA of _bb_tick spacing)
+_bb_last_tick_t = 0.0
+_bb_delayed = []              # heap of (due_monotonic, seq, fn): hits owed part-way into a pulse
+_bb_delayed_cv = threading.Condition()
+_bb_delayed_seq = 0
+_bb_delayed_thread = None
+_bb_dedupe = None             # PulseDeduper, set up with the mind
 pedal      = None  # PedalInput -- foot pedal -> beatbuddy (orc1_pedal.py), feedback-safe
 _pedal_ports = []  # opened pedal input ports (threaded in run_all_inputs)
 _PEDAL_PREFIXES = tuple(getattr(cfg, "PEDAL_PORT_PREFIXES", _orc1_pedal.DEFAULT_PREFIXES))
@@ -1590,17 +1604,20 @@ def skipback_save(track_id, seconds=60, done=None):
 _SKIPBACK_ALL_BUSY = threading.Event()
 
 
-def skipback_save_all(seconds=0, tracks=None, done=None):
+def skipback_save_all(seconds=0, tracks=None, done=None, end_ts=None):
     """Sample-aligned grab of several skipback tracks into ONE folder in
     ~/recordings (skipback/skipback_grab_multi.py). seconds 0 = everything the
     chosen tracks hold in common; tracks None/[] = every recording track.
     Background thread like skipback_save; a second press while one is still
-    writing is ignored (a pedal stomp twice must not queue two big grabs)."""
+    writing is ignored (a pedal stomp twice must not queue two big grabs).
+    end_ts = the wall-clock time the grab ENDS at (default: now); seconds may be
+    a fraction (a grab pad's N bars at the live tempo, 2026-10-19)."""
     if _SKIPBACK_ALL_BUSY.is_set():
         print("  ! skipback all-tracks save already running -- ignored", flush=True)
         return False
     _SKIPBACK_ALL_BUSY.set()
-    press_env = dict(os.environ, SKIPBACK_PRESS_TS=repr(time.time()))
+    press_env = dict(os.environ, SKIPBACK_PRESS_TS=repr(
+        float(end_ts) if end_ts is not None else time.time()))
 
     def _work():
         import subprocess
@@ -1610,7 +1627,7 @@ def skipback_save_all(seconds=0, tracks=None, done=None):
                                   "skipback", "skipback_grab_multi.py")
             # same stereo joins as the web GRAB ALL card (the web writes it)
             cmd = ["nice", "-n", "15", "ionice", "-c3", "python3", script,
-                   str(max(0, int(seconds))), "--joins-file",
+                   "%.6f" % max(0.0, float(seconds)), "--joins-file",
                    os.path.expanduser("~/.orc1_skipback_joins.json")]
             if tracks:
                 cmd += ["--tracks", ",".join(str(int(t)) for t in tracks)]
@@ -1640,7 +1657,7 @@ def module_cc(module, cc, value):
     """Send CC `cc` = `value` to MODULE on whatever channel /matrix binds it to
     right now (the module's own parameter numbers; e.g. the visuals renderer's
     knobs). Unbound = nothing sent, returns False. The named path a surface
-    uses instead of a literal channel (see orc1_kikpad's VISUALS page)."""
+    uses instead of a literal channel."""
     ch = _module_channel(module)
     if not ch:
         return False
@@ -3510,6 +3527,7 @@ def write_state_json():
                 "clock_mode": (arp.clock_mode if arp else None),
                 "tempo_mode": ("clock" if _bb_follow_clock else "song"),
                 "output":     dict(_BB_OUT),
+                "mix":        dict(_BB_MIX),
             } if beatbuddy else {}),
             # Was getattr(fire, "_clock_out", False) -- FireHandler never had
             # that attribute (clock-out state lives on Sequencer), so this
@@ -3529,6 +3547,9 @@ def write_state_json():
                 d: (os.path.basename(sampler_browsed(d) or "") or None)
                 for d in ("A", "B")
             },
+            # SCENES: pending recall, what the last recall did, where the bar
+            # comes from (fire / orc / stopped), the Fire link (orc1_scenes).
+            "scenes":         _scene_status(),
             # Last CC values forwarded to synth bus via SYNTH_CC command.
             # Keyed as strings so JSON round-trips cleanly.
             "synth_cc":       dict(state["synth_cc"]),
@@ -3847,17 +3868,62 @@ def _bb_out_targets(note, vel, out, bbkit_ch, drum_ch, table):
     return [("synth", int(bbkit_ch), note, vel)] if bbkit_ch else []
 
 
+def _bb_send_target(t):
+    """Send one _bb_out_targets() entry now."""
+    if t[0] == "synth":
+        send_synth_midi(mido.Message("note_on", channel=t[1] - 1, note=t[2], velocity=t[3]))
+    else:
+        _k, port, ch, n, v = t
+        send_to(port, mido.Message("note_on", channel=ch - 1, note=n, velocity=v))
+        with _bb_offs_lock:          # the clock tick, this worker and the web thread all touch the list
+            _bb_pending_offs.append((time.monotonic() + _BB_PORT_OFF_S, port, ch - 1, n))
+
+
+def _bb_delayed_run():
+    """Worker: fire the hits that belong part-way into a clock pulse."""
+    while True:
+        with _bb_delayed_cv:
+            while not _bb_delayed:
+                _bb_delayed_cv.wait()
+            due, _seq, fn = _bb_delayed[0]
+            wait = due - time.monotonic()
+            if wait > 0:
+                _bb_delayed_cv.wait(wait)
+                continue
+            heapq.heappop(_bb_delayed)
+        try:
+            fn()
+        except Exception as e:
+            sig = "delayed:" + repr(e)
+            if sig not in _bb_err_seen:     # logged once, like the tick: a dead output must not be silent
+                _bb_err_seen.add(sig)
+                print(f"  ! BeatBuddy delayed hit failed (logged once): {e!r}", flush=True)
+
+
+def _bb_later(seconds, fn):
+    global _bb_delayed_seq, _bb_delayed_thread
+    with _bb_delayed_cv:
+        if _bb_delayed_thread is None:
+            _bb_delayed_thread = threading.Thread(target=_bb_delayed_run, daemon=True,
+                                                  name="bb-delayed")
+            _bb_delayed_thread.start()
+        _bb_delayed_seq += 1
+        heapq.heappush(_bb_delayed, (time.monotonic() + seconds, _bb_delayed_seq, fn))
+        _bb_delayed_cv.notify()
+
+
 def _bb_flush_offs(now=None, everything=False):
     """Send the note-offs owed to external gear (dest "port") whose time is up
     (or all of them). Called every clock pulse from the BeatBuddy tick."""
     global _bb_pending_offs
-    if not _bb_pending_offs:
-        return
-    now = time.monotonic() if now is None else now
-    due = [p for p in _bb_pending_offs if everything or p[0] <= now]
-    if not due:
-        return
-    _bb_pending_offs = [p for p in _bb_pending_offs if p not in due]
+    with _bb_offs_lock:
+        if not _bb_pending_offs:
+            return
+        now = time.monotonic() if now is None else now
+        due = [p for p in _bb_pending_offs if everything or p[0] <= now]
+        if not due:
+            return
+        _bb_pending_offs = [p for p in _bb_pending_offs if p not in due]
     for _t, port, ch0, note in due:
         try:
             send_to(port, mido.Message("note_off", channel=ch0, note=note, velocity=0))
@@ -3901,6 +3967,42 @@ def _bb_out_load():
             d = json.load(f)
         _bb_out_set(d.get("dest", "bbkit"), d.get("port"), d.get("channel"),
                     persist=False)
+    except Exception:
+        pass
+
+
+def _bb_mix_file():
+    return os.path.expanduser("~/.orc1_bb_mix.json")
+
+
+def _bb_mix_set(group, gain, persist=True):
+    """Set one drum's BeatBuddy level (0 = muted .. 2.0); unknown drums are ignored."""
+    import orc1_beatbuddy as _m
+    if not isinstance(group, str) or group not in dict(_m.DRUM_GROUPS):
+        return dict(_BB_MIX)
+    g = _m.clamp_gain(gain)
+    if g == 1.0:
+        _BB_MIX.pop(group, None)       # 1.0 is the default: keep the file small
+    else:
+        _BB_MIX[group] = g
+    if persist:
+        try:
+            tmp = _bb_mix_file() + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(_BB_MIX, f)
+            os.replace(tmp, _bb_mix_file())
+        except Exception as e:
+            print(f"  ! BeatBuddy mix persist failed: {e}", flush=True)
+    return dict(_BB_MIX)
+
+
+def _bb_mix_load():
+    """Restore the saved per-drum levels (missing/corrupt -> all 1.0)."""
+    try:
+        with open(_bb_mix_file()) as f:
+            d = json.load(f)
+        for k, v in d.items():
+            _bb_mix_set(k, v, persist=False)
     except Exception:
         pass
 
@@ -4026,6 +4128,19 @@ def _bb_pedal_action(g):
 def _execute_cmd(cmd):
     """Execute a web UI command dict. Called from the cmd poll thread."""
     action = cmd.get("action", "")
+    # -- SCENES (orc1_scenes, 2026-10-26). These return a reply dict, which the
+    #    command socket sends back as one JSON line ({"ok":...,...}).
+    if action == "SCENE_CAPTURE" or action == "SCENE_RECALL" or action == "SCENE_SET" \
+            or action == "SCENE_CLEAR" or action == "SCENE_LIST" or action == "SETTINGS_READ" \
+            or action == "FIRE_PATTERN":
+        return _scene_cmd(cmd)
+    # -- the Fire's UNIVERSAL pages (orc1_fire_pages, 2026-10-27): reply dicts too.
+    if action in ("FIRE_PAGES_INFO", "FIRE_PAGE_READ", "FIRE_PAGE_WRITE", "FIRE_PAGE_CLEAR"):
+        r = _orc1_fire_pages.socket_cmd(fire_pages, cmd)
+        if action in ("FIRE_PAGE_WRITE", "FIRE_PAGE_CLEAR"):
+            print_status(f"[fire pages] {action} page {cmd.get('page')}: "
+                         + ("ok" if r.get("ok") else str(r.get("error"))))
+        return r
     if action == "TOGGLE_ROOT_MODE":
         state["root_mode"] = not state["root_mode"]
     elif action == "TOGGLE_KEY_LOCK":
@@ -4074,6 +4189,13 @@ def _execute_cmd(cmd):
             o = _bb_out_set(cmd.get("dest"), cmd.get("port"), cmd.get("channel"))
             print_status("BeatBuddy output -> " + (
                 f"port {o['port']} ch{o['channel']}" if o["dest"] == "port" else o["dest"]))
+    elif action == "BB_MIX":
+        if cmd.get("group") == "reset":
+            for _g in list(_BB_MIX):
+                _bb_mix_set(_g, 1.0)
+            print_status("BeatBuddy mix reset")
+        else:
+            _bb_mix_set(cmd.get("group"), cmd.get("gain", 1.0))
     elif action == "BB_TAP" and beatbuddy:
         beatbuddy.tap(_bb_now_ms())         # main -> drumfill; stopped -> start
     elif action == "BB_HOLD" and beatbuddy:
@@ -5046,16 +5168,24 @@ def _execute_cmd(cmd):
     elif action.startswith("SEQ_"):
         _handle_seq_cmd(action)
     elif action == "RESTART_ORC":
+        # The PLAY page's RESTART button. Goes through orc1_gentle_restart.sh
+        # (hosts stopped one at a time, brain restarted, hosts started one at
+        # a time): a plain `restart orc1` stops all six PartOf hosts at once
+        # and made skipback-rec miss a deadline (measured 2026-09-28). The
+        # script runs as its own transient unit, because it stops THIS
+        # service and a child in orc1's cgroup would be killed with it before
+        # the hosts were started again. A second press while one is running
+        # fails on the unit name, which is the right answer.
         import subprocess as _sp, threading as _th
         def _restart():
             import time as _t
             _t.sleep(0.4)
-            # (orc1-synth is retired, 2026-09-24; the module hosts are
-            #  PartOf=orc1, so restarting orc1 restarts them.)
-            _sp.Popen(["sudo", "-n", "systemctl", "restart",
-                       "orc1.service", "orc1-system.service"])
-            _t.sleep(3)
-            _sp.Popen(["sudo", "-n", "systemctl", "restart", "orc1-web.service"])
+            gentle = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "orc1_gentle_restart.sh")
+            _sp.Popen(["sudo", "-n", "systemd-run", "--unit=orc1-restart-button",
+                       "--collect", "--quiet", "/bin/bash", "-c",
+                       '"$0"; systemctl restart orc1-system.service orc1-web.service',
+                       gentle])
         _th.Thread(target=_restart, daemon=True).start()
     if action:
         print_status(f"[web] {action}")
@@ -5130,8 +5260,16 @@ def _cmd_socket_loop():
                     except Exception:
                         continue
                     try:
-                        _execute_cmd(cmd)
-                        conn.sendall(b'{"ok":true}\n')
+                        res = _execute_cmd(cmd)
+                        if isinstance(res, dict):
+                            # "ok" FIRST and no spaces: orc1_web checks the first
+                            # 64 bytes for '"ok":true' (scenes, SETTINGS_READ).
+                            out = {"ok": bool(res.get("ok", True))}
+                            out.update((k, v) for k, v in res.items() if k != "ok")
+                            conn.sendall((json.dumps(out, separators=(",", ":"), default=str)
+                                          + "\n").encode("utf-8"))
+                        else:
+                            conn.sendall(b'{"ok":true}\n')
                     except Exception:
                         try: conn.sendall(b'{"ok":false}\n')
                         except Exception: pass
@@ -5140,6 +5278,12 @@ def _cmd_socket_loop():
         finally:
             try: conn.close()
             except Exception: pass
+
+
+# A scene recall burst runs many ctrl CCs / actions in a row; each would log and
+# rewrite ~/orc1_state.json. The scenes worker sets this (its own thread only) and
+# writes the state ONCE when the burst is done (orc1_scenes burst_guard).
+_status_quiet = threading.local()
 
 
 def print_status(label=""):
@@ -5153,6 +5297,8 @@ def print_status(label=""):
     (c) kill din_input_loop(), which has no reopen path.  A cosmetic failure must
     not cost the instrument its MIDI input.
     """
+    if getattr(_status_quiet, "on", False):
+        return
     try:
         _print_status_body(label)
     except Exception as e:
@@ -5486,6 +5632,15 @@ def handle_ctrl_note_off(note):
 
 
 def handle_ctrl_cc(cc, value):
+    # SCENES (2026-10-26): ch 13 SCENE_RECALL_CC, value N = scene N (1-127),
+    # with that scene's own timing (orc1_scenes). Value 0 is ignored, so a
+    # momentary 127/0 button does not recall scene 1 on its release.
+    if cc == cfg.SCENE_RECALL_CC:
+        _slot = _orc1_scenes.slot_for_cc_value(value)
+        if _slot:
+            _scene_recall(_slot, source="ch13 cc")
+        return
+
     # If function key is held, route to func layer first -- but only for
     # CCs that actually have a FUNC mapping. handle_func_cc falls back to
     # handle_ctrl_cc for unmapped CCs, so diverting unconditionally caused
@@ -5787,6 +5942,14 @@ def _route_message(msg, source_label="usb", source_name=""):
         # Device chatter SysEx (Arturia config read-back, our Fire firmware's
         # host-protocol replies) is not musical data -- do NOT leak it to the
         # pisound MIDI output. See _DEVICE_SYSEX_PREFIXES.
+        # Our Fire SEQUENCER firmware's host replies + bar messages (0F) feed the
+        # scenes engine (orc1_scenes.FireBarLink); consumed, never forwarded.
+        # The UNIVERSAL page replies (10-15) go to fire_pages FIRST (it only queues
+        # them for the waiting socket thread; FireBarLink would swallow them).
+        if msg.type == 'sysex' and fire_pages.handle_sysex(msg.data, source_name):
+            return
+        if msg.type == 'sysex' and fire_bar_link.handle_sysex(msg.data, source_name):
+            return
         if msg.type == 'sysex' and _sysex_is_device_chatter(msg.data):
             return
         # MIDI clock/transport is CHAIN-THRU'd, but ONLY from the DIN to the DIN,
@@ -5804,8 +5967,11 @@ def _route_message(msg, source_label="usb", source_name=""):
         # ORC can SLAVE regardless of whether we re-broadcast.
         # ⚠ A device patched to the DIN in AND out at once will still loop -- do
         #   not wire a slave's DIN OUT back into the ORC's DIN IN.
+        # Exception: a USB input in cfg.CLOCK_THRU_USB_PORTS (our Fire sequencer
+        # firmware: it never echoes transport) is passed through too, so the Fire's
+        # PLAY starts the MPC on the DIN (2026-10-23).
         if msg.type in ('clock', 'start', 'stop', 'continue', 'songpos', 'reset'):
-            if source_label == 'din':
+            if source_label == 'din' or cfg.is_clock_thru_port(source_name):
                 send_to('pisound', msg)      # chain-thru the master clock
         else:
             _pass(msg)
@@ -5833,6 +5999,11 @@ def _route_message(msg, source_label="usb", source_name=""):
                     arp.clock_tick()
         if msg.type == 'clock' and fire:
             fire.clock_tick()
+        if msg.type in ('start', 'stop', 'continue'):
+            _scene_transport[0] = msg.type           # scenes: transport beats "pulses arriving"
+            if msg.type == 'stop' and fire_bar_link.is_ours(source_name):
+                fire_bar_link.stopped()
+                scenes.fire_stop()
         if msg.type == 'start' and seq:
             seq.play()
         if msg.type == 'stop' and seq:
@@ -6182,6 +6353,9 @@ def _pedal_switch_action(action, down, momentary):
     elif action.startswith("cmd:"):
         if down:
             _execute_cmd({"action": action[4:]})
+    elif action.startswith("scene:"):
+        if down:
+            _scene_recall(int(action[6:]), source="pad/pedal")
     elif action.startswith("rc505:"):
         _pedal_rc505(action[6:], down, momentary)
     else:
@@ -6217,12 +6391,17 @@ def _padmap_conf_file():
     return os.path.expanduser("~/.orc1_padmap.json")
 
 
-def _padmap_emit(kind, ch, a, b):
+def _padmap_emit(kind, ch, a, b, port=None):
+    """A pad's note / CC: onto the internal synth bus (a module), or to an OUTPUT
+    PORT (cfg.PORTS key) on its own channel (2026-10-19: any CC to any channel)."""
     if kind == "cc":
         m = mido.Message("control_change", channel=ch - 1, control=a, value=b)
     else:
         m = mido.Message(kind, channel=ch - 1, note=a, velocity=b)
-    send_synth_midi(m)
+    if port is None:
+        send_synth_midi(m)
+    else:
+        send_to(port, m)
 
 
 def _padmap_action(action):
@@ -6235,7 +6414,7 @@ def _padmap_action(action):
 
 
 def _padmap_conf_set(raw, save=True):
-    conf, errs = _orc1_padmap.validate_config(raw, _MM_KEYS)
+    conf, errs = _orc1_padmap.validate_config(raw, _MM_KEYS, ports=set(cfg.PORTS))
     for e in errs:
         print(f"  ! padmap config: {e}", flush=True)
     padmap.set_config(conf)
@@ -6284,6 +6463,332 @@ def _surface_loop():
                 print(f"  ! surface link: {e}", flush=True)
                 said = True
 
+
+# Skipback GRAB pads (2026-10-19, orc1_padmap.grab_plan): bars at the live tempo, a
+# hold (press -> release, snapped to whole bars), a time, or everything. All go
+# through skipback_save_all (one track = tracks [id]) so a length can be a fraction
+# of a second and the grab ends at an exact wall-clock time (SKIPBACK_PRESS_TS).
+def _padmap_grab(e, press_ts, release_ts):
+    plan = _orc1_padmap.grab_plan(e, press_ts, release_ts, time.time(),
+                                  sampler_bpm(), _SMP_BEATS_BAR)
+    if plan is None:
+        return
+    secs, end_ts, delay, tracks = plan
+    what = f"t{tracks[0]}" if tracks and len(tracks) == 1 else ("armed tracks" if tracks is None else f"tracks {tracks}")
+    print(f"  [padmap] grab {e.get('len')}: {secs:.2f}s of {what}"
+          + (f", in {delay:.2f}s" if delay > 0 else ""), flush=True)
+    if delay > 0:
+        # a snapped-UP hold: its window ends in the future; grab once it has been recorded
+        threading.Timer(delay + 0.05, skipback_save_all, args=(secs, tracks),
+                        kwargs={"end_ts": end_ts}).start()
+    else:
+        skipback_save_all(secs, tracks, end_ts=end_ts)
+
+
+_HOLD_RGB = (7, 7, 7)                # a grab pad while it records (held)
+
+
+def _padmap_hold_light(dev, pad, holding):
+    if holding:
+        surface_link.paint_pad(dev, pad, _HOLD_RGB)
+        return
+    e = (padmap.conf["devices"].get(dev, {}).get("pads", {}).get(f"note:{pad}") or {})
+    surface_link.paint_pad(dev, pad, _orc1_padmap.COLOR_RGB.get(e.get("color"), (0, 0, 0)))
+
+
+padmap.run_grab = _padmap_grab
+padmap.on_hold = _padmap_hold_light
+
+tap_blinker = _orc1_surface_link.TapBlinker(surface_link, padmap.surfaces)
+
+
+def _tap_blink_loop():
+    """Blink every surface tap-tempo pad on the ORC clock's beat (orc1_surface_link.TapBlinker).
+    ~66 Hz while a tap pad exists; it re-reads the pad maps twice a second."""
+    said, next_refresh, have = False, 0.0, False
+    while True:
+        try:
+            now = time.monotonic()
+            if now >= next_refresh:
+                have = tap_blinker.refresh()
+                next_refresh = now + 0.5
+            if not have:
+                time.sleep(0.5)
+                continue
+            beat = bar = None
+            ext = False
+            if arp:
+                beat = arp.beat_phase()
+                bar = arp.bar_phase(beats_per_bar=_SMP_BEATS_BAR)
+                ext = arp.clock_mode == CLOCK_EXTERNAL
+            tap_blinker.tick(now, beat, bar, ext)
+            said = False
+        except Exception as e:
+            if not said:
+                print(f"  ! tap blink: {e}", flush=True)
+                said = True
+        time.sleep(0.015)
+
+
+# -- SCENES (orc1_scenes + orc1_settings_registry, 2026-10-26) -------------------
+# Scenes live in ~/.orc1_scenes.json (this brain is the only writer). A recall
+# lands IMMEDIATE / NEXT_BEAT / NEXT_BAR / BARS_2 / BARS_4: the bar is the Fire's
+# (its 0F messages, firmware v0.30+) while the Fire runs the beat, else the ORC
+# clock (_scene_pulse below). Nothing playing = at once. Triggers: the web
+# (SCENE_RECALL), ch 13 CC SCENE_RECALL_CC (value N = scene N), a pad / FCB
+# switch "scene:N".
+# The settings registry is NEVER built on a brain thread (~3.4 s of ast work on
+# the Pi, holding the GIL): _scene_loop runs it as a separate process that writes
+# a JSON cache, and the brain only loads that. Until then scene calls answer
+# "settings list loading".
+_orc1_settings.set_build_allowed(False)
+_scene_transport = [None]     # last outside 'start' / 'stop' / 'continue' (_route_message)
+
+
+def _scene_send_cc(ch, cc, value):
+    """A scene CC onto the internal synth bus. RAISES when it cannot be sent
+    (send_synth_midi swallows errors; a recall must count them)."""
+    msg = mido.Message("control_change", channel=int(ch) - 1, control=int(cc), value=int(value))
+    if not _synth_bus:
+        raise RuntimeError("synth bus not open")
+    _synth_bus.send(msg)
+    thru = state.get("voice_thru", {}).get(str(int(ch)))       # the same thru mirror as send_synth_midi
+    if thru and thru.get("port") and thru.get("channel"):
+        send_to(thru["port"], msg.copy(channel=int(thru["channel"]) - 1))
+
+
+@contextlib.contextmanager
+def _scene_quiet():
+    """Around a recall burst: no per-message print_status (state written once after)."""
+    _status_quiet.on = True
+    try:
+        yield
+    finally:
+        _status_quiet.on = False
+
+
+def _scene_playing():
+    """Is anything playing that has a beat to land on? (orc1_scenes.playing_from)"""
+    try:
+        ext = bool(arp) and arp.clock_mode == CLOCK_EXTERNAL
+        pulses = bool(arp) and _orc1_scenes.clock_running(
+            arp._last_pulse_wall, arp._estimated_bpm() or arp.internal_bpm, time.monotonic())
+        return _orc1_scenes.playing_from(
+            seq_running=bool(seq and seq.running),
+            bb_playing=bool(beatbuddy and beatbuddy.is_playing()),
+            arp_notes=bool(arp and arp.enabled and arp.current_chord),
+            ext_clock=ext, pulses_running=pulses, last_transport=_scene_transport[0])
+    except Exception:
+        return False
+
+
+def _settings_live(ids):
+    """{id: value} -- LIVE brain values for the registry's brain-held settings
+    (tempo, harmony, arp, BeatBuddy tempo mode, the Fire pattern), read from
+    memory instead of ~/orc1_state.json (which lags after a ch-13 knob). Any
+    other id is read from its owner's file (orc1_settings_registry.read_one).
+    The Fire pattern only while the Fire is known to be in PATTERN mode."""
+    reg = _orc1_settings.by_id()
+    live = {
+        "root": state["root"], "scale": state["scale"], "scale_mode": scale_mode_now(),
+        "quality_mode": state.get("quality_mode", "DIAT"), "preset": state["preset"],
+        "voicing": state["voicing"], "vl_strength": round(float(state["vl_strength"]), 3),
+        "key_lock": bool(state["key_lock"]), "arp_hold": bool(state.get("arp_hold", False)),
+        "arp": ({"enabled": bool(arp.enabled), "pattern": arp.pattern_name,
+                 "rate": arp.subdivision, "clock_mode": arp.clock_mode,
+                 "bpm": round(arp._estimated_bpm() or arp.internal_bpm, 1),
+                 "swing": round(arp.swing_amount, 3), "humanize": round(arp.humanize, 3),
+                 "gate": round(arp.gate_trim, 3)} if arp else {}),
+        "beatbuddy": ({"tempo_mode": "clock" if _bb_follow_clock else "song"}
+                      if beatbuddy else {}),
+    }
+    out, cache = {}, {}
+    for i in ids or ():
+        e = reg.get(i)
+        if e is None:
+            continue
+        rd = e.get("read") or {}
+        if rd.get("kind") == "state":
+            v = live
+            for k in rd["path"]:
+                v = v.get(k) if isinstance(v, dict) else None
+            out[i] = v
+        elif rd.get("kind") == "brain" and rd.get("key") == "fire.pattern":
+            out[i] = (fire_bar_link.current_pattern()
+                      if fire_bar_link.in_song_mode() is False else None)
+        else:
+            out[i] = _orc1_settings.read_one(e, cache)[0]
+    return out
+
+
+def _scene_state_changed():
+    try:
+        write_state_json()
+    except Exception:
+        pass
+
+
+fire_bar_link = _orc1_scenes.FireBarLink(
+    mido, lambda: _usb_card_idents(), on_bar=lambda *a: scenes.fire_bar(*a),
+    log=lambda s: print(s, flush=True),
+    ports=tuple(getattr(cfg, "FIRE_SEQ_PORT_NAMES", None) or _orc1_scenes.FIRE_SEQ_PORTS))
+
+# The Fire's UNIVERSAL pages (fw v0.31+, stored on the Fire), edited from /control.
+# Shares fire_bar_link's port + lock; one page transfer at a time.
+fire_pages = _orc1_fire_pages.FirePages(
+    send=fire_bar_link.host_send, version=fire_bar_link.link_version,
+    is_ours=fire_bar_link.is_ours, log=lambda s: print(s, flush=True))
+
+scenes = _orc1_scenes.SceneEngine(
+    _orc1_scenes.SceneStore(), _orc1_settings,
+    send_synth_cc=_scene_send_cc,
+    call_ctrl_cc=lambda cc, v: handle_ctrl_cc(cc, v),
+    call_ctrl_pc=lambda p: handle_ctrl_pc(p),
+    run_action=lambda c: _execute_cmd(c),
+    fire=fire_bar_link,
+    bindings=lambda: dict(_bindings),
+    recall_ctx=lambda: {"clock_mode": arp.clock_mode if arp else None},
+    is_playing=_scene_playing, brain_read=_settings_live,
+    log=lambda s: print(s, flush=True), on_change=_scene_state_changed,
+    burst_guard=_scene_quiet)
+
+
+def _scene_recall(slot, timing=None, source=""):
+    r = scenes.recall(slot, timing, source=source)
+    if not r.get("ok"):
+        print(f"  [scenes] recall {slot} ({source}): {r.get('error')}", flush=True)
+    return r
+
+
+def _scene_status():
+    try:
+        return scenes.status()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _scene_cmd(cmd):
+    """The SCENE_* / SETTINGS_READ / FIRE_PATTERN socket actions -> reply dict."""
+    a = cmd.get("action", "")
+    try:
+        if a == "SCENE_LIST":
+            return scenes.list()
+        if a == "SETTINGS_READ":
+            ids = cmd.get("ids") or []
+            if not isinstance(ids, list):
+                return {"ok": False, "error": "ids must be a list"}
+            return {"ok": True, "values": _settings_live(ids)}
+        if a == "SCENE_CAPTURE":
+            r = scenes.capture(cmd.get("slot"), cmd.get("ids") or [], merge=bool(cmd.get("merge")))
+        elif a == "SCENE_RECALL":
+            r = _scene_recall(cmd.get("slot"), cmd.get("timing") or None, source="web")
+        elif a == "SCENE_SET":
+            r = scenes.set(cmd.get("slot"), name=cmd.get("name"), timing=cmd.get("timing"),
+                           values=cmd.get("values"), merge=bool(cmd.get("merge")),
+                           remove=cmd.get("remove"))
+        elif a == "SCENE_CLEAR":
+            r = scenes.clear(cmd.get("slot"))
+        elif a == "FIRE_PATTERN":
+            if fire_bar_link.in_song_mode() is True:
+                r = {"ok": False, "error": "Fire in song mode"}
+            else:
+                ok, why = fire_bar_link.send_pattern(int(cmd.get("pattern", -1)))
+                r = {"ok": ok, "error": why} if not ok else {"ok": True}
+        else:
+            return {"ok": False, "error": f"unknown scene action {a}"}
+    except _orc1_settings.NotReady:
+        return {"ok": False, "error": _orc1_scenes.NOT_READY}
+    except (ValueError, TypeError) as e:
+        r = {"ok": False, "error": str(e)}
+    print_status(f"[scenes] {a} {cmd.get('slot', cmd.get('pattern', ''))}: "
+                 + ("ok" if r.get("ok") else str(r.get("error"))))
+    return r
+
+
+_scene_last_step = [None]
+_scene_last_bb = [None]
+
+
+def _scene_pulse():
+    """Clock thread, every 24-ppqn pulse (arp.subscribe_ticks(1, ...), after the
+    seq's and the BeatBuddy's subscribers): tell the scenes engine where the
+    ORC's beats and bars are. In order of preference:
+      - the running sequencer's 16-step grid (step 0 = the PLAY / START press);
+      - the BeatBuddy's own beat-in-bar while it plays (BeatBuddyMind.
+        get_beat_in_bar: its bar, its time signature, from its own start);
+      - the arp pulse grid, the same index math as ArpEngine.beat_phase /
+        bar_phase ((pulse_total - 1) % PPQN == 0 = a beat).
+    Cheap: no lock, never sends."""
+    if seq and seq.running:
+        _scene_last_bb[0] = None
+        gs = seq._global_step
+        if gs != _scene_last_step[0]:
+            _scene_last_step[0] = gs
+            if gs >= 0 and gs % 4 == 0:
+                scenes.orc_beat(gs % (4 * _SMP_BEATS_BAR) == 0)
+        return
+    _scene_last_step[0] = None
+    if beatbuddy and beatbuddy.is_playing():
+        b = beatbuddy.get_beat_in_bar()
+        if b is not None and b >= 0:
+            if b != _scene_last_bb[0]:
+                _scene_last_bb[0] = b
+                scenes.orc_beat(b == 0)
+            return
+    _scene_last_bb[0] = None
+    t = arp._pulse_total
+    if (t - 1) % PPQN == 0:
+        scenes.orc_beat((t - 1) % (PPQN * _SMP_BEATS_BAR) == 0)
+
+
+def _scene_registry_cache():
+    """Load the settings-registry JSON cache, (re)building it in a SEPARATE,
+    niced process when it is missing or the sources changed. True = ready."""
+    if _orc1_settings.load_cache():
+        return True
+    import subprocess as _sp
+    here = os.path.dirname(os.path.abspath(__file__))
+    t0 = time.monotonic()
+    try:
+        r = _sp.run(["nice", "-n", "10", sys.executable, "-B",
+                     os.path.join(here, "orc1_settings_registry.py"), "--build-cache"],
+                    capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            print(f"  ! scenes: registry cache build failed: {(r.stderr or r.stdout)[-300:]}", flush=True)
+            return False
+    except Exception as e:
+        print(f"  ! scenes: registry cache build failed: {e}", flush=True)
+        return False
+    ok = _orc1_settings.load_cache()
+    print(f"  [scenes] settings registry cache built in {time.monotonic() - t0:.1f}s "
+          f"({'loaded' if ok else 'NOT loaded'})", flush=True)
+    return ok
+
+
+def _scene_loop():
+    """~4 Hz: a pending recall lands if everything stopped; ~1 Hz: the Fire
+    link (hello / version / bar messages on); ~every 30 s: the settings
+    registry cache is checked against the sources (rebuilt in a separate
+    process only when they changed)."""
+    said, n = False, 0
+    try:
+        _scene_registry_cache()
+    except Exception as e:
+        print(f"  ! scenes: settings registry cache: {e}", flush=True)
+    while True:
+        time.sleep(0.25)
+        try:
+            scenes.poll()
+            n += 1
+            if n % 4 == 0:
+                fire_bar_link.poll()
+            if n % 120 == 0 and not _orc1_settings.cache_current():
+                _scene_registry_cache()
+            said = False
+        except Exception as e:
+            if not said:
+                print(f"  ! scenes loop: {e}", flush=True)
+                said = True
 
 def _pedal_poll_loop():
     """Flushes the pedal's expression filters (travel ends) + long-press timing.
@@ -7018,24 +7523,38 @@ def main():
             if vel <= 0:
                 return  # BeatBuddy voices are one-shots; the kit host ignores note-offs
             # Output is a CHOICE (_BB_OUT): the BBKit, the 909, or any MIDI port.
+            # The mind places hits part-way into a clock pulse (`delay`, player ticks);
+            # honour it, or flams/rolls/32nds in a fill land together = a double hit.
+            dest = _BB_OUT.get("dest")
+            late = _bbmod.hit_delay_seconds(delay, _bb_pulse_s)
             for t in _bb_out_targets(note, vel, _BB_OUT, _module_channel("bbkit"),
                                      _module_channel("drums"),
                                      getattr(cfg, "BB_TO_909", {})):
+                # A one-voice-per-note target (909 / external gear) must not get the same
+                # drum twice at (almost) the same instant (factory songs layer kicks; a fill's
+                # landing hit meets the next downbeat). Keyed by WHAT IS PLAYED (t minus its
+                # velocity), so two BeatBuddy notes folded onto one 909 voice count as one.
+                if dest != "bbkit" and _bb_dedupe.seen(t[:-1], delay):
+                    continue
+                # per-drum level (BB MIX card), by the drum actually played; after the dedupe so
+                # a muted or quiet hit still counts as 'played' for it
+                tv = _bbmod.scale_velocity(t[-1], _BB_MIX.get(_bbmod.target_group(dest, t[-2]), 1.0))
+                if tv <= 0:
+                    continue
+                t = t[:-1] + (tv,)
                 try:
-                    if t[0] == "synth":
-                        send_synth_midi(mido.Message("note_on", channel=t[1] - 1,
-                                                     note=t[2], velocity=t[3]))
+                    if late > 0.0005:
+                        _bb_later(late, lambda t=t: _bb_send_target(t))
                     else:
-                        _k, port, ch, n, v = t
-                        send_to(port, mido.Message("note_on", channel=ch - 1,
-                                                   note=n, velocity=v))
-                        _bb_pending_offs.append((time.monotonic() + _BB_PORT_OFF_S,
-                                                 port, ch - 1, n))
+                        _bb_send_target(t)
                 except Exception:
                     pass
 
+        global _bb_dedupe
+        _bb_dedupe = _bbmod.PulseDeduper()
         beatbuddy = _bbmod.BeatBuddyMind(emit=_bb_emit)
         _bb_out_load()                     # restore the chosen output (default BBKit)
+        _bb_mix_load()                     # restore the per-drum levels
         beatbuddy._songs_dir = os.path.expanduser(
             getattr(cfg, "BB_SONGS_DIR", "~/.orc1_bbsongs"))
 
@@ -7062,7 +7581,14 @@ def main():
             _bb_last = [beatbuddy.PlayerStatus]
 
             def _bb_tick():
-                global _bb_next_quit
+                global _bb_next_quit, _bb_last_tick_t, _bb_pulse_s
+                _now = time.monotonic()
+                if _bb_last_tick_t:
+                    _dt = _now - _bb_last_tick_t
+                    if 0.002 < _dt < 0.2:     # ignore stalls / clock stop-start gaps
+                        _bb_pulse_s += 0.1 * (_dt - _bb_pulse_s)
+                _bb_last_tick_t = _now
+                _bb_dedupe.new_pulse()
                 # The mind is internally serialized + self-recovering (orc1_beatbuddy
                 # _serialized lock + the process_song invariant net), so this should
                 # never raise. But the arp swallows subscriber exceptions silently,
@@ -7116,6 +7642,13 @@ def main():
     threading.Thread(target=_hotplug_loop, daemon=True).start()
     print("  MIDI hot-plug scanner running (3s interval)")
     threading.Thread(target=_surface_loop, daemon=True, name="surface").start()
+    threading.Thread(target=_tap_blink_loop, daemon=True, name="tap-blink").start()
+    # SCENES: beats / bars of the ORC clock. Subscribed HERE, after the
+    # sequencer's subscriber (built above) and the BeatBuddy tick, so on each
+    # pulse it sees the step / beat that pulse made.
+    if arp:
+        arp.subscribe_ticks(1, _scene_pulse)
+    threading.Thread(target=_scene_loop, daemon=True, name="scenes").start()
     threading.Thread(target=_din_clock_watchdog, daemon=True).start()
     print("  DIN clock watchdog running (auto-sync external/internal)")
     _open_synth_bus()

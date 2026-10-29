@@ -917,6 +917,18 @@ ARP_CC_MAP = {
 
 ARP_PC_OFFSET = 60
 
+# ── Scene recall (CC on CH_CTRL, 2026-10-26) ──────────────────────────────────
+# value N recalls scene N (1-127; 0 is ignored, so a momentary 127/0 button
+# does not recall on release), with the scene's own timing (orc1_scenes).
+# Program changes on ch 13 are taken (scales 0+, presets 40-56, arp patterns
+# 60+), so the trigger is a CC. 42 = the first CC free in FUNC_CC_MAP,
+# CTRL_CC_MAP, ARP_CC_MAP and every other CH_CTRL number (checked 2026-10-26).
+SCENE_RECALL_CC = 42
+
+# Our Fire SEQUENCER firmware's MIDI port (scenes: hello / bar messages / queue
+# pattern, orc1_scenes.FireBarLink). Case-insensitive substring.
+FIRE_SEQ_PORT_NAMES = ["ORC FW seq"]
+
 # ── Scale select via PROGRAM CHANGE (PC on CH_CTRL) ───────────────────────────
 # PC (SCALE_PC_OFFSET + n) selects the n-th scale in orc1.SCALE_ORDER — one
 # message, direct access, no CC burned per scale.  Sits in the free PC block
@@ -1792,6 +1804,21 @@ def is_fire_port(name):
     """True if a MIDI port name belongs to a Fire the handler should drive."""
     nl = (name or "").lower()
     return any(p.lower() in nl for p in FIRE_PORT_NAMES)
+
+
+# USB inputs whose MIDI clock/transport (clock, start, stop, continue) is passed
+# to the DIN out, like the DIN in's own. USB transport is dropped by default (the
+# BeatStep Pro re-emits it on USB and looped one START into >1200). Only list a
+# device that never echoes transport it receives. Our Fire sequencer firmware
+# sends START on PLAY (with clock out on, SHIFT + PLAY) and the MPC on the DIN
+# waits for it (2026-10-23).
+CLOCK_THRU_USB_PORTS = ["ORC FW seq"]
+
+
+def is_clock_thru_port(name):
+    """True if a USB input's clock/transport should be passed to the DIN out."""
+    nl = (name or "").lower()
+    return any(p.lower() in nl for p in CLOCK_THRU_USB_PORTS)
 
 
 FIRE = {

@@ -81,11 +81,84 @@ def write_cmd(action, extra=None):
         return True
     except: return False
 
+# ── Command socket with a full reply (scenes, SETTINGS_READ) ──────────────────
+# _send_cmd_socket above reads only 64 bytes, which is all an ack needs. The
+# scenes actions reply with ONE JSON line that can be large (SCENE_LIST carries
+# every stored scene), so this reader reads up to the newline, with a deadline
+# for the whole reply and a size cap. The brain reads the command until we shut
+# our write side, runs it, sends the reply line, then closes.
+
+CMD_REPLY_MAX = 8 * 1024 * 1024        # bytes; a full 128-slot store is ~1-2 MB
+
+
+class CmdReplyError(Exception):
+    """The brain is reachable but its reply was missing, late, too long or not JSON."""
+
+
+def _cmd_request(payload, timeout=5.0, max_bytes=None):
+    """Send one command and return the brain's one-line JSON reply as a dict.
+    Raises FileNotFoundError / ConnectionRefusedError when nothing is listening
+    (the brain is down), CmdReplyError for a bad / slow / oversized reply."""
+    cap = CMD_REPLY_MAX if max_bytes is None else max_bytes
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(min(timeout, 1.0))
+        s.connect(CMD_SOCK)
+        s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+        try:
+            s.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        deadline = time.monotonic() + timeout
+        buf = bytearray()
+        while b"\n" not in buf:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise CmdReplyError("no reply from the ORC in time")
+            s.settimeout(left)
+            try:
+                chunk = s.recv(65536)
+            except socket.timeout:
+                raise CmdReplyError("no reply from the ORC in time")
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > cap:
+                raise CmdReplyError("reply from the ORC too long")
+        line = bytes(buf).split(b"\n", 1)[0].strip()
+        if not line:
+            raise CmdReplyError("empty reply from the ORC")
+        try:
+            out = json.loads(line.decode("utf-8"))
+        except ValueError:
+            raise CmdReplyError("reply from the ORC is not JSON")
+        if not isinstance(out, dict):
+            raise CmdReplyError("reply from the ORC is not an object")
+        return out
+    finally:
+        s.close()
+
+
+def _cmd_json(payload, timeout=5.0):
+    """_cmd_request -> a Flask JSON response (errors as {"ok": false, "error"})."""
+    try:
+        return jsonify(_cmd_request(payload, timeout=timeout))
+    except (FileNotFoundError, ConnectionRefusedError):
+        return jsonify({"ok": False, "error": "the ORC is not running"}), 503
+    except CmdReplyError as e:
+        return jsonify({"ok": False, "error": str(e)}), 504
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"cannot reach the ORC ({e})"}), 503
+
 # ── Pages (templates/ + static/) ──────────────────────────────────────────────
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/chord')
+def chord_page():
+    return render_template('chord.html')
 
 @app.route('/sampler')
 def sampler_page():
@@ -360,7 +433,7 @@ def api_padmap_get():
             raw, saved = json.load(f), True
     except Exception:
         raw, saved = {}, False
-    conf, errs = _pm.validate_config(raw, _padmap_modules())
+    conf, errs = _pm.validate_config(raw, _padmap_modules(), ports=set(_pedal_ports()))
     st = read_state() or {}
     bound = _live_bindings(st)
     try:
@@ -376,14 +449,29 @@ def api_padmap_get():
                     for m in _padmap_modules()],
         "devices": st.get("midi_devices", []) if isinstance(st, dict) else [],
         "hits": hits,
+        "sb_tracks": _padmap_sb_tracks(),     # for GRAB pads: one track / a fixed set
+        "ports": _pedal_ports(),              # output ports a pad may send to (cfg.PORTS keys)
     })
+
+
+def _padmap_sb_tracks():
+    """[{id, name, armed}] of the skipback tracks (~/.orc1_skipback_tracks.json)."""
+    try:
+        with open(os.path.expanduser("~/.orc1_skipback_tracks.json")) as f:
+            tr = json.load(f).get("tracks", [])
+        return [{"id": int(t["id"]), "name": str(t.get("name") or "track %s" % t["id"]),
+                 "armed": t.get("armed", True) is not False}
+                for t in tr if isinstance(t, dict) and "id" in t]
+    except Exception:
+        return []
 
 
 @app.route('/api/padmap', methods=['POST'])
 def api_padmap_set():
     import orc1_padmap as _pm
     data = request.get_json(force=True, silent=True) or {}
-    conf, errs = _pm.validate_config(data.get("config"), _padmap_modules())
+    conf, errs = _pm.validate_config(data.get("config"), _padmap_modules(),
+                                     ports=set(_pedal_ports()))
     ok = write_cmd("PADMAP_SET", {"config": conf})
     return jsonify({"ok": bool(ok), "config": conf, "errors": errs})
 
@@ -570,7 +658,15 @@ def cc_map_page():
     # running code". Now it rebuilds itself (niced, ~3 s) when anything it reads is
     # newer than the page; a failed rebuild serves the old page.
     _cc_map_refresh()
-    return app.send_static_file('cc_map.html')
+    # static/cc_map.html is now a FRAGMENT (the groups of tables), rendered inside
+    # base.html so the page matches the rest of the UI (templates/cc.html).
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(here, 'static', 'cc_map.html'), encoding='utf-8') as f:
+            body = f.read()
+    except OSError:
+        body = '<div class="note">The CC map has not been generated yet.</div>'
+    return render_template('cc.html', body=body)
 
 
 @app.route('/screens')
@@ -593,6 +689,7 @@ def _cc_map_stale():
     except OSError:
         return True
     srcs = (glob.glob(os.path.join(here, "*.py"))
+            + glob.glob(os.path.join(here, "daw", "orc_*.py"))
             + glob.glob(os.path.join(here, "static", "js", "*.js"))
             + glob.glob(os.path.join(here, "templates", "*.html")))
     return any(os.path.getmtime(p) > built for p in srcs
@@ -887,8 +984,20 @@ def _sb_track0_ports():
 _jack_last_error = [None]
 
 
-def _jack(args):
-    """Run a jack CLI tool. "" if it cannot run at all.
+def _jack_env(server):
+    """Environment for a jack CLI call. None (the main server) = this
+    process's own environment, exactly as before; a name points the tool at
+    that per-card server."""
+    if not server:
+        return None
+    env = dict(os.environ)
+    env["JACK_DEFAULT_SERVER"] = server
+    return env
+
+
+def _jack(args, server=None):
+    """Run a jack CLI tool. "" if it cannot run at all. `server` names a
+    per-card jackd (orc1-jackd@<card>); None = the main (default) server.
 
     Returning empty rather than raising is what makes the callers' carefully
     written "jackd is not reachable" paths REACHABLE. Before this, a wedged
@@ -900,7 +1009,7 @@ def _jack(args):
     import subprocess
     try:
         return subprocess.run(args, capture_output=True, text=True,
-                              timeout=5).stdout
+                              timeout=5, env=_jack_env(server)).stdout
     except Exception as e:
         # Deduped: /patch polls several endpoints on a timer, so an
         # unreachable jackd would otherwise write thousands of identical
@@ -2239,6 +2348,78 @@ def api_universal_pads_clear():
                         status=500, mimetype='application/json')
 
 
+# ─── FIRE UNIVERSAL PAGES (ORC Fire firmware v0.31+, stored ON the Fire) ─────
+# The /control UNIVERSAL card. The pages live in the Fire's flash; the brain
+# carries the SysEx (orc1_fire_pages.FirePages over the "ORC FW seq" port).
+#   GET  /api/fire_pages              FIRE_PAGES_INFO -> {ok, pages[8]{len,sum,name}, budget,
+#                                     used, current, showing, connected, version, why} + meta
+#   GET  /api/fire_pages/<p>          FIRE_PAGE_READ  (p 0-7) -> {ok, data{name,pads,knobs}, bytes, len, sum}
+#   POST /api/fire_pages/<p>          {name, pads, knobs} -> FIRE_PAGE_WRITE (checked here first),
+#                                     the brain writes, reads back and compares -> {ok, verified, ...}
+#   POST /api/fire_pages/<p>/clear    FIRE_PAGE_CLEAR
+import orc1_fire_pages as _fire_pages
+
+
+def _fire_pages_meta():
+    fp = _fire_pages
+    return {"pages": fp.PAGES, "pads": fp.PADS, "knobs": fp.KNOBS, "name_len": fp.NAME_LEN,
+            "pad_types": [{"key": k, "label": fp.PAD_TYPE_LABEL[k]} for k in fp.PAD_TYPES],
+            "colours": [{"name": n, "rgb": [min(255, c * 36) for c in rgb]}
+                        for n, rgb in zip(fp.COLOURS, fp.COLOUR_RGB7)],
+            "max_len": fp.MAX_LEN, "budget": fp.BUDGET, "version_needed": fp.PAGES_VERSION}
+
+
+def _fire_pages_page(p):
+    if not 0 <= p < _fire_pages.PAGES:
+        return None, (jsonify({"ok": False, "error": f"page must be 0-{_fire_pages.PAGES - 1}"}), 400)
+    return p, None
+
+
+@app.route('/api/fire_pages')
+def api_fire_pages_info():
+    try:
+        out = _cmd_request({"action": "FIRE_PAGES_INFO"}, timeout=4.0)
+    except (FileNotFoundError, ConnectionRefusedError):
+        out = {"ok": False, "error": "the ORC is not running"}
+    except CmdReplyError as e:
+        out = {"ok": False, "error": str(e)}
+    except OSError as e:
+        out = {"ok": False, "error": f"cannot reach the ORC ({e})"}
+    out["meta"] = _fire_pages_meta()
+    return jsonify(out)
+
+
+@app.route('/api/fire_pages/<int:p>')
+def api_fire_page_read(p):
+    p, bad = _fire_pages_page(p)
+    if bad:
+        return bad
+    return _cmd_json({"action": "FIRE_PAGE_READ", "page": p}, timeout=10.0)
+
+
+@app.route('/api/fire_pages/<int:p>', methods=['POST'])
+def api_fire_page_write(p):
+    p, bad = _fire_pages_page(p)
+    if bad:
+        return bad
+    data = request.get_json(force=True, silent=True)
+    try:
+        _fire_pages.encode_page(data)           # a bad page never reaches the brain
+    except _fire_pages.PageError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return _cmd_json({"action": "FIRE_PAGE_WRITE", "page": p,
+                      "data": {"name": data.get("name", ""), "pads": data.get("pads") or [],
+                               "knobs": data.get("knobs") or []}}, timeout=30.0)
+
+
+@app.route('/api/fire_pages/<int:p>/clear', methods=['POST'])
+def api_fire_page_clear(p):
+    p, bad = _fire_pages_page(p)
+    if bad:
+        return bad
+    return _cmd_json({"action": "FIRE_PAGE_CLEAR", "page": p}, timeout=20.0)
+
+
 # ─── CONTROL PAGE ────────────────────────────────────────────────────────────
 
 @app.route('/control')
@@ -2469,9 +2650,8 @@ _CONFIG_OVERRIDES_FILE = os.path.expanduser("~/.orc1_config_overrides.json")
 _CONFIG_SCHEMA = [
     # ── SYNTH ──
     ("SYNTH.MASTER_LEVEL",         "float",  0.0,  1.5,  None,
-     "Master bus BOOT level (0=silent, 0.6=nominal, 1.5=hot). Only applies "
-     "while the master fader has never been moved — once it has, the saved "
-     "level in ~/.orc1_bus_levels.json wins and this has no effect.",
+     "Master level at first boot (0 = silent, 0.6 = nominal, 1.5 = hot). "
+     "Ignored once the master fader has been moved.",
      "synth", 0.60),
     ("SYNTH.SUB_HPF_HZ",           "float",  10.0, 200.0, None,
      "Sub oscillator HPF cutoff Hz — filters infrasonic content", "synth", 40.0),
@@ -2489,23 +2669,23 @@ _CONFIG_SCHEMA = [
     # restart cascades a synth restart -- one token covers both readers.
     # Avoid 10 (always-passthrough), 12 (chord in), 13 (ctrl), 14 (passthrough), 15 (melody).
     ("SYNTH.CH_DRUM",     "int", 1, 16, None,
-     "Drum voice MIDI-in channel (default 10 = GM drum channel)", "orc1", 10),
+     "Drums: first-boot channel only (default 10). Set channels on MATRIX.", "orc1", 10),
     ("SYNTH.CH_POLY",     "int", 1, 16, None,
-     "Poly synth MIDI-in channel (default 8; CH 7 legacy alias also works)", "orc1", 8),
+     "Poly synth: first-boot channel only (default 8). Set channels on MATRIX.", "orc1", 8),
     ("SYNTH.CH_CHIP",     "int", 1, 16, None,
-     "NES Pulse 1 MIDI-in channel (default 9)", "orc1", 9),
+     "Chip pulse 1: first-boot channel only (default 9). Set channels on MATRIX.", "orc1", 9),
     ("SYNTH.CH_CHIP_P2",  "int", 1, 16, None,
-     "NES Pulse 2 MIDI-in channel (default 6)", "orc1", 6),
+     "Chip pulse 2: first-boot channel only (default 6). Set channels on MATRIX.", "orc1", 6),
     ("SYNTH.CH_CHIP_TRI", "int", 1, 16, None,
-     "NES Triangle MIDI-in channel (default 11)", "orc1", 11),
+     "Chip triangle: first-boot channel only (default 11). Set channels on MATRIX.", "orc1", 11),
     ("SYNTH.CH_CHIP_NS",  "int", 1, 16, None,
-     "NES Noise MIDI-in channel (default 4)", "orc1", 4),
+     "Chip noise: first-boot channel only (default 4). Set channels on MATRIX.", "orc1", 4),
     ("SYNTH.CH_GB_WAVE",  "int", 1, 16, None,
-     "Game Boy Wave MIDI-in channel (default 5)", "orc1", 5),
+     "Game Boy wave: first-boot channel only (default 5). Set channels on MATRIX.", "orc1", 5),
     ("SYNTH.CH_CHIP_PCM", "int", 1, 16, None,
-     "NES PCM MIDI-in channel (default 16)", "orc1", 16),
+     "Chip PCM: first-boot channel only (default 16). Set channels on MATRIX.", "orc1", 16),
     ("SAMPLER.CH_SAMPLER","int", 1, 16, None,
-     "Sampler MIDI-in channel (default 7)", "orc1", 7),
+     "Sampler: first-boot channel only (default 7). Set channels on MATRIX.", "orc1", 7),
     # ── SAMPLER ──
     # Tokens corrected 2026-07-29: these were ALL "none" (= no restart
     # needed), but every one is read ONCE at process start -- either into
@@ -2717,6 +2897,33 @@ _RESTART_MAP = {
     "web":      "orc1-web",
     "skipback": "skipback-record",
 }
+
+# Whole-Pi power (2026-10-25), the /system page's REBOOT / SHUTDOWN buttons.
+# The :5002 dashboard's buttons needed a "system token" typed into a browser
+# prompt that nothing ever told you; these take the same network rule
+# (orc1_nettrust: the Pi itself, its hotspot, the home network) and no token.
+# The page asks for the confirmation. Runs detached so the reply gets out.
+_POWER_CMDS = {
+    "shutdown": ["sudo", "-n", "systemctl", "poweroff"],
+    "reboot":   ["sudo", "-n", "systemctl", "reboot"],
+}
+
+@app.route('/api/power/<action>', methods=['POST'])
+def api_power(action):
+    if action not in _POWER_CMDS:
+        return jsonify({"ok": False, "error": "unknown action"}), 400
+    try:
+        import orc1_nettrust
+        trusted = orc1_nettrust.trusted(request.remote_addr or "")
+    except Exception:
+        trusted = False                       # fail closed
+    if not trusted:
+        return jsonify({"ok": False,
+                        "error": "only allowed from the Pi, its hotspot or the home network"}), 403
+    import subprocess
+    subprocess.Popen(_POWER_CMDS[action], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return jsonify({"ok": True, "action": action})
 
 @app.route('/api/restart/<service>', methods=['POST'])
 def api_restart(service):
@@ -3236,6 +3443,8 @@ def api_skipback_tracks_get():
             "recording":   bool(st.get("recording")),
             "resolved":    st.get("resolved", []),
             "connected":   bool(st.get("connected")),
+            # own (manual) source gone, recording the pisound inputs instead
+            "fallback":    bool(st.get("fallback")),
             "fill_secs":   st.get("fill_secs", 0),
             "ram_blocked": bool(st.get("ram_blocked")),
             "drain_err":   st.get("drain_err"),
@@ -3266,6 +3475,10 @@ def api_skipback_tracks_get():
         "raw_sources":   srcs,
         "zoom_present":  _zoom_present(),
         "status_ts":     glob.get("ts"),
+        # seconds since the recorder last wrote its status (every ~5 s while
+        # alive); computed here so a browser clock that is off doesn't matter
+        "status_age":    (round(time.time() - glob["ts"], 1)
+                          if isinstance(glob.get("ts"), (int, float)) else None),
     }), mimetype='application/json')
 
 @app.route('/api/skipback/tracks', methods=['POST'])
@@ -3716,8 +3929,9 @@ def _vis_patterns():
 def api_visuals_patterns():
     """The background's pattern SETS in knob order (daw/vis_patterns.py):
     [{"name", "folder" (null = built-in), "names": [...]}]. SET = CC 50,
-    PATTERN = CC 34 (bucketed over the set's names). The last set is
-    "custom" = your uploads (~/orc1_patterns).
+    PATTERN = CC 34 (bucketed over the set's names). "custom" = your
+    uploaded tiles (~/orc1_patterns); the LAST set is "pictures" = your
+    art / images (~/orc1_pictures, POST /api/visuals/pictures).
     POST multipart "file" = an SVG tile for CUSTOM (2026-10-12): checked
     (512 KB max, safe SVG, renders, actually shows: the ORC reads the RED
     channel) by vis_patterns.save_upload -> {"name", "warning"}; refused
@@ -3746,6 +3960,64 @@ def api_visuals_patterns():
         sets = [{"name": n, "folder": f, "names": names}
                 for n, f, names in vp.pattern_sets(vp.BUILTIN)]
         return Response(json.dumps({"ok": True, "sets": sets}), mimetype='application/json')
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
+@app.route('/api/visuals/pictures', methods=['POST'])
+def api_visuals_pictures():
+    """POST multipart "file" = one of YOUR pictures for the PICTURES set
+    (2026-10-24): a PNG / JPG / GIF / WebP / BMP / SVG, 16 MB max, 40 MP
+    max; stored grey, at most 2048 px on its longer side, by
+    vis_patterns.save_picture -> {"name", "warning"}; refused with the
+    reason otherwise. Same name = replaces your earlier one."""
+    try:
+        vp = _vis_patterns()
+        # judge the size BEFORE request.files spools the body to /tmp (RAM)
+        if request.content_length is None:
+            return _sb_err("upload needs a Content-Length", 411)
+        if request.content_length > vp.PIC_UPLOAD_MAX + 64 * 1024:
+            return _sb_err("too big (16 MB max)", 413)
+        up = request.files.get("file")
+        if up is None:
+            return _sb_err("no file", 400)
+        data = up.read(vp.PIC_UPLOAD_MAX + 1)
+        try:
+            name, warn = vp.save_picture(up.filename, data)
+        except ValueError as e:
+            return _sb_err(str(e), 400)
+        return Response(json.dumps({"ok": True, "name": name, "warning": warn}),
+                        mimetype='application/json')
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
+@app.route('/api/visuals/palettes', methods=['GET', 'POST'])
+def api_visuals_palettes():
+    """The colour palette SLOTS (daw/vis_palettes.py, 2026-10-24): GET ->
+    {"slots": [[hex, ...] x 8], "defaults": [...]}; POST {"slot": i,
+    "colours": [hex, ...]} = store ONE palette (an edit: other pages' edits
+    to other slots survive), POST {"slots": [...]} = store all 8 (DEFAULTS);
+    1-4 '#rrggbb' each, refused with the reason otherwise. The renderer
+    re-reads the file within a second. LINES PALETTE (CC 95) / BACKGROUND
+    PALETTE (CC 96) pick a slot live."""
+    try:
+        _vis_patterns()                  # puts daw/ on sys.path
+        import vis_palettes as vpal
+        if request.method == 'POST':
+            body = request.get_json(silent=True) or {}
+            try:
+                if "slot" in body:
+                    slots = vpal.save_slot(body.get("slot"), body.get("colours"))
+                else:
+                    slots = vpal.save(body.get("slots"))
+            except ValueError as e:
+                return _sb_err(str(e), 400)
+            return Response(json.dumps({"ok": True, "slots": slots}), mimetype='application/json')
+        return Response(json.dumps({"ok": True, "slots": vpal.load(),
+                                    "defaults": [list(p) for p in vpal.DEFAULTS],
+                                    "max_colours": vpal.MAX_COLOURS}),
+                        mimetype='application/json')
     except Exception as e:
         return _sb_err(str(e), 500)
 
@@ -3832,24 +4104,24 @@ def api_visuals_logo(name):
 def api_visuals_pattern_png(folder, slug):
     """One file tile as a PNG (rasterised on first use, then cached), for
     the /visuals gallery. Only the pattern folders and plain slugs.
-    DELETE removes one of YOUR tiles (custom only)."""
+    DELETE removes one of YOURS (custom tiles, pictures)."""
     import re as _re
     from flask import send_file
-    if folder not in ("hero", "monster", "custom") or not _re.fullmatch(r"[a-z0-9-]{1,80}", slug):
+    if folder not in ("hero", "monster", "custom", "pictures") or not _re.fullmatch(r"[a-z0-9-]{1,80}", slug):
         return _sb_err("no such pattern", 404)
     try:
         vp = _vis_patterns()
         if request.method == 'DELETE':
-            if folder != vp.CUSTOM:
-                return _sb_err("only your custom patterns can be deleted", 403)
-            if not vp.delete_upload(slug):
+            if folder not in (vp.CUSTOM, vp.PICTURES):
+                return _sb_err("only your own patterns and pictures can be deleted", 403)
+            if not (vp.delete_picture(slug) if folder == vp.PICTURES else vp.delete_upload(slug)):
                 return _sb_err("no such pattern", 404)
             return Response(json.dumps({"ok": True}), mimetype='application/json')
         if slug not in vp._slugs(folder):
             return _sb_err("no such pattern", 404)
         resp = send_file(vp.tile_png(folder, slug), mimetype="image/png")
         # yours can be replaced under the same name: never let a browser keep an old one
-        resp.headers["Cache-Control"] = "no-cache" if folder == vp.CUSTOM else "max-age=86400"
+        resp.headers["Cache-Control"] = "no-cache" if folder in (vp.CUSTOM, vp.PICTURES) else "max-age=86400"
         return resp
     except Exception as e:
         return _sb_err(str(e), 500)
@@ -4076,14 +4348,45 @@ def api_health_run():
 # input port, so a stereo source into a mono track sums, and a mono source
 # into a stereo destination feeds both sides. Both are plain wires.
 
-def _patch_ports():
-    """Every audio port right now, with direction. [] if jackd is unreachable."""
-    out, cur, res = _jack(["jack_lsp", "-t", "-p"]), None, []
+# ONE GRID, SEVERAL SERVERS (2026-10-19). A module moved to a card's own jackd
+# (orc1-jackd@<card>) leaves the main graph, and so did everything wired to it:
+# the grid could no longer see it. So every list below covers EVERY running
+# server. A port on a per-card server is named "<server>::<client>:<port>"
+# (e.g. "pisound::ORC1-Mono:out_L"); main-server names are unchanged, so the
+# saved patch and every older caller read exactly as before. JACK cannot wire
+# across servers: _patch_run refuses that with a plain message.
+_SRV_SEP = "::"
+# Per-card servers whose ports could NOT be listed on the last pass. Their
+# saved wires are "unknown", never "missing": the reconciler must not age
+# them toward a prune (the first rule of the saved patch, per server).
+_patch_unreachable = set()
+
+
+def _port_server(name):
+    """(server or None, bare JACK port name) for a grid port name."""
+    if _SRV_SEP in name:
+        srv, bare = name.split(_SRV_SEP, 1)
+        return srv, bare
+    return None, name
+
+
+def _patch_servers():
+    """[None] (the main server) + every running per-card server's name."""
+    return [None] + sorted({n for n, _c in _jackd_servers() if n})
+
+
+def _patch_ports_one(server):
+    """Audio ports of ONE server, names prefixed for a per-card server.
+    None if that server cannot be listed."""
+    out, cur, res = _jack(["jack_lsp", "-t", "-p"], server), None, []
+    if not out.strip():
+        return None
+    pre = (server + _SRV_SEP) if server else ""
     for line in out.splitlines():
         if not line.strip():
             continue
         if not line.startswith(("\t", " ")):
-            cur = {"name": line.strip(), "dir": None, "audio": False}
+            cur = {"name": pre + line.strip(), "dir": None, "audio": False}
             res.append(cur)
         elif cur is not None:
             s = line.strip().lower()
@@ -4097,48 +4400,114 @@ def _patch_ports():
     return [p for p in res if p["audio"] and p["dir"]]
 
 
+def _patch_ports():
+    """Every audio port right now, on every server, with direction.
+    [] if the MAIN jackd is unreachable (no graph = no information, exactly as
+    before); a per-card server that cannot be listed is left out and noted in
+    _patch_unreachable."""
+    res, bad = [], set()
+    for srv in _patch_servers():
+        ports = _patch_ports_one(srv)
+        if ports is None:
+            if srv is None:
+                return []
+            bad.add(srv)
+            continue
+        res.extend(ports)
+    _patch_unreachable.clear()
+    _patch_unreachable.update(bad)
+    return res
+
+
 def _patch_conns(ports=None):
-    """[[src_out, dst_in], ...] -- each connection once, in signal direction.
+    """[[src_out, dst_in], ...] -- each connection once, in signal direction,
+    on every server (per-card names prefixed like _patch_ports).
 
     `ports` may be passed in by a caller that has already enumerated them, so
     the reconciler below does not run jack_lsp twice per pass; omitted, it
     enumerates them itself exactly as before.
     """
-    out, cur = _jack(["jack_lsp", "-c"]), None
     dirs = {p["name"]: p["dir"]
             for p in (ports if ports is not None else _patch_ports())}
+    servers = sorted({_port_server(n)[0] for n in dirs} - {None})
     seen = set()
+    for srv in [None] + servers:
+        _patch_conns_one(srv, dirs, seen)
+    return sorted(seen)
+
+
+def _patch_conns_one(server, dirs, seen):
+    out, cur = _jack(["jack_lsp", "-c"], server), None
+    pre = (server + _SRV_SEP) if server else ""
     for line in out.splitlines():
         if not line.strip():
             continue
         if not line.startswith(("\t", " ")):
-            cur = line.strip()
+            cur = pre + line.strip()
         elif cur:
-            other = line.strip()
+            other = pre + line.strip()
             # jack_lsp -c lists connections from BOTH ends; keep the one
             # oriented output -> input so the UI never shows a wire twice.
             if dirs.get(cur) == "out" and dirs.get(other) == "in":
                 seen.add((cur, other))
             elif dirs.get(cur) == "in" and dirs.get(other) == "out":
                 seen.add((other, cur))
-    return sorted(seen)
+
+
+def _jackd_servers():
+    """[(server_name or None, card)] for every running jackd. None = the
+    default (main) server. A per-card server (orc1-jackd@<card>) is
+    `jackd -n <card> ... -dalsa -dhw:<card>`; the main one has no -n BEFORE
+    -dalsa (its `-n N` after -dalsa is the ALSA period count, not a name).
+    Same rule as orc1_assign_module_out.sh's default_card()."""
+    import re as _re
+    import subprocess
+    res = []
+    try:
+        out = subprocess.run(["ps", "-eo", "args"], capture_output=True,
+                             text=True, timeout=4).stdout
+    except Exception:
+        return res
+    for l in out.splitlines():
+        parts = l.split()
+        if not parts or not parts[0].endswith("jackd"):
+            continue
+        m = _re.search(r"-d\s*hw:(\S+)", l)
+        if not m:
+            continue
+        pre = _re.split(r"\s-d\s*alsa\b", l, maxsplit=1)[0].split()
+        name = pre[pre.index("-n") + 1] if ("-n" in pre and
+                pre.index("-n") + 1 < len(pre)) else None
+        res.append((name, m.group(1)))
+    return res
 
 
 def _patch_card():
-    """The interface jackd is actually on, for labelling. Not hardcoded."""
-    try:
-        import subprocess
-        out = subprocess.run(["ps", "-eo", "args"], capture_output=True,
-                             text=True, timeout=4).stdout
-        for l in out.splitlines():
-            if "jackd" in l and "-d" in l and "grep" not in l:
-                import re as _re
-                m = _re.search(r"-d\s*hw:(\S+)", l)
-                if m:
-                    return m.group(1)
-    except Exception:
-        pass
+    """The interface the DEFAULT jackd is on, for labelling. Not hardcoded.
+    Must skip per-card servers: picking the first jackd in `ps` labelled
+    whichever started first (a card switch restarts the main one, so a
+    per-card server could come first)."""
+    for name, card in _jackd_servers():
+        if name is None:
+            return card
     return "SYSTEM"
+
+
+def _card_servers():
+    """{card: {"running": bool, "modules": [...]}} for every card that has
+    (or is assigned) its OWN jackd in the per-host-jackd model. Read from the
+    live processes AND the module drop-ins, so a server that should be up but
+    is not shows as assigned-but-down instead of vanishing."""
+    res = {}
+    for name, card in _jackd_servers():
+        if name is not None:
+            res.setdefault(name, {"running": True, "modules": []})
+    for key in sorted(_CARD_ASSIGNABLE):
+        card = _module_current_card(key)
+        if card not in ("main", "default"):
+            res.setdefault(card, {"running": False, "modules": []})
+            res[card]["modules"].append(key)
+    return res
 
 
 def _patch_label(name, card, track_names):
@@ -4166,7 +4535,10 @@ def _patch_label(name, card, track_names):
             n = short.rsplit("_", 1)[-1]
             if n.isdigit():
                 return "%s %s %s" % (client[:-len(suffix)].upper(), word, n)
-    return short.replace("_", " ").upper()
+    # Everything else: say WHOSE port it is. Used to return just "OUT L" for every
+    # module, so the CURRENT PATCH list read "OUT L -> L12 OUT 3" for all of them.
+    who = client[5:] if client.startswith("ORC1-") else client
+    return ("%s %s" % (who, short.replace("_", " "))).upper()
 
 
 @app.route('/patch')
@@ -4194,9 +4566,16 @@ def api_patch():
         pass
 
     def _row(p):
-        client = p["name"].split(":", 1)[0]
-        return {"name": p["name"], "client": client, "dir": p["dir"],
-                "label": _patch_label(p["name"], card, track_names)}
+        srv, bare = _port_server(p["name"])
+        client = bare.split(":", 1)[0]
+        if srv is None:
+            return {"name": p["name"], "client": client, "dir": p["dir"],
+                    "server": "", "label": _patch_label(bare, card, track_names)}
+        # A per-card server is named after its card, so its system ports are
+        # that card's ins/outs ("pisound OUT 1").
+        return {"name": p["name"], "client": "%s server · %s" % (srv, client),
+                "dir": p["dir"], "server": srv,
+                "label": _patch_label(bare, srv, track_names)}
 
     return Response(json.dumps({
         "ok": True, "card": card,
@@ -4209,61 +4588,22 @@ def api_patch():
     }), mimetype='application/json')
 
 
-def _module_owned_wires(conns, phys=None):
-    """{(src, dst): module label} for each module's CONFIGURED output wires --
-    the pair /api/module_outputs owns (resolve_module_out of its saved dest).
-    Extra fan-out wires a player added from a module out are NOT included:
-    those are the player's own, freely cut. Asks jackd for the physical ports
-    only when a module out is actually in `conns`."""
-    import orc1_config as _cfg
-    outs = {}
-    for key in _cfg.MODULE_OUT_KEYS:
-        jk = _cfg.MODULE_JACK_NAMES.get(key)
-        if jk:
-            outs[key] = (jk + ":out_L", jk + ":out_R")
-    srcs = {s for (s, _d) in conns}
-    if not any(p in srcs for pair in outs.values() for p in pair):
-        return {}
-    phys = phys if phys is not None else _mo_phys_ports()
-    owned = {}
-    for key, (ol, orr) in outs.items():
-        pair = _cfg.resolve_module_out(_cfg.load_module_out(key), phys)
-        if pair:
-            label = _cfg.MODULE_LABELS.get(key, key)
-            owned[(ol, pair[0])] = label
-            owned[(orr, pair[1])] = label
-    return owned
-
-
 def _patch_protected(conns=None, phys=None):
     """{(src, dst): reason} for wires a misclick must not silently remove.
 
     NOT a denylist -- everything here can still be torn down deliberately, by
-    sending force=true. It exists because these are not recoverable from where
-    the player is standing:
+    sending force=true. Only the skipback recorder's source wiring is guarded:
+    it is the always-on safety net this whole machine exists for, and cutting it
+    stops the ring recording while every status field still reads RECORDING.
 
-      * A module's CONFIGURED output (drum/poly/chip/... -> its pair from
-        MODULE OUTPUTS). The host only connects it at startup, so cutting it
-        silences the module with no visible cause -- and re-picking the same
-        pair in the MODULE OUTPUTS dropdown fires no change event. (Until
-        2026-09-23 this guarded the retired ORC1-Synth, so after the audio host
-        split it protected nothing.)
-      * The skipback recorder's source wiring is the always-on safety net this
-        whole machine exists for. Cutting it stops the ring recording while
-        every status field still reads RECORDING.
-
-    Resolved LIVE from the graph rather than hardcoded, so it stays correct on
-    a different card or a re-sourced track.
+    A module's output wires are NOT protected (2026-10-19, owner): there are
+    no predefined homes for modules, every wire on the grid is the player's own.
+    `phys` is kept for callers, unused.
     """
     conns = conns if conns is not None else _patch_conns()
-    owned = _module_owned_wires(conns, phys)
     out = {}
     for src, dst in conns:
-        if (src, dst) in owned:
-            out[(src, dst)] = ("this is the %s module's output -- change it "
-                               "on MODULE OUTPUTS; cut here, the module goes "
-                               "silent until it restarts" % owned[(src, dst)])
-        elif dst.startswith("skipback-rec:"):
+        if dst.startswith("skipback-rec:"):
             out[(src, dst)] = ("this feeds a skipback track -- removing it "
                                "stops that ring recording")
     return out
@@ -4276,6 +4616,52 @@ def api_patch_protected():
         "protected": [[a, b, why] for (a, b), why in
                       _patch_protected().items()]}),
         mimetype='application/json')
+
+
+def _mo_sync_from_graph(touched_srcs):
+    """The /patch grid is where routing is chosen; a module host only needs a
+    STARTING pair when it (re)starts (autoconnect_module_out reads this file).
+    So after any grid change to a module's outputs, record the pair it is now on:
+    the lowest physical pair it is wired to as a clean L/R pair, 'none' if it is
+    wired to no physical output at all, and nothing at all for the first pair
+    (the default, no entry). Further fan-out wires come back from the saved patch.
+    A half-wired or odd state leaves the file alone. Never raises into the wire
+    change (2026-10-19; replaces the MODULE OUTPUTS card as the way this file is
+    kept)."""
+    import orc1_config as _cfg
+    # The file holds ONE dest per module, read by the host on whichever server
+    # it is on, so a module on a card's own jackd is measured against THAT
+    # server's outputs (2026-10-19; it used to see only the main server).
+    rev = {v: k for k, v in _cfg.MODULE_JACK_NAMES.items() if k in _cfg.MODULE_OUT_KEYS}
+    keys = {}
+    for sp in touched_srcs:
+        srv, bare = _port_server(sp)
+        cl, _, port = bare.partition(":")
+        if cl in rev and port in ("out_L", "out_R"):
+            keys[rev[cl]] = srv
+    if not keys:
+        return
+    conns = _patch_conns()
+    for key in sorted(keys):
+        srv = keys[key]
+        phys = _mo_phys_ports(srv) if srv else _mo_phys_ports()
+        if not phys:
+            continue
+        pairs = _mo_pairs(phys)[:-1]                  # drop 'none'
+        jk = ((srv + _SRV_SEP) if srv else "") + _cfg.MODULE_JACK_NAMES[key]
+        l_to = {d for (s2, d) in conns if s2 == jk + ":out_L" and d in phys}
+        r_to = {d for (s2, d) in conns if s2 == jk + ":out_R" and d in phys}
+        if not l_to and not r_to:
+            dest = "none"
+        else:
+            hit = [pr for pr in pairs if pr["ports"][0] in l_to and pr["ports"][1] in r_to]
+            if not hit:
+                continue                              # odd/half wiring: leave the file
+            dest = hit[0]["id"]
+            if dest == pairs[0]["id"]:
+                dest = ""                             # the default pair = no entry
+        if (_cfg.load_module_out(key) or "") != dest:
+            _mo_write(key, dest)
 
 
 @app.route('/api/patch', methods=['POST'])
@@ -4299,7 +4685,18 @@ def api_patch_set():
                                         "error": "need op, src, dst"}),
                             status=400, mimetype='application/json')
 
-        live = {p["name"]: p["dir"] for p in _patch_ports()}
+        ports = _patch_ports()
+        busy = {_port_server(p)[0] for p in src + dst} & _patch_unreachable
+        if not ports or busy:
+            # jack_lsp did not answer (it happens for a moment, e.g. while a
+            # module restarts). Saying "these ports do not exist" here sent
+            # owner chasing a routing problem that was not there.
+            return Response(json.dumps({
+                "ok": False,
+                "error": "JACK did not answer just now -- nothing was "
+                         "changed, try again"}),
+                status=503, mimetype='application/json')
+        live = {p["name"]: p["dir"] for p in ports}
         bad = [p for p in src + dst if p not in live]
         if bad:
             return Response(json.dumps({
@@ -4310,6 +4707,22 @@ def api_patch_set():
             return Response(json.dumps({
                 "ok": False,
                 "error": "sources must be outputs and destinations inputs"}),
+                status=400, mimetype='application/json')
+
+        moved = None
+        srvs = {_port_server(p)[0] for p in src + dst}
+        if len(srvs) > 1 and op == "connect":
+            src, moved, err = _patch_move_module(src, dst)
+            if err:
+                return Response(json.dumps({"ok": False, "error": err}),
+                                status=400, mimetype='application/json')
+            srvs = {_port_server(p)[0] for p in src + dst}
+        if len(srvs) > 1:
+            return Response(json.dumps({
+                "ok": False,
+                "error": "those ports are on different JACK servers (%s) -- "
+                         "a wire can only join ports on the same server"
+                         % ", ".join(sorted(s or "main" for s in srvs))}),
                 status=400, mimetype='application/json')
 
         if len(src) == 1:
@@ -4387,9 +4800,15 @@ def api_patch_set():
                     warn = ("the wire is live but could not be saved: %s" % e)
                     print("[patch] %s" % warn, flush=True)
             saved_now = _patch_saved_pairs()
+            try:
+                _mo_sync_from_graph([a for a, _b in done])
+            except Exception as e:
+                print("[patch] startup-pair sync skipped: %s" % e, flush=True)
 
         body = {"ok": not failed, "op": op, "done": done, "failed": failed,
                 "saved": saved_now, "connections": _patch_conns()}
+        if moved:
+            body["moved"] = moved
         if warn:
             body["warning"] = warn
         return Response(json.dumps(body), mimetype='application/json')
@@ -4410,16 +4829,18 @@ def api_patch_set():
 _mo_lock = threading.RLock()
 
 
-def _mo_phys_ports():
+def _mo_phys_ports(server=None):
     """Physical playback (speaker) ports in JACK order -- the SAME order the
     hosts get from S.phys_playback_ports(), so both agree what 'out-3-4' means.
-    [] if jackd is unreachable."""
-    out, cur, res = _jack(["jack_lsp", "-t", "-p"]), None, []
+    [] if jackd is unreachable. `server` = a per-card server: its ports, named
+    the grid's way ("<server>::system:playback_1")."""
+    out, cur, res = _jack(["jack_lsp", "-t", "-p"], server), None, []
+    pre = (server + _SRV_SEP) if server else ""
     for line in out.splitlines():
         if not line.strip():
             continue
         if not line.startswith(("\t", " ")):
-            cur = {"name": line.strip(), "audio": False,
+            cur = {"name": pre + line.strip(), "audio": False,
                    "inp": False, "phys": False}
             res.append(cur)
         elif cur is not None:
@@ -4602,8 +5023,182 @@ def api_module_outputs_set():
 # via sudo (passwordless sudo is available on this box). The host then attaches
 # to that server and self-connects to its physical outs; nothing is wired here.
 _ASSIGN_HELPER = "/home/pibox/orc/orc1/orc1_assign_module_out.sh"
-# Modules whose host adapts to the server's sample rate (bbkit is still 48k-only).
-_CARD_ASSIGNABLE = {"poly", "chip", "drum", "mono", "sampler"}
+# Modules that can move to a card's own jackd. All but bbkit adapt to the
+# server's sample rate; bbkit's kit is loaded at 48 kHz, so it may only go to a
+# server running at 48000 (_card_rate_refusal), and its host falls back to the
+# main server if it ever lands on another rate (2026-10-19, owner: "it won't
+# let me put the beatbuddy on the pisound").
+_CARD_ASSIGNABLE = {"poly", "chip", "drum", "mono", "sampler", "bbkit"}
+_FIXED_RATE = {"bbkit": 48000}
+
+
+def _card_rate(card):
+    """The rate `card`'s own jackd runs (or would run) at. A running server is
+    asked (jack_samplerate); otherwise it is predicted the way
+    orc1_jackd_card_start.sh picks it: 48000 if the card offers it, else the
+    card's highest rate. None if unknown."""
+    if card in ("main", "default"):
+        out = _jack(["jack_samplerate"])
+    else:
+        out = (_jack(["jack_samplerate"], card)
+               if card in {n for n, _c in _jackd_servers() if n} else "")
+    try:
+        return int(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        pass
+    if card in ("main", "default"):
+        return None
+    try:
+        import re as _re
+        idx = None
+        with open("/proc/asound/cards") as f:
+            for line in f:
+                m = _re.match(r"\s*(\d+)\s+\[(\S+)\s*\]", line)
+                if m and m.group(2) == card:
+                    idx = m.group(1)
+                    break
+        if idx is None:
+            return None
+        rates, sect = [], False
+        with open("/proc/asound/card%s/stream0" % idx) as f:
+            for line in f:
+                if line.startswith("Playback:"):
+                    sect = True
+                    continue
+                if _re.match(r"[A-Z][a-z]+:", line):
+                    sect = False
+                if sect and "Rates:" in line:
+                    body = line.split("Rates:", 1)[1]
+                    nums = [int(x) for x in _re.findall(r"\d+", body)]
+                    if "-" in body and len(nums) >= 2:
+                        if nums[0] <= 48000 <= nums[-1]:
+                            return 48000
+                    rates += nums
+        if 48000 in rates:
+            return 48000
+        return max(rates) if rates else None
+    except OSError:
+        return None
+
+
+def _card_rate_refusal(module, card):
+    """None if `module` can run on `card`'s server, else the reason why not."""
+    need = _FIXED_RATE.get(module)
+    if not need or card in ("main", "default"):
+        return None
+    rate = _card_rate(card)
+    if rate == need:
+        return None
+    import orc1_config as _cfg
+    return ("%s only runs at %d Hz, and %s's server runs at %s, so it stays "
+            "where it is" % (_cfg.MODULE_LABELS.get(module, module), need, card,
+                             ("%d Hz" % rate) if rate else "an unknown rate"))
+
+
+@app.route('/api/module_card')
+def api_module_card():
+    """Which server each card-assignable module is on ('main' or a card with
+    its own jackd), the cards it could go to, and which per-card servers are
+    actually running. Feeds the MODULE SERVERS card on /patch."""
+    import orc1_config as _cfg
+    try:
+        own = _card_servers()
+        cards = _assignable_cards()
+        mods = [{"key": k, "label": _cfg.MODULE_LABELS.get(k, k),
+                 "card": _module_current_card(k),
+                 "cards": [c for c in cards
+                           if _card_rate_refusal(k, c) is None]}
+                for k in _cfg.MODULE_OUT_KEYS if k in _CARD_ASSIGNABLE]
+        for m in mods:
+            m["running"] = (m["card"] == "main" or
+                            bool(own.get(m["card"], {}).get("running")))
+        return Response(json.dumps({"ok": True, "main": _patch_card(),
+                                    "cards": _assignable_cards(),
+                                    "modules": mods}),
+                        mimetype='application/json')
+    except Exception as e:
+        return Response(json.dumps({"ok": False, "error": str(e)}),
+                        status=500, mimetype='application/json')
+
+
+def _assign_module_card(module, card):
+    """Move a module's host to `card`'s own jackd, or 'main'. The caller has
+    validated both. (ok, log tail or error text)."""
+    import subprocess
+    r = subprocess.run(["sudo", _ASSIGN_HELPER, module, card],
+                       capture_output=True, text=True, timeout=45)
+    out = (r.stdout or "").strip()
+    if r.returncode != 0:
+        return False, (r.stderr or out or "assign failed").strip()[:400]
+    return True, out[-400:]
+
+
+def _patch_move_module(src, dst):
+    """A grid CONNECT from a module's outputs on one server to ports on
+    another (owner, 2026-10-19: "instead of giving me a warning, just break
+    that connection and put it to the new location"). JACK cannot wire across
+    servers, so the MODULE moves: its host goes to the destination's server,
+    the wires it had (live and saved, on any server) are dropped, including
+    the pair its host wires itself to at startup, and the caller then makes
+    the requested wire there (which also records it as the startup pair).
+
+    Returns (new_src, info, error): new_src = `src` renamed onto the target
+    server. Only a module can move; a card's own ports cannot."""
+    import orc1_config as _cfg
+    rev = {v: k for k, v in _cfg.MODULE_JACK_NAMES.items()}
+    tsrv = {_port_server(p)[0] for p in dst}
+    if len(tsrv) != 1:
+        return None, None, "the destinations are on different JACK servers"
+    tsrv = tsrv.pop()
+    mods = set()
+    for p in src:
+        srv, bare = _port_server(p)
+        cl, _, port = bare.partition(":")
+        if cl not in rev or port not in ("out_L", "out_R"):
+            return None, None, ("%s is not a module output, so it cannot move "
+                                "to another JACK server (only a module can)" % p)
+        mods.add((rev[cl], srv))
+    if len(mods) != 1:
+        return None, None, "pick the outputs of one module"
+    key, _fsrv = mods.pop()
+    if key not in _CARD_ASSIGNABLE:
+        return None, None, ("%s cannot change JACK server (it only runs on the "
+                            "main one)" % _cfg.MODULE_LABELS.get(key, key))
+    card = tsrv or "main"
+    why = _card_rate_refusal(key, card)
+    if why:
+        return None, None, why
+    ok, msg = _assign_module_card(key, card)
+    if not ok:
+        return None, None, "could not move %s to %s: %s" % (key, card, msg)
+    pre = (tsrv + _SRV_SEP) if tsrv else ""
+    jk = pre + _cfg.MODULE_JACK_NAMES[key]
+    outs = (jk + ":out_L", jk + ":out_R")
+    new_src = [pre + _port_server(p)[1] for p in src]
+    # Its ports appear once the restarted host is on the new server...
+    for _ in range(40):
+        live = {p["name"] for p in _patch_ports()}
+        if all(p in live for p in new_src):
+            break
+        time.sleep(0.25)
+    else:
+        return None, None, ("moved %s to %s, but its ports never appeared "
+                            "there" % (key, card))
+    # ...and it wires itself to its startup pair a moment later. Wait for that
+    # (bounded: a startup dest of "none" never wires), so the cut below does
+    # not race it and leave a stray wire.
+    for _ in range(12):
+        if any(s in outs for s, _d in _patch_conns()):
+            break
+        time.sleep(0.25)
+    with _patch_lock:
+        for s, dd in _patch_conns():
+            if s in outs:
+                _patch_run("jack_disconnect", s, dd)
+        name = _cfg.MODULE_JACK_NAMES[key]
+        _patch_saved_remove([[e["src"], e["dst"]] for e in _patch_saved_load()
+                             if _port_server(e["src"])[1].split(":", 1)[0] == name])
+    return new_src, {"module": key, "to": card}, None
 
 
 @app.route('/api/module_card', methods=['POST'])
@@ -4626,16 +5221,17 @@ def api_module_card_set():
                 return Response(json.dumps({
                     "ok": False, "error": "no such card: %s" % card}),
                     status=400, mimetype='application/json')
-        r = subprocess.run(["sudo", _ASSIGN_HELPER, module, card],
-                           capture_output=True, text=True, timeout=45)
-        out = (r.stdout or "").strip()
-        if r.returncode != 0:
+        why = _card_rate_refusal(module, card)
+        if why:
+            return Response(json.dumps({"ok": False, "error": why}),
+                            status=400, mimetype='application/json')
+        ok, out = _assign_module_card(module, card)
+        if not ok:
             return Response(json.dumps({
-                "ok": False, "module": module, "card": card,
-                "error": (r.stderr or out or "assign failed").strip()[:400]}),
+                "ok": False, "module": module, "card": card, "error": out}),
                 status=500, mimetype='application/json')
         return Response(json.dumps({"ok": True, "module": module, "card": card,
-                                    "log": out[-400:]}),
+                                    "log": out}),
                         mimetype='application/json')
     except Exception as e:
         return Response(json.dumps({"ok": False, "error": str(e)}),
@@ -4745,8 +5341,15 @@ def _patch_run(tool, a, b):
     are already exactly as they should be.
     """
     import subprocess
+    sa, ba = _port_server(a)
+    sb, bb = _port_server(b)
+    if sa != sb:
+        return ("%s and %s are on different JACK servers (%s / %s) -- a wire "
+                "can only join ports on the same server"
+                % (a, b, sa or "main", sb or "main"))
     try:
-        r = subprocess.run([tool, a, b], capture_output=True, timeout=8)
+        r = subprocess.run([tool, ba, bb], capture_output=True, timeout=8,
+                           env=_jack_env(sa))
     except Exception as e:
         return str(e)
     err = (r.stderr or b"").decode("utf-8", "replace").strip()
@@ -4957,6 +5560,12 @@ def _patch_reconcile(prune=True, connect=True, force=False):
             # restart happened, so forget that we ever saw this wire up --
             # that is what makes it eligible for restoring when they return.
             _patch_seen_up.discard(t)
+            if _port_server(t[0])[0] in _patch_unreachable:
+                # Its per-card server is up but could not be listed: no
+                # information, so no aging toward a prune (the FIRST rule).
+                keep.append(e)
+                rep["pending"].append(list(t))
+                continue
             if e["missing_since"] is None:
                 e["missing_since"] = now
                 changed = True
@@ -5026,7 +5635,7 @@ def api_patch_saved():
     rows = []
     for e in saved:
         t = (e["src"], e["dst"])
-        if not ports:
+        if not ports or _port_server(t[0])[0] in _patch_unreachable:
             # "unknown" is not "missing": with no graph we cannot tell, and
             # saying "missing" here would be inventing a fact about hardware.
             state, why = "unknown", ""
@@ -5227,11 +5836,14 @@ def api_patch_cards():
     graph_clients = {p["name"].split(":", 1)[0] for p in _patch_ports()}
     cpu = _proc_cpu()
     jack_card = _patch_card()
+    own = _card_servers()
     rows = []
     for c in _alsa_cards():
         entry = {"name": c["name"], "index": c["index"],
                  "minor": c["name"] in _CARD_MINOR,
-                 "is_jackd": c["name"] == jack_card, "dirs": {}}
+                 "is_jackd": c["name"] == jack_card,
+                 # its OWN jackd (a module routed here), outside this graph
+                 "own_server": own.get(c["name"]), "dirs": {}}
         for direction, present, ch in (("in", c["has_cap"], c["cap_ch"]),
                                        ("out", c["has_play"], c["play_ch"])):
             if not present:
@@ -5277,6 +5889,16 @@ def api_patch_cards_set():
                 "ok": False, "error": "no such card: %s" % card}),
                 status=400, mimetype='application/json')
         unit = _bridge_unit(card, direction)
+        srv = _card_servers().get(card)
+        if op == "start" and srv and srv["running"]:
+            # The ALSA device is exclusive: a bridge would only fail "device
+            # busy" (or, worse, win the race and starve the module's server).
+            return Response(json.dumps({
+                "ok": False, "unit": unit,
+                "error": "%s has its own JACK server (%s) -- route that "
+                         "module back to main first" % (
+                             card, ", ".join(srv["modules"]) or "no module")}),
+                status=409, mimetype='application/json')
         r = subprocess.run(["sudo", "systemctl", op, unit],
                            capture_output=True, text=True, timeout=25)
         if r.returncode != 0:
@@ -5314,6 +5936,135 @@ def api_patch_cards_set():
     except Exception as e:
         return Response(json.dumps({"ok": False, "error": str(e)}),
                         status=500, mimetype='application/json')
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCENES (PLAY page) — proxies to the brain's SCENE_* / SETTINGS_READ actions
+# ══════════════════════════════════════════════════════════════════════════════
+# The brain owns ~/.orc1_scenes.json and does every capture / recall
+# (orc1_scenes.py, orc1.py _scene_cmd); this process only relays. The list of
+# settings comes from orc1_settings_registry's JSON cache, which the BRAIN
+# builds in its own process: here building is switched off and only
+# load_cache() is used, so a missing / stale cache answers "settings list
+# loading" and the page retries.
+#   GET    /api/scenes                     SCENE_LIST -> {ok, slots, status}
+#   GET    /api/scenes/settings            the sceneable settings, for the editor
+#   POST   /api/scenes/<n>                 SCENE_SET {name?, timing?, values?, merge?, remove?}
+#   POST   /api/scenes/<n>/capture         SCENE_CAPTURE {ids, merge?}
+#   POST   /api/scenes/<n>/recall          SCENE_RECALL {timing?}
+#   POST   /api/scenes/<n>/clear           SCENE_CLEAR
+#   POST   /api/settings/read              SETTINGS_READ {ids}
+
+import orc1_settings_registry as _settings_reg
+_settings_reg.set_build_allowed(False)
+
+SCENE_SLOTS = 128
+SCENE_TIMINGS = ("IMMEDIATE", "NEXT_BEAT", "NEXT_BAR", "BARS_2", "BARS_4")
+
+
+def _scene_slot_ok(n):
+    return 1 <= n <= SCENE_SLOTS
+
+
+def _scene_bad_slot(n):
+    return jsonify({"ok": False, "error": f"scene slot must be 1-{SCENE_SLOTS}, got {n}"}), 400
+
+
+def _scene_body():
+    d = request.get_json(silent=True)
+    return d if isinstance(d, dict) else {}
+
+
+@app.route('/api/scenes')
+def api_scenes_list():
+    return _cmd_json({"action": "SCENE_LIST"}, timeout=4.0)
+
+
+@app.route('/api/scenes/settings')
+def api_scenes_settings():
+    try:
+        ents = _settings_reg.registry()
+    except _settings_reg.NotReady:
+        return jsonify({"ok": False, "loading": True, "error": "settings list loading"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"settings list unreadable ({e})"}), 500
+    out = []
+    for e in ents:
+        if not e.get("sceneable"):
+            continue
+        out.append({"id": e["id"], "thing": e.get("thing") or "Other",
+                    "label": e.get("label") or e["id"], "type": e.get("type"),
+                    "range": e.get("range"), "choices": e.get("choices"),
+                    "default": e.get("default"), "readable": bool(e.get("read")),
+                    "order": e.get("order", 50)})
+    return jsonify({"ok": True, "settings": out})
+
+
+@app.route('/api/scenes/<int:n>', methods=['POST'])
+def api_scene_set(n):
+    if not _scene_slot_ok(n):
+        return _scene_bad_slot(n)
+    d = _scene_body()
+    cmd = {"action": "SCENE_SET", "slot": n}
+    if "name" in d:
+        cmd["name"] = str(d.get("name") or "")[:40]
+    if d.get("timing") is not None:
+        if d["timing"] not in SCENE_TIMINGS:
+            return jsonify({"ok": False, "error": "unknown timing"}), 400
+        cmd["timing"] = d["timing"]
+    if d.get("values") is not None:
+        if not isinstance(d["values"], dict):
+            return jsonify({"ok": False, "error": "values must be {setting id: value}"}), 400
+        cmd["values"] = d["values"]
+    if d.get("merge"):
+        cmd["merge"] = True
+    if d.get("remove") is not None:
+        if not isinstance(d["remove"], list):
+            return jsonify({"ok": False, "error": "remove must be a list of ids"}), 400
+        cmd["remove"] = d["remove"]
+    return _cmd_json(cmd)
+
+
+@app.route('/api/scenes/<int:n>/capture', methods=['POST'])
+def api_scene_capture(n):
+    if not _scene_slot_ok(n):
+        return _scene_bad_slot(n)
+    d = _scene_body()
+    ids = d.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "error": "tick at least one setting to capture"}), 400
+    cmd = {"action": "SCENE_CAPTURE", "slot": n, "ids": ids}
+    if d.get("merge"):
+        cmd["merge"] = True
+    return _cmd_json(cmd, timeout=8.0)
+
+
+@app.route('/api/scenes/<int:n>/recall', methods=['POST'])
+def api_scene_recall(n):
+    if not _scene_slot_ok(n):
+        return _scene_bad_slot(n)
+    t = _scene_body().get("timing") or None
+    if t is not None and t not in SCENE_TIMINGS:
+        return jsonify({"ok": False, "error": "unknown timing"}), 400
+    cmd = {"action": "SCENE_RECALL", "slot": n}
+    if t:
+        cmd["timing"] = t
+    return _cmd_json(cmd)
+
+
+@app.route('/api/scenes/<int:n>/clear', methods=['POST'])
+def api_scene_clear(n):
+    if not _scene_slot_ok(n):
+        return _scene_bad_slot(n)
+    return _cmd_json({"action": "SCENE_CLEAR", "slot": n})
+
+
+@app.route('/api/settings/read', methods=['POST'])
+def api_settings_read():
+    ids = _scene_body().get("ids")
+    if not isinstance(ids, list):
+        return jsonify({"ok": False, "error": "ids must be a list"}), 400
+    return _cmd_json({"action": "SETTINGS_READ", "ids": ids}, timeout=6.0)
 
 
 if __name__ == '__main__':

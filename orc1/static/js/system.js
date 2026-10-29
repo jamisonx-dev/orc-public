@@ -1,5 +1,6 @@
 /* system.js — ORC-1 system health helpers
-   Used by system.html (full page) and main.js (compact card).
+   Used by system.html. (_sysRenderCompact fed PLAY's PI HEALTH card until
+   2026-10-26; the same numbers are on this page in full.)
    Depends on nothing — pure functions + self-contained poll. */
 
 'use strict';
@@ -250,7 +251,7 @@ async function loadAudio(){
   }catch(e){el.innerHTML='<span style="font-size:10px;color:var(--muted)">audio api unavailable</span>';}
 }
 async function setAudio(card){
-  if(!confirm('Switch audio output to '+card+'?\nThe audio engines will restart (~10s of silence).'))return;
+  if(!confirm('Switch the main audio interface to '+card+'?\nSound stops for about 10 s, and skipback stops recording until the audio server is back.'))return;
   try{
     await fetch('/api/audio/device',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({card})});
@@ -593,4 +594,54 @@ if (document.getElementById('config-body')) _cfgLoad();
 if (document.getElementById('health-body')) {
   loadHealth();
   setInterval(loadHealth, 60000);
+}
+
+// ── SYSTEM CONTROLS: RESTART ORC (moved from PLAY 2026-10-26) ────────────────
+// Same action and confirm text as PLAY's old RESTART button. The brain runs
+// orc1_gentle_restart.sh (hosts stopped and started one at a time).
+function orcRestart() {
+  if (!confirm('Restart the ORC (engine, sound modules, web page)?\nSound stops for about 10 s. Skipback keeps recording; a short glitch is possible.')) return;
+  const b = document.getElementById('orc-restart');
+  const m = document.getElementById('orc-restart-msg');
+  if (b) b.disabled = true;
+  if (m) m.textContent = 'Restarting the ORC: sound comes back in about 10 s.';
+  cmd('RESTART_ORC');
+  setTimeout(() => { if (b) b.disabled = false; if (m) m.textContent = ''; }, 9000);
+}
+
+// ── SYSTEM CONTROLS: whole-Pi reboot / shut down (2026-10-25) ─────────────────
+// Two steps on the page (browser confirm() dialogs are easy to dismiss by
+// accident on a phone): tap REBOOT / SHUT DOWN, then the named button.
+const _POWER_TEXT = {
+  reboot:   'Reboot the Pi? Sound stops for about a minute. Skipback audio held in RAM is lost (GRAB ALL first to keep it).',
+  shutdown: 'Shut down the Pi? Everything stops, and skipback audio held in RAM is lost (GRAB ALL first to keep it). To start it again, unplug the power and plug it back in.'
+};
+let _powerAction = null;
+function powerAsk(action) {
+  _powerAction = action;
+  document.getElementById('power-msg').textContent = _POWER_TEXT[action];
+  document.getElementById('power-go').textContent = action === 'reboot' ? 'REBOOT NOW' : 'SHUT DOWN NOW';
+  document.getElementById('power-confirm').hidden = false;
+  document.getElementById('power-status').textContent = '';
+}
+function powerCancel() {
+  _powerAction = null;
+  document.getElementById('power-confirm').hidden = true;
+}
+async function powerGo() {
+  const action = _powerAction;
+  if (!action) return;
+  powerCancel();
+  const st = document.getElementById('power-status');
+  try {
+    const r = await fetch('/api/power/' + action, {method: 'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { st.textContent = (action === 'reboot' ? 'Reboot' : 'Shut down') + ' failed: ' + (d.error || ('HTTP ' + r.status)); return; }
+    document.getElementById('power-btns').hidden = true;
+    st.textContent = action === 'reboot'
+      ? 'Rebooting. This page comes back in about a minute.'
+      : 'Shutting down. Wait about 30 s before unplugging the power.';
+  } catch (e) {
+    st.textContent = 'No response from the ORC web server.';
+  }
 }

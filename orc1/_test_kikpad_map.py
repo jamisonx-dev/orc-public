@@ -248,7 +248,7 @@ class Engine:
     pass
 
 
-s = K.KikpadSurface(Engine(), home=tmp, n_sets=1, log=lambda m: None)
+s = K.KikpadSurface(Engine(), home=tmp, log=lambda m: None)
 got = []
 s.sysex_hook = got.append
 s.handle(Msg("sysex", data=(0x7D, 0x4B, 0x50, 0x01, 1, 2, 8, 64)))

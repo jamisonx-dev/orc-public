@@ -37,23 +37,89 @@ const ORC = (() => {
                                Math.round(diff / 60) + 'm ago';
   }
 
+  /* ─── LOST-CONTACT WATCHDOG (2026-10-28) ───────────────────
+     owner's phone lost the Pi for 76 s mid-BeatBuddy session: every press
+     in that minute silently went nowhere while the page still looked fine.
+     A /state poll that HANGS never reached the catch below, so the dot froze
+     on 'live', and a new poll stacked up every 1.5 s until the browser's few
+     connections to the Pi were all stuck. Now: one poll at a time, aborted
+     after POLL_TIMEOUT_MS, and a banner once nothing has answered for LOST_MS. */
+  const POLL_TIMEOUT_MS = 4000;
+  const LOST_MS = 5000;
+  let _inflight = false;
+  let _lastOk = Date.now();
+  let _lostShown = false;
+
+  function _banner() {
+    let b = document.getElementById('orc-lost');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'orc-lost';
+      b.className = 'orc-lost';
+      b.setAttribute('role', 'status');
+      document.body.appendChild(b);
+    }
+    return b;
+  }
+
+  function _watch() {
+    if (document.hidden) return;                 // a backgrounded tab is not a lost ORC
+    const gap = Date.now() - _lastOk;
+    if (gap > LOST_MS) {
+      const b = _banner();
+      b.className = 'orc-lost show';
+      b.textContent = 'NO CONTACT WITH THE ORC · ' + Math.round(gap / 1000) +
+                      's · presses are not arriving';
+      _lostShown = true;
+      const dot = dotEl();
+      if (dot) dot.className = 'dot dead';
+    }
+  }
+
+  function _contact() {
+    _lastOk = Date.now();
+    if (!_lostShown) return;
+    _lostShown = false;
+    const b = _banner();
+    b.className = 'orc-lost show back';
+    b.textContent = 'BACK IN CONTACT WITH THE ORC';
+    setTimeout(function () { if (!_lostShown) b.className = 'orc-lost'; }, 2500);
+  }
+
   async function _tick() {
+    if (_inflight) return;                       // never stack polls on a stuck link
+    _inflight = true;
+    const ctl = window.AbortController ? new AbortController() : null;
+    const t = ctl ? setTimeout(function () { ctl.abort(); }, POLL_TIMEOUT_MS) : null;
     try {
-      const r = await fetch('/state');
+      const r = await fetch('/state', ctl ? { signal: ctl.signal } : undefined);
       if (!r.ok) throw new Error(r.status);
       const d = await r.json();
+      _contact();
       _last = d;
+      // /state carries no _ts (its 'timestamp' only moves on brain events), so
+      // without one the dot means 'the Pi answered' rather than staying grey.
       if (d._ts) _updateStatus(d._ts);
+      else { const dot = dotEl(); if (dot) dot.className = 'dot live'; }
       for (const fn of _subs) { try { fn(d); } catch (e) { console.error('[orc poll sub]', e); } }
     } catch (e) {
       const dot = dotEl();
       if (dot) dot.className = 'dot dead';
+    } finally {
+      if (t) clearTimeout(t);
+      _inflight = false;
     }
   }
 
   function start() {
     _tick();
     _timer = setInterval(_tick, REFRESH_MS);
+    setInterval(_watch, 1000);
+    // Coming back to the tab: phones freeze background timers, so the last
+    // answer looks old. Give the link a fresh LOST_MS and ask right away.
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { _lastOk = Date.now(); _tick(); }
+    });
   }
 
   function subscribe(fn) {

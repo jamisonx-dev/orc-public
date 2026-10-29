@@ -192,6 +192,9 @@ def valid_switch_action(a):
         return True
     if _re.fullmatch(r"chord:[1-7]", a) or _re.fullmatch(r"rc505:[a-z0-9_]+(:hold)?", a):
         return True
+    m = _re.fullmatch(r"scene:(\d{1,3})", a)       # recall scene N (orc1_scenes), its own timing
+    if m:
+        return 1 <= int(m.group(1)) <= 128
     m = _CMD_RE.match(a)
     return bool(m) and m.group(1) not in CMD_BLOCKED
 

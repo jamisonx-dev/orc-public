@@ -214,8 +214,10 @@ class DrumEngine:
             for v in self.voices.values():
                 buf[s:e] += v.render(seg)
 
-        # Drum-bus master * ceiling (same shaping the synth applied).
-        buf *= self.drum_master * S.DRUM_FADER_CEIL
+        # Drum-bus fader: squared taper * ceiling, like the synth buses (2026-10-19, owner:
+        # the Fire's fader "doesn't scale correctly"; it was linear = cc/127). The stored
+        # master stays the raw position, so saved levels / the display round-trip unchanged.
+        buf *= S._synth_fader_gain(self.drum_master, S.DRUM_FADER_CEIL)
         return self.lim.process([buf])[0]
 
 

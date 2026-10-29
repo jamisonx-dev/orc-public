@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}ORC-1 · CHORD{% endblock %}
+{% block page_label %}CHORD{% endblock %}
+
+{% block content %}
+  <!-- Chord engine + arpeggiator + CHORDS -> POLY / CHIP, re-rendered from /state by chord.js -->
+  <div id="content">
+    <div class="offline-card"><div class="offline-icon">◈</div><div class="offline-msg">WAITING FOR ENGINE…</div></div>
+  </div>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/js/chord.js"></script>
+{% endblock %}

@@ -132,6 +132,108 @@ MULTI_TAP_WINDOW_MS = 350
 
 
 # ---------------------------------------------------------------------------
+# Output helpers (pure; used by the brain's emit callback, tested without it)
+# ---------------------------------------------------------------------------
+
+def hit_delay_seconds(delay_ticks, pulse_s):
+    """Seconds into the current clock pulse at which a hit should sound.
+
+    The mind hands emit() a sub-pulse offset in player ticks (a flam, a roll, a
+    32nd note is up to 19 ticks into its pulse). Playing every hit at the pulse
+    edge collapses those onto one instant, which on a one-voice-per-note kit
+    (the 909) is heard as a double hit -- dense fills and transitions most."""
+    d = max(0.0, min(float(delay_ticks), 4.0 * TICKS_PER_CLOCK))
+    return d / TICKS_PER_CLOCK * max(0.0, float(pulse_s))
+
+
+# Per-drum mixer groups (2026-10-19). A level per drum, applied to the hit's
+# velocity before it reaches ANY output (BBKit, 909, external port), so it works
+# the same everywhere and folds nothing together. Notes are BeatBuddy's own map
+# (the one cfg.BB_TO_909 translates from); anything not listed is 'perc'.
+DRUM_GROUPS = (
+    ("kick", "KICK"), ("snare", "SNARE"), ("rim", "RIM / CLAP"), ("hat", "HATS"),
+    ("tom", "TOMS"), ("ride", "RIDE"), ("crash", "CRASH"), ("perc", "PERC"),
+)
+_GROUP_NOTES = {
+    "kick": (35, 36), "snare": (1, 38, 40), "rim": (37, 39),
+    "hat": (42, 44, 46, 47), "tom": (41, 43, 45, 48, 50),
+    "ride": (51, 53, 59), "crash": (49, 52, 55, 57),
+}
+_NOTE_GROUP = {n: g for g, ns in _GROUP_NOTES.items() for n in ns}
+MIX_MAX = 2.0
+
+
+def note_group(note):
+    return _NOTE_GROUP.get(int(note), "perc")
+
+
+# What a "909" output actually plays: cfg.BB_TO_909 folds several BeatBuddy notes onto one 909 voice (and kit-specific
+# notes, e.g. a brush sweep on 35, onto the snare), so for that output the MIX drums follow the TARGET voice.
+_NOTES_909 = {"kick": (36,), "snare": (38,), "rim": (37, 39), "hat": (42, 46), "tom": (41, 47, 48, 50),
+              "ride": (51, 53), "crash": (49, 55)}
+_NOTE_GROUP_909 = {n: g for g, ns in _NOTES_909.items() for n in ns}
+
+
+def target_group(dest, note):
+    """Which MIX drum a hit is, by what it will actually play: the 909's own voice for a 909 output,
+    the BeatBuddy note otherwise (BBKit plays them as they are; a MIDI port gets them untranslated)."""
+    if dest == "909":
+        return _NOTE_GROUP_909.get(int(note), "perc")
+    return note_group(note)
+
+
+def clamp_gain(g):
+    try:
+        g = float(g)
+    except (TypeError, ValueError):
+        return 1.0
+    if g != g:                       # NaN
+        return 1.0
+    return max(0.0, min(MIX_MAX, g))
+
+
+def scale_velocity(vel, gain):
+    """Velocity after the drum's level. 0 means 'do not play' (muted)."""
+    g = clamp_gain(gain)
+    if g <= 0.0:
+        return 0
+    return max(1, min(127, int(round(int(vel) * g))))
+
+
+class PulseDeduper:
+    """Drop a note repeated almost on top of itself (within WINDOW_TICKS).
+
+    Two ways the song data does this, both heard as a double hit on a
+    one-voice-per-note target (the 909, external gear):
+      * the same note layered twice on one tick (two kicks, two velocities);
+      * a transition fill's landing hit (its last event, one bar-length in)
+        arriving with the next part's downbeat note, 0-2 ticks apart.
+    The BeatBuddy's sampled kit layers them; a drum module retriggers. A real
+    flam is 18+ ticks apart and a 64th note is 30, so WINDOW_TICKS = 8 never
+    eats a deliberate hit. Call new_pulse() once per clock pulse, then
+    seen(note, delay) for each hit; True means 'already played, skip it'."""
+
+    WINDOW_TICKS = 8
+
+    def __init__(self):
+        self._pulse = 0
+        self._last = {}
+
+    def new_pulse(self):
+        self._pulse += 1
+
+    def seen(self, key, delay):
+        """`key` = whatever identifies the drum being played (a note, or the output target + note)."""
+        d = max(0.0, min(float(delay), 4.0 * TICKS_PER_CLOCK))     # the same cap hit_delay_seconds applies
+        t = self._pulse * TICKS_PER_CLOCK + d
+        last = self._last.get(key)
+        if last is not None and abs(t - last) < self.WINDOW_TICKS:
+            return True
+        self._last[key] = t
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Data model -- the .BBS structures the player walks
 # ---------------------------------------------------------------------------
 

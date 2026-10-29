@@ -58,11 +58,15 @@ while true; do
         [ "$secs" -gt 0 ] || secs=60
         echo "visuals: orc ${scene:-cycle}"
         echo orc > /tmp/orc1_visuals.now
-        # SCHED_IDLE: below every ordinary process, far below the realtime
-        # audio threads. One skipback xrun (21:13:38 2026-09-29) landed while
-        # an early build of this ran at ~90% of a core; now ~10-18%.
+        # nice 10 (was SCHED_IDLE until 2026-10-24): still below ordinary
+        # processes, far below the realtime audio threads. SCHED_IDLE let any
+        # background burst (the 15-min health check, a journalctl) starve it:
+        # 50-220 ms hitches on screen, traced. The 2026-09-29 skipback xrun
+        # that SCHED_IDLE was for turned out to be the recorder's own writer
+        # threads (session 43); the recorder now runs at SCHED_FIFO 1, which
+        # no SCHED_OTHER process can preempt.
         # shellcheck disable=SC2086
-        chrt --idle 0 python3 "$HERE/orc_visuals.py" $scene --secs "$secs" &
+        nice -n 10 python3 "$HERE/orc_visuals.py" $scene --secs "$secs" &
         pid=$!
         echo "$pid" > "$PIDF"
         wait "$pid"

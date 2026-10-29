@@ -1,0 +1,16 @@
+[Unit]
+Description=ORC-1 network + files page (:5003)
+After=network.target
+
+[Service]
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+ExecStart=/usr/bin/python3 /home/pibox/orc/orc1/orc1_net.py 5003
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+MemoryMax=96M
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

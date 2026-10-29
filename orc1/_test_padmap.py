@@ -78,7 +78,7 @@ def t_validator():
         "note:42": {"do": "action", "action": "page:up"},
         "note:43": {"do": "action", "action": "transition"},
         "note:44": {"do": "action", "action": "cmd:PADMAP_SET"},
-        "note:45": {"do": "cc", "module": "poly", "cc": 74},
+        "note:45": {"do": "cc", "module": "poly", "cc": 74, "mode": "sometimes"},
         "cc:4":    {"do": "note", "module": "drums", "note": 1},
         "cc:5":    {"do": "cc", "module": "poly", "cc": 200},
         "cc:7":    {"do": "cc", "module": "poly", "cc": 74},
@@ -101,7 +101,9 @@ def t_validator():
     check("page flips refused", "note:42" not in pads)
     check("transition toggle refused", "note:43" not in pads)
     check("non-pedal cmd refused? (cmd:PADMAP_SET is a valid cmd name)", "note:44" in pads)
-    check("note pad can't 'send CC'", "note:45" not in pads)
+    # 2026-10-19: a note pad MAY send a CC now (owner: "an arbitrary cc to a channel",
+    # _test_pad_cc covers it); an unknown CC behaviour is still refused.
+    check("note pad CC with an unknown behaviour refused", "note:45" not in pads)
     check("cc pad can't 'play note'", "cc:4" not in pads)
     check("cc out of range refused", "cc:5" not in pads)
     check("cc remap kept", pads.get("cc:7") == {"do": "cc", "module": "poly", "cc": 74})

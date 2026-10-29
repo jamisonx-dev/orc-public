@@ -54,8 +54,30 @@ def _load_token():
 
 SYSTEM_TOKEN = _load_token()
 
+def _trusted_source(req):
+    """Reboot/shutdown only from the Pi itself, its hotspot, or a home LAN
+    (see orc1_nettrust.py). Fails CLOSED: on a stranger's WiFi nobody can reboot the Pi
+    even with the (publicly default) token below."""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "orc1"))
+        import orc1_nettrust
+        return orc1_nettrust.trusted(req.remote_addr or "")
+    except Exception:
+        return False
+
+
 def _authorized(req):
-    """Accept token via 'Authorization: Bearer <tok>' header or JSON body {"token": ...}."""
+    """Trusted source address only (2026-10-25). The token below was the
+    published default nobody was ever told, so the page's buttons failed
+    with "Invalid token"; the network rule is what actually protects them,
+    the same rule the main /system page's buttons use."""
+    return _trusted_source(req)
+
+def _authorized_with_token(req):
+    """The old rule: trusted source AND the shared token. Unused."""
+    if not _trusted_source(req):
+        return False
     if not SYSTEM_TOKEN:
         return False
     auth = req.headers.get("Authorization", "")
@@ -542,20 +564,10 @@ async function doAction() {
   if (!pendingAction) return;
   const action = pendingAction;
   closeConfirm();
-  let token = localStorage.getItem('orc1_token') || '';
-  if (!token) {
-    token = (prompt('System token:') || '').trim();
-    if (!token) return;
-    localStorage.setItem('orc1_token', token);
-  }
   try {
-    const res = await fetch('/system/' + action, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
+    const res = await fetch('/system/' + action, { method: 'POST' });
     if (res.status === 401) {
-      localStorage.removeItem('orc1_token');
-      alert('Invalid token — try again.');
+      alert('Not allowed from this network (only the Pi, its hotspot or the home network).');
     }
   } catch(e) {}
 }

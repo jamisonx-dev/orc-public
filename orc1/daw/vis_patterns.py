@@ -4,9 +4,15 @@ Three sources of repeating tiles:
   * "built-in": drawn by orc_visuals.make_pattern (no files)
   * "hero":     patterns/hero/*.svg     (Hero Patterns, CC BY 4.0)
   * "monster":  patterns/monster/*.svg  (Pattern Monster, MIT)
-  * "custom":   ~/orc1_patterns/*.svg  (your own uploads, 2026-10-12; always
-                the LAST set, even when empty, so the set count stays put;
-                at most PAGE tiles, so it is never split into pages)
+  * "custom":   ~/orc1_patterns/*.svg  (your own uploads, 2026-10-12; there
+                even when empty, so the set count stays put; at most PAGE
+                tiles, so it is never split into pages)
+  * "pictures": ~/orc1_pictures/*.png (2026-10-24: your own art / images,
+                uploaded as PNG, JPG, GIF, WebP, BMP or SVG and stored as one
+                grey PNG each, at most PIC_MAX px on the longer side). The LAST
+                set, there even when empty. A picture is NOT one repeat of a
+                pattern: the renderer's REPEAT knob (CC 84) shows it repeated,
+                mirrored (no seam) or once.
 See patterns/CREDITS.md. A MIDI knob has 128 steps, so a set bigger than 128
 is split into pages ("monster 1", "monster 2", ...): SET (CC 50) picks the
 page, PATTERN (CC 34) picks a tile in it, and every tile is reachable.
@@ -21,6 +27,7 @@ stdlib only at import; numpy + pygame are imported only to load a tile.
 import os
 import re
 import subprocess
+import tempfile
 import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,15 +53,40 @@ def user_dir():
     return os.path.expanduser("~/orc1_patterns")
 
 
+PICTURES = "pictures"
+# A picture is stored grey, at most PIC_MAX px on its longer side. Why 2048:
+# the background is drawn at HALF the screen (640 x 360 on the 1280 x 720
+# monitor), and at its default size a picture fills the screen height (360
+# background rows), so 2048 still holds detail when you zoom in ~5x. Each
+# stored picture is <= 4 MB of grey in memory (2048 x 2048 x 1 byte; about
+# 5.3 MB on the GPU with its mipmaps), and the visuals session is capped at
+# 200 MB (MemoryHigh), so the renderer keeps only PIC_KEEP pictures loaded.
+PIC_MAX = 2048
+PIC_UPLOAD_MAX = 16 * 1024 * 1024    # bytes: a phone photo fits (12 MP JPEG ~ 3-8 MB)
+PIC_SVG_MAX = 2 * 1024 * 1024        # an SVG drawing (text) may be bigger than a tile
+PIC_MAX_PIXELS = 40_000_000          # decoded size, before it is shrunk (a 40 MP photo)
+PIC_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
+
+
+def pictures_dir():
+    """Your pictures (resolved at call time: tests sandbox HOME)."""
+    return os.path.expanduser("~/orc1_pictures")
+
+
 def folder_dir(folder):
-    """A set's folder name -> where its SVGs live."""
-    return user_dir() if folder == CUSTOM else os.path.join(PAT_DIR, folder)
+    """A set's folder name -> where its files live (SVGs; PNGs for pictures)."""
+    if folder == CUSTOM:
+        return user_dir()
+    if folder == PICTURES:
+        return pictures_dir()
+    return os.path.join(PAT_DIR, folder)
 
 
 def _slugs(folder):
     d = folder_dir(folder)
+    ext = ".png" if folder == PICTURES else ".svg"
     try:
-        return sorted(f[:-4] for f in os.listdir(d) if f.endswith(".svg"))
+        return sorted(f[:-4] for f in os.listdir(d) if f.endswith(ext) and not f.startswith("."))
     except OSError:
         return []
 
@@ -71,6 +103,7 @@ def pattern_sets(builtin=()):
             label = folder if len(pages) == 1 else f"{folder} {n}"
             out.append((label, folder, page))
     out.append((CUSTOM, CUSTOM, _slugs(CUSTOM)[:PAGE]))
+    out.append((PICTURES, PICTURES, _slugs(PICTURES)[:PAGE]))   # always LAST (only APPEND sets)
     return out
 
 
@@ -112,6 +145,8 @@ def tile_scale(w, h):
 def tile_png(folder, slug):
     """-> the cached PNG for one tile, rasterising it first if it is missing
     or older than its SVG. Raises on failure (no rsvg-convert, bad SVG)."""
+    if folder == PICTURES:                  # stored ready to use (save_picture)
+        return os.path.join(pictures_dir(), slug + ".png")
     svg = os.path.join(folder_dir(folder), slug + ".svg")
     out_dir = os.path.join(cache_dir(), folder)
     png = os.path.join(out_dir, slug + ".png")
@@ -138,12 +173,28 @@ def tile_png(folder, slug):
 
 def load_tile(folder, slug):
     """-> (grey float32 [rows, cols] in 0..1, (width, height) in tile units).
-    Grey = the red channel (the tiles are grey on black)."""
+    Grey = the red channel (the tiles are grey on black). A PICTURE comes back
+    as uint8 [rows, cols] 0..255 instead (see below)."""
     import numpy as np
     import pygame
     png = tile_png(folder, slug)
+    if folder == PICTURES:
+        # stored grey: read it straight as bytes (uint8 [rows, cols]). The
+        # float route below costs ~50 MB per 2048 px picture in a session
+        # capped at 200 MB (2026-10-24 review); the renderer takes either.
+        from PIL import Image
+        with Image.open(png) as im:
+            a = np.asarray(im.convert("L"))
+        return a, picture_units(a.shape[1], a.shape[0])
     a = pygame.surfarray.array3d(pygame.image.load(png))[:, :, 0].T
     return a.astype("f4") / 255.0, svg_size(os.path.join(folder_dir(folder), slug + ".svg"))
+
+
+def picture_units(w, h):
+    """A w x h px picture -> its size in tile units, so the SCALE knob's
+    default (1.5 px per unit at 720) shows it as tall as the screen, whatever
+    its pixel count, aspect kept."""
+    return (480.0 * w / h, 480.0)
 
 
 # ---- your own tiles (the CUSTOM set) -------------------------------------------
@@ -159,6 +210,12 @@ def check_upload(text):
     so nothing in it may reach another file or the network."""
     if len(text.encode("utf-8")) > MAX_UPLOAD:
         raise ValueError("too big (512 KB max): a pattern is one small repeat")
+    _check_svg_safety(text)
+    return _size_of(text)
+
+
+def _check_svg_safety(text):
+    """The SVG rules both tiles and pictures follow (see check_upload)."""
     low = text.lower()
     if "<!doctype" in low or "<!entity" in low:
         raise ValueError("DOCTYPE / ENTITY declarations aren't allowed")
@@ -181,7 +238,6 @@ def check_upload(text):
         body = (el.text or "").replace(" ", "")
         if tag == "style" and ("@import" in body or "url(" in body.replace("url(#", "")):
             raise ValueError("styles may not load other files")
-    return _size_of(text)
 
 
 def tile_stats(png):
@@ -261,8 +317,162 @@ def delete_upload(slug):
 
 
 def custom_sig():
-    """Changes whenever an upload / delete changes the CUSTOM folder."""
+    """Changes whenever an upload / delete changes the CUSTOM or PICTURES folder."""
+    out = []
+    for d in (user_dir(), pictures_dir()):
+        try:
+            out.append(os.stat(d).st_mtime_ns)
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+# ---- your own art / images (the PICTURES set) ------------------------------------
+
+def _svg_to_png(text, tmp_dir):
+    """A checked SVG drawing -> a temp PNG path, at most PIC_MAX px on its
+    longer side (rsvg-convert, like the tiles). Raises ValueError."""
+    if len(text.encode("utf-8")) > PIC_SVG_MAX:
+        raise ValueError("too big (2 MB max for an SVG drawing)")
+    _check_svg_safety(text)
+    w, h = _size_of(text)
+    k = PIC_MAX / max(w, h)
+    # unique names: the web serves uploads on threads of ONE process, so a
+    # pid-only name let two SVG uploads at once swap or delete each other's files
+    fd, svg = tempfile.mkstemp(prefix=".pic.", suffix=".svg", dir=tmp_dir)
+    png = svg + ".png"
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    done = False
     try:
-        return os.stat(user_dir()).st_mtime_ns
-    except OSError:
-        return None
+        subprocess.run(["rsvg-convert", "-w", str(max(1, round(w * k))), "-h", str(max(1, round(h * k))),
+                        "-o", png, svg], check=True, capture_output=True, timeout=30)
+        done = True
+    except FileNotFoundError:
+        raise ValueError("SVG pictures need rsvg-convert on the Pi (apt install librsvg2-bin)")
+    except subprocess.CalledProcessError as e:
+        raise ValueError("it doesn't render: %s" % (e.stderr or b"").decode("utf-8", "replace")[:120])
+    except subprocess.TimeoutExpired:
+        raise ValueError("it took too long to render")
+    finally:
+        for p in ((svg,) if done else (svg, png)):   # a failed render may leave half a PNG
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    return png
+
+
+# EXIF orientation -> the PIL transpose that turns a phone photo upright
+# (the same table ImageOps.exif_transpose uses; Image.Transpose values)
+_EXIF_TURN = {2: 0, 3: 3, 4: 1, 5: 5, 6: 4, 7: 6, 8: 2}
+
+
+def picture_grey(data):
+    """An uploaded image file's bytes -> a PIL grey ("L") image, at most
+    PIC_MAX px on its longer side. Phone photos are turned upright (EXIF),
+    transparent = black (that's how it shows on screen), colour -> its
+    brightness (luminance: unlike a tile, blue counts). Raises ValueError."""
+    import io
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = PIC_MAX_PIXELS          # bigger = refused by PIL itself
+    try:
+        im = Image.open(io.BytesIO(data))
+        w, h = im.size
+        if w * h > PIC_MAX_PIXELS:
+            raise ValueError("too many pixels (%d x %d; 40 megapixels max)" % (w, h))
+        if im.format == "JPEG":
+            im.draft("RGB", (PIC_MAX, PIC_MAX))      # decode a big JPEG small: fast, little memory
+        orient = im.getexif().get(0x0112, 1)         # read now: the shrunk copy has no EXIF
+        im.load()
+        # GREY FIRST, in strips, then shrink (2026-10-24 review): converting /
+        # compositing a 40 MP picture at full size took ~600 MB in orc1-web on
+        # a 1.8 GB Pi (measured), and a big allocation can wedge jackd
+        # (skipback). Strips keep every colour copy small; the full-size grey
+        # is 1 byte a pixel. Peak ~ the decode + a quarter of it.
+        if im.mode != "L":
+            w, h = im.size
+            g = Image.new("L", (w, h))
+            for y in range(0, h, 256):
+                g.paste(_grey(im.crop((0, y, w, min(h, y + 256)))), (0, y))
+            im = g
+        if max(im.size) > PIC_MAX:
+            im.thumbnail((PIC_MAX, PIC_MAX), Image.LANCZOS, reducing_gap=2.0)
+        if orient in _EXIF_TURN:                     # = ImageOps.exif_transpose, on the small copy
+            im = im.transpose(_EXIF_TURN[orient])
+    except ValueError:
+        raise
+    except Exception as e:                           # not an image / truncated / a decompression bomb
+        raise ValueError("not an image this can read (%s)" % (str(e)[:80] or type(e).__name__))
+    return im
+
+
+def _grey(im):
+    """Any PIL image (a strip of one) -> grey "L": transparent = black, colour
+    -> its brightness (luminance)."""
+    from PIL import Image
+    if im.mode == "P" and "transparency" in im.info:
+        im = im.convert("RGBA")
+    if im.mode in ("RGBA", "LA", "PA"):
+        rgba = im.convert("RGBA")
+        im = Image.alpha_composite(Image.new("RGBA", rgba.size, (0, 0, 0, 255)), rgba)
+    return im.convert("L")
+
+
+def save_picture(filename, data):
+    """Check + convert + store one of YOUR pictures (bytes of a PNG / JPG /
+    GIF / WebP / BMP / SVG file). -> (slug, warning or None). Raises
+    ValueError (nothing stored) when it can't be used. Same name = replaces."""
+    if len(data) > PIC_UPLOAD_MAX:
+        raise ValueError("too big (16 MB max)")
+    name = os.path.basename(filename or "picture")
+    slug = slugify(os.path.splitext(name)[0])
+    have = _slugs(PICTURES)
+    if slug not in have and len(have) >= PAGE:
+        raise ValueError("PICTURES is full (%d pictures): delete one first" % PAGE)
+    d = pictures_dir()
+    os.makedirs(d, exist_ok=True)
+    svg_png = None
+    try:
+        head = data[:512].lstrip().lower()
+        if name.lower().endswith(".svg") or head.startswith(b"<?xml") or head.startswith(b"<svg"):
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("not a text SVG file")
+            svg_png = _svg_to_png(text, d)
+            with open(svg_png, "rb") as f:
+                data = f.read()
+        g = picture_grey(data)
+        lo, hi = g.getextrema()
+        if hi < 24:
+            raise ValueError("it's all black: nothing would show (INVERT can flip a dark "
+                             "drawing, but this one has nothing in it)")
+        warn = None
+        if hi - lo < 40:
+            warn = "very low contrast: try CRISP to cut it to black and white"
+        fd, tmp = tempfile.mkstemp(prefix=".%s." % slug, suffix=".tmp.png", dir=d)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                g.save(f, format="PNG", optimize=True)
+            os.replace(tmp, os.path.join(d, slug + ".png"))
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return slug, warn
+    finally:
+        if svg_png:
+            try:
+                os.remove(svg_png)
+            except OSError:
+                pass
+
+
+def delete_picture(slug):
+    """Remove one of YOUR pictures. -> True if it existed."""
+    if slug not in _slugs(PICTURES):
+        return False
+    os.remove(os.path.join(pictures_dir(), slug + ".png"))
+    return True

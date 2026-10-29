@@ -129,6 +129,52 @@
   .ucs-pad-num { font-size: .55em; }
 }
 
+/* ── FIRE UNIVERSAL PAGES (stored on the Fire, 2026-10-27) ───── */
+.fup-status {
+  font-size: .75em;
+  padding: .4em .6em;
+  border-radius: 4px;
+  margin-bottom: .7em;
+  background: var(--surface2);
+  color: var(--muted);
+}
+.fup-status.good { color: var(--teal); background: var(--teal-bg); }
+.fup-status.bad  { color: var(--warn); background: var(--warn-bg); }
+.fup-pages { display: flex; gap: .3em; flex-wrap: wrap; }
+.fup-pages .btn.fup-used:not(.accent) { border-color: var(--teal-border); color: var(--teal); }
+.fup-name { max-width: 8em; font-family: var(--fs, monospace); text-transform: none; }
+.fup-gap { flex: 1; }
+/* the 16 pads share the card's width (they used to be fixed 2.4em and scroll); on a phone
+   they stop at 22px and the grid scrolls sideways inside the card, never the page */
+#universal-card .ucs-row {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(22px, 1fr)) auto;
+}
+#universal-card .ucs-pad { width: auto; height: auto; aspect-ratio: 1; min-height: 22px; }
+.ucs-pad.tinted { box-shadow: inset 0 -4px 0 var(--padc); }
+.ucs-pad.tinted.sel { box-shadow: inset 0 -4px 0 var(--padc), 0 0 0 2px var(--accent); }
+.fup-colrow { display: flex; gap: .4em; align-items: center; }
+.fup-swatch {
+  width: 1.4em; height: 1.4em; border-radius: 3px;
+  border: 1px solid var(--border); flex-shrink: 0;
+}
+#ucs-type-help { margin-bottom: .6em; }
+.fup-knobs {
+  margin-top: .8em;
+  padding-top: .7em;
+  border-top: 1px solid var(--border);
+}
+.fk-row { display: flex; flex-wrap: wrap; gap: .3em; align-items: center; }
+.fk-num { width: 3.6em; }
+.fup-send {
+  display: flex; align-items: center; gap: .7em; flex-wrap: wrap;
+  margin-top: .8em;
+}
+.fup-dirty { font-size: .72em; color: var(--muted); }
+.fup-result { font-size: .75em; margin-top: .4em; min-height: 1.2em; color: var(--muted); }
+.fup-result.good { color: var(--teal); }
+.fup-result.bad  { color: var(--warn); }
+
 /* ── Knob map ───────────────────────────────────────────────── */
 .km-controls {
   display: flex;

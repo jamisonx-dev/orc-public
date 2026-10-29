@@ -26,13 +26,8 @@ const CTRL = (() => {
   let _ports   = [];
   let _curView  = 'seq';
   let _curLayer = 'base';
-  // Universal per-PAGE (per-bank) knob overrides (Fire reorg P2). Only consulted
-  // when _curView === 'universal'; other views use the global _map.
-  let _uniBank  = 0;
-  let _uniBanks = 1;
-  let _uniKnobs = {};   // {layer: {idx: [action]}} for the current _uniBank
-  let _uniFaders = {};  // {row: {cc,channel,port,value}} for the current _uniBank (P3)
-  let _ccPorts  = ['synth', 'pisound'];   // ports for the universal CC editor
+  // (The Akai-firmware 'universal' view's per-page knobs + fader rows were edited
+  //  here until 2026-10-27; the UNIVERSAL pages now live ON the Fire, see UCS.)
   // Module keys (from /api/knobmap). On the internal "synth" port a knob can
   // NAME a module instead of a channel -- it then follows the module wherever
   // /matrix puts it (2026-09-24). A number still means exactly that channel.
@@ -72,7 +67,8 @@ const CTRL = (() => {
     try {
       const r  = await fetch('/api/knobmap');
       const d  = await r.json();
-      _views   = d.views   || [];
+      // 'universal' is edited in the FIRE UNIVERSAL PAGES card (stored on the Fire)
+      _views   = (d.views  || []).filter(v => v !== 'universal');
       _layers  = d.layers  || ['base', 'shift', 'alt'];
       _targets = d.targets || [];
       _modules = d.modules || [];
@@ -92,9 +88,6 @@ const CTRL = (() => {
         _curView = sel.value || _curView;
       }
 
-      if (_curView === 'universal') {
-        _uniBank = 0; await loadUniKnobs(); await loadUniFaders();
-      }
       _renderKnobGrid();
 
       // Populate CC-out port dropdown from live port list (once)
@@ -111,8 +104,6 @@ const CTRL = (() => {
               o.value = p.key || p; o.textContent = p.label || p.key || p;
               portSel.appendChild(o);
             });
-            // Keep the universal per-knob CC editor's port list in step.
-            _ccPorts = ports.map(p => p.key || p);
           }
         } catch(_) {}
       }
@@ -140,125 +131,12 @@ const CTRL = (() => {
     _renderKnobGrid();
   }
 
-  // ── Universal per-page knobs (Fire reorg P2) ───────────────
-  async function loadUniKnobs() {
-    try {
-      const r = await fetch('/api/universal_knobs?bank=' + _uniBank);
-      const d = await r.json();
-      _uniKnobs = d.knobs || {};
-      _uniBanks = d.banks || 1;
-      _renderUniBankSel();
-    } catch (e) { console.error('[uniknobs load]', e); _uniKnobs = {}; }
-  }
-
-  function _renderUniBankSel() {
-    const sel = document.getElementById('km-bank');
-    if (!sel) return;
-    sel.innerHTML = '';
-    for (let b = 0; b < _uniBanks; b++) {
-      const o = document.createElement('option');
-      o.value = b; o.textContent = 'PAGE ' + (b + 1);
-      sel.appendChild(o);
-    }
-    sel.value = _uniBank;
-  }
-
-  async function onKmBankChange() {
-    const sel = document.getElementById('km-bank');
-    _uniBank = parseInt((sel && sel.value) || 0) || 0;
-    await loadUniKnobs();
-    await loadUniFaders();
-    _renderKnobGrid();
-  }
-
-  async function loadUniFaders() {
-    try {
-      const r = await fetch('/api/universal_faders?bank=' + _uniBank);
-      const d = await r.json();
-      _uniFaders = d.faders || {};
-    } catch (e) { console.error('[unifaders load]', e); _uniFaders = {}; }
-  }
-
-  function _renderUniFaderRows() {
-    const host = document.getElementById('uk-fader-rows');
-    if (!host) return;
-    const portOpts = _ccPorts.map(p =>
-      `<option value="${_esc(p)}">${_esc(p)}</option>`).join('');
-    host.innerHTML = [0,1,2,3].map(row => {
-      const f    = _uniFaders[String(row)] || _uniFaders[row] || null;
-      const on   = !!f;
-      const ch   = on ? f.channel : 1;
-      const cc   = on ? f.cc : 7;
-      const stat = on ? `▬ CC${f.cc} · ch${f.channel} · ${f.port}` : 'per-pad';
-      return `<div style="display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:2px 0">
-        <span style="font-size:9px;color:var(--label);width:44px">ROW ${row}</span>
-        <select id="uf-port-${row}" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px">${portOpts}</select>
-        <span style="font-size:9px;color:var(--label)">CH</span>
-        <input type="number" id="uf-ch-${row}" min="1" max="16" value="${ch}" style="width:34px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px">
-        <span style="font-size:9px;color:var(--label)">CC</span>
-        <input type="number" id="uf-cc-${row}" min="0" max="127" value="${cc}" style="width:40px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px">
-        <button class="btn accent" onclick="CTRL.setUniFader(${row})">SET</button>
-        <button class="btn" onclick="CTRL.clearUniFader(${row})" title="row → per-pad">×</button>
-        <span style="font-size:9px;color:var(--muted)">${_esc(stat)}</span>
-      </div>`;
-    }).join('');
-    [0,1,2,3].forEach(row => {
-      const f = _uniFaders[String(row)] || _uniFaders[row] || null;
-      if (f) { const ps = document.getElementById('uf-port-' + row);
-               if (ps) ps.value = f.port; }
-    });
-  }
-
-  async function setUniFader(row) {
-    const port = document.getElementById('uf-port-' + row)?.value || 'synth';
-    const ch   = parseInt(document.getElementById('uf-ch-' + row)?.value ?? 1) || 1;
-    const cc   = parseInt(document.getElementById('uf-cc-' + row)?.value ?? 7) || 0;
-    try {
-      await fetch('/api/universal_faders', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({bank: _uniBank, row, cc, channel: ch, port})
-      });
-      _uniFaders[String(row)] = {cc, channel: ch, port,
-                                 value: (_uniFaders[String(row)]||{}).value || 0};
-      _renderUniFaderRows();
-    } catch(e) { console.error('[unifader set]', e); }
-  }
-
-  async function clearUniFader(row) {
-    try {
-      await fetch('/api/universal_faders', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({bank: _uniBank, row, clear: true})
-      });
-      delete _uniFaders[String(row)];
-      delete _uniFaders[row];
-      _renderUniFaderRows();
-    } catch(e) { console.error('[unifader clear]', e); }
-  }
-
   function _renderKnobGrid() {
     const grid = document.getElementById('km-grid');
     if (!grid) return;
 
     const sel = document.getElementById('km-view');
     _curView  = sel ? sel.value : _curView;
-
-    const isUni = (_curView === 'universal');
-    // The PAGE selector + the CC-only editor only apply to the universal surface.
-    const bw = document.getElementById('km-bank-wrap');
-    if (bw) bw.style.display = isUni ? '' : 'none';
-    // Hide the shared CC-OUT builder for universal (each knob has its own inline
-    // CC editor there); it stays for the internal views.
-    const ccPanel = document.getElementById('km-cc-panel');
-    if (ccPanel) ccPanel.style.display = isUni ? 'none' : '';
-    const faderPanel = document.getElementById('uk-fader-panel');
-    if (faderPanel) faderPanel.style.display = isUni ? '' : 'none';
-
-    if (isUni) {
-      _renderUniKnobGrid(grid, _uniKnobs[_curLayer] || {});
-      _renderUniFaderRows();
-      return;
-    }
 
     // ── Internal views: the named-target dropdown (unchanged) ──
     const layerMap = (_map[_curView] || {})[_curLayer] || {};
@@ -298,110 +176,11 @@ const CTRL = (() => {
     });
   }
 
-  // On the CC surface, label a knob by WHAT IT SENDS, never by a cryptic preset
-  // name (the confusing "synflt"/"dincut" labels have no place here).
-  function _ccLabel(a) {
-    if (!a) return '(baseline)';
-    if (a[0] === 'cc_out' && a.length === 4) return `CC${a[3]} · ${_chTxt(a[2])} · ${a[1]}`;
-    if (a[0] === 'pitch_out') return `PITCH · ${_chTxt(a[2])} · ${a[1]}`;
-    if (a[0] === 'none') return 'off';
-    return a[0] || '?';
-  }
-
-  // The universal surface is a CC-send surface: each knob is just PORT/CH/CC.
-  // No named internal targets -- to drive an internal ORC param, send its CC
-  // to its channel here (poly cutoff = CC74 ch8 synth, etc.).
-  function _renderUniKnobGrid(grid, layerMap) {
-    const portOpts = _ccPorts.map(p =>
-      `<option value="${_esc(p)}">${_esc(p)}</option>`).join('');
-    grid.innerHTML = [0,1,2,3].map(k => {
-      const cur  = layerMap[String(k)] || layerMap[k] || null;
-      const isCC = cur && cur[0] === 'cc_out';
-      const ch   = isCC ? cur[2] : 1;
-      const cc   = isCC ? cur[3] : 74;
-      const txt  = _ccLabel(cur);
-      return `<div class="km-knob">
-        <div class="km-knob-label">KNOB ${k+1}</div>
-        <div class="uk-cc" style="display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:3px 0">
-          <select id="uk-port-${k}" style="background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px">${portOpts}</select>
-          <span style="font-size:9px;color:var(--label)">CH</span>
-          <select id="uk-ch-${k}" data-cur="${_esc(String(ch))}" style="max-width:150px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px"></select>
-          <span style="font-size:9px;color:var(--label)">CC</span>
-          <input type="number" id="uk-cc-${k}" min="0" max="127" value="${cc}" style="width:40px;background:var(--dim);border:1px solid var(--border);color:var(--bright);font-family:var(--fs);font-size:10px;padding:2px 3px;border-radius:2px">
-          <button class="btn accent" onclick="CTRL.setUniKnobCC(${k})">SET</button>
-          <button class="btn" onclick="CTRL.clearUniKnob(${k})" title="clear → baseline">×</button>
-        </div>
-        <div class="km-cur" id="km-cur-${k}">${_esc(txt)}</div>
-      </div>`;
-    }).join('');
-    // Restore the port selection per knob (value must be set after the option
-    // list exists).
-    [0,1,2,3].forEach(k => {
-      const cur = layerMap[String(k)] || layerMap[k] || null;
-      const ps = document.getElementById('uk-port-' + k);
-      if (cur && cur[0] === 'cc_out' && ps) ps.value = cur[1];
-      const cs = document.getElementById('uk-ch-' + k);
-      if (ps && cs) {
-        const fill = () => {
-          const want = cs.value ? _chVal(cs.value) : _chVal(cs.dataset.cur || 1);
-          cs.innerHTML = _chOpts(ps.value, want);
-        };
-        fill();
-        ps.onchange = fill;           // modules exist only on the synth port
-      }
-    });
-  }
-
-  async function _postUniKnob(knob, action) {
-    await fetch('/api/universal_knobs', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({bank: _uniBank, layer: _curLayer, knob,
-                            knob_action: action})
-    });
-    _uniKnobs[_curLayer] = _uniKnobs[_curLayer] || {};
-    if (action) _uniKnobs[_curLayer][String(knob)] = action;
-    else        delete _uniKnobs[_curLayer][String(knob)];
-    const curEl = document.getElementById('km-cur-' + knob);
-    if (curEl) curEl.textContent = _ccLabel(action);
-  }
-
-  async function setUniKnobCC(knob) {
-    const port = document.getElementById('uk-port-' + knob)?.value || 'synth';
-    const ch   = _chVal(document.getElementById('uk-ch-' + knob)?.value ?? 1);
-    const cc   = parseInt(document.getElementById('uk-cc-' + knob)?.value ?? 74) || 0;
-    try { await _postUniKnob(knob, ['cc_out', port, ch, cc]); }
-    catch(e) { console.error('[uniknob cc]', e); }
-  }
-
-  async function clearUniKnob(knob) {
-    try { await _postUniKnob(knob, null); }
-    catch(e) { console.error('[uniknob clear]', e); }
-  }
-
   async function assignKnob(knob) {
     const sel = document.getElementById('km-sel-' + knob);
     if (!sel) return;
     let target = null;
     if (sel.value) { try { target = JSON.parse(sel.value); } catch(e) { return; } }
-
-    // Universal: write a per-PAGE override. Empty selection clears it (the knob
-    // falls back to the baseline dialmap).
-    if (_curView === 'universal') {
-      try {
-        await fetch('/api/universal_knobs', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({bank: _uniBank, layer: _curLayer, knob,
-                                knob_action: target})
-        });
-        _uniKnobs[_curLayer] = _uniKnobs[_curLayer] || {};
-        if (target) _uniKnobs[_curLayer][String(knob)] = target;
-        else        delete _uniKnobs[_curLayer][String(knob)];
-        const curEl = document.getElementById('km-cur-' + knob);
-        if (curEl) curEl.textContent = target ? '→ ' + _targetLabel(target)
-                                              : '(baseline)';
-      } catch(e) { console.error('[uniknob set]', e); }
-      return;
-    }
 
     if (!sel.value) return;   // global map: "(unassigned)" is a no-op
     try {
@@ -441,24 +220,14 @@ const CTRL = (() => {
     if (stEl) stEl.textContent = 'saving…';
     const target = ['cc_out', port, ch, cc];
     try {
-      if (_curView === 'universal') {
-        await fetch('/api/universal_knobs', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({bank: _uniBank, layer: _curLayer, knob,
-                                knob_action: target})
-        });
-        _uniKnobs[_curLayer] = _uniKnobs[_curLayer] || {};
-        _uniKnobs[_curLayer][String(knob)] = target;
-      } else {
-        await fetch('/api/knobmap', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({view: _curView, layer: _curLayer, knob, target})
-        });
-        _map[_curView] = _map[_curView] || {};
-        _map[_curView][_curLayer] = _map[_curView][_curLayer] || {};
-        _map[_curView][_curLayer][String(knob)] = target;
-      }
+      await fetch('/api/knobmap', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({view: _curView, layer: _curLayer, knob, target})
+      });
+      _map[_curView] = _map[_curView] || {};
+      _map[_curView][_curLayer] = _map[_curView][_curLayer] || {};
+      _map[_curView][_curLayer][String(knob)] = target;
       _renderKnobGrid();
       if (stEl) stEl.textContent = `✓ knob${knob+1} → CC${cc} ${_chTxt(ch)} (${port})`;
       setTimeout(() => { if (stEl) stEl.textContent = ''; }, 3000);
@@ -607,8 +376,6 @@ const CTRL = (() => {
 
   // ── Public API ─────────────────────────────────────────────
   return { init, loadKnobmap, setLayer, assignKnob, assignCCOut,
-           onKmBankChange, setUniKnobCC, clearUniKnob,
-           setUniFader, clearUniFader,
            onRowTypeChange, saveChordRows, clearVoiceMap };
 
 })();
@@ -616,272 +383,426 @@ const CTRL = (() => {
 document.addEventListener('DOMContentLoaded', CTRL.init);
 
 /* ════════════════════════════════════════════════════════════════
-   UCS — Universal Control Surface pad editor
+   UCS — FIRE UNIVERSAL PAGES (ORC Fire firmware v0.31+, 2026-10-27)
+   The pages are stored ON the Fire. This editor reads a page from the Fire,
+   edits it here (a draft), and SEND TO FIRE writes the whole page, after
+   which the brain reads it back and compares (orc1_fire_pages.FirePages).
+   Same look and flow as the old universal pad editor: page (bank) tabs,
+   BASE / SHIFT layer, a 4×16 pad grid, an inline pad editor; plus the
+   page's knobs (4 banks × 4). Channels are 1-16 here.
    ════════════════════════════════════════════════════════════════ */
 const UCS = (() => {
 
-  // State
-  let _pads  = {};          // {"r,c": assignment}
-  let _layer = 'base';      // base | shift | alt
-  let _sel   = null;        // "r,c" of selected pad, or null
-  let _ports = [];          // [{key, label, static}] from /api/midi_ports
-  let _bank  = 0;           // which pad bank is shown (Fire pages with GRID <>)
-  let _banks = 1;           // how many banks the box reports
+  const KBANK_NAMES = ['CHANNEL', 'MIXER', 'USER 1', 'USER 2'];   // the Fire's KNOB MODE lights
+  const TYPE_HELP = {
+    note:       'NOTE: plays the note while held. ON = velocity.',
+    note_latch: 'NOTE LATCH: one press starts the note, the next stops it. ON = velocity.',
+    cc_hold:    'CC HOLD: sends ON when pressed, OFF when let go.',
+    cc_toggle:  'CC TOGGLE: sends ON and OFF on alternate presses.',
+    cc_press:   'CC PRESS: sends ON on each press, nothing on release.',
+    pc:         'PROG CHANGE: sends program NUMBER.',
+  };
 
-  // ── Init ────────────────────────────────────────────────────
+  let _meta   = null;      // /api/fire_pages meta (types, colours, sizes)
+  let _info   = null;      // last FIRE_PAGES_INFO reply
+  let _page   = 0;         // 0-7
+  let _layer  = 0;         // 0 BASE, 1 SHIFT
+  let _sel    = null;      // pad index 0-63, or null
+  let _kbank  = 0;         // knob bank 0-3
+  let _draft  = null;      // {name, pads: {"pad,layer": {...}}, knobs: {slot: {...}}}
+  let _loaded = false;     // _draft came from the Fire
+  let _dirty  = false;
+  let _busy   = false;
+
+  const $ = id => document.getElementById(id);
+
+  // ── Init / status ────────────────────────────────────────────
   async function init() {
-    await loadPorts();
+    await loadInfo();
+    if (_info && _info.ok && Number.isInteger(_info.current)) _page = _info.current;
+    _renderBankTabs();
     await load();
-    _renderGrid();
   }
 
-  // ── Port list ───────────────────────────────────────────────
-  async function loadPorts(portList) {
+  async function loadInfo() {
     try {
-      if (!portList) {
-        const r = await fetch('/api/midi_ports');
-        const d = await r.json();
-        portList = d.ports || [];
-      }
-      _ports = portList;
-      const sel = document.getElementById('ucs-port');
-      if (!sel) return;
-      const prev = sel.value;
-      sel.innerHTML = _ports.map(p =>
-        `<option value="${_esc(p.key)}">${_esc(p.label)}${p.static ? '' : ' ✦'}</option>`
-      ).join('');
-      // Restore previous selection if still valid
-      if (prev && _ports.some(p => p.key === prev)) sel.value = prev;
-    } catch(e) { console.error('[ucs ports load]', e); }
-  }
-
-  async function scanPorts() {
-    const btn = document.getElementById('ucs-scan-btn');
-    if (btn) { btn.textContent = 'SCANNING…'; btn.disabled = true; }
-    try {
-      const r = await fetch('/api/midi_ports/scan', { method: 'POST' });
+      const r = await fetch('/api/fire_pages');
       const d = await r.json();
-      await loadPorts(d.ports || []);
-    } catch(e) { console.error('[ucs scan ports]', e); }
-    finally {
-      if (btn) { btn.textContent = 'SCAN PORTS'; btn.disabled = false; }
+      _meta = d.meta || _meta;
+      _info = d;
+    } catch (e) {
+      _info = {ok: false, error: 'cannot reach the ORC web server'};
+      console.error('[fire pages info]', e);
     }
+    _fillSelects();
+    _renderStatus();
   }
 
-  async function load() {
-    try {
-      const r = await fetch('/api/universal_pads?bank=' + _bank);
-      const d = await r.json();
-      _pads   = d.pads || {};
-      _banks  = Math.max(1, d.banks || 1);
-      _renderBankTabs();
-      _renderGrid();
-    } catch(e) { console.error('[ucs load]', e); }
+  function _renderStatus() {
+    const el = $('fup-status');
+    if (!el) return;
+    const d = _info || {};
+    if (!d.ok) {
+      el.className = 'fup-status bad';
+      el.textContent = d.error || d.why || 'the Fire did not answer';
+      return;
+    }
+    const cur = Number.isInteger(d.current) ? ` · the Fire is on page ${d.current + 1}` +
+                (d.showing ? ' (UNIVERSAL showing)' : '') : '';
+    el.className = 'fup-status good';
+    el.textContent = `Fire connected · firmware version ${d.version} · storage ${d.used} of ${d.budget} bytes${cur}`;
   }
 
-  // ── Pad banks ───────────────────────────────────────────────
-  // The Fire pages between banks with GRID <>. Bank 0 is what this page
-  // edited before banks existed, so it stays the default and an old client
-  // that never sends `bank` keeps hitting exactly the pads it always did.
+  function _fillSelects() {
+    if (!_meta) return;
+    const ts = $('ucs-type');
+    if (ts && !ts.options.length)
+      ts.innerHTML = _meta.pad_types.map(t => `<option value="${_esc(t.key)}">${_esc(t.label)}</option>`).join('');
+    const cs = $('ucs-colour');
+    if (cs && !cs.options.length)
+      cs.innerHTML = _meta.colours.map((c, i) => `<option value="${i}">${_esc(c.name.toUpperCase())}</option>`).join('');
+  }
+
+  function _rgb(i) {
+    const c = _meta && _meta.colours[i];
+    return c ? `rgb(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]})` : 'transparent';
+  }
+
+  // ── Page tabs ────────────────────────────────────────────────
   function _renderBankTabs() {
-    const box = document.getElementById('ucs-banks');
+    const box = $('ucs-banks');
     if (!box) return;
+    const n = (_meta && _meta.pages) || 8;
+    const pages = (_info && _info.ok && _info.pages) || [];
     let h = '';
-    for (let b = 0; b < _banks; b++) {
-      h += `<button class="btn${b === _bank ? ' accent' : ''}" `
-         + `onclick="UCS.setBank(${b})">${b + 1}</button>`;
+    for (let p = 0; p < n; p++) {
+      const pi = pages[p] || {};
+      const tip = pi.name ? ` title="${_esc(pi.name)}"` : '';
+      const used = pi.entries ? ' fup-used' : '';
+      h += `<button class="btn${p === _page ? ' accent' : ''}${used}"${tip} onclick="UCS.setBank(${p})">${p + 1}</button>`;
     }
     box.innerHTML = h;
   }
 
-  async function setBank(b) {
-    if (b === _bank) return;
-    _bank = b;
-    closeEditor();          // the editor is bound to a pad in the old bank
+  async function setBank(p) {
+    if (p === _page || _busy) return;
+    if (_dirty && !confirm(`Page ${_page + 1} has changes not sent to the Fire. Drop them?`)) return;
+    _page = p;
+    closeEditor();
+    _renderBankTabs();
     await load();
   }
 
-  // ── Layer tabs ──────────────────────────────────────────────
-  function setLayer(layer) {
-    _layer = layer;
-    ['base','shift','alt'].forEach(l => {
-      const t = document.getElementById('ucs-tab-' + l);
-      if (t) t.className = 'btn' + (l === layer ? ' accent' : '');
-    });
-    _renderGrid();
+  // ── Read a page from the Fire ────────────────────────────────
+  function _emptyDraft() { return {name: '', pads: {}, knobs: {}}; }
+
+  function _toDraft(data) {
+    const d = _emptyDraft();
+    if (!data) return d;
+    d.name = data.name || '';
+    (data.pads || []).forEach(p => { d.pads[`${p.pad},${p.layer}`] = Object.assign({}, p); });
+    (data.knobs || []).forEach(k => { d.knobs[k.slot] = Object.assign({}, k); });
+    return d;
   }
 
-  // ── Grid rendering ──────────────────────────────────────────
-  function _layerKey(key) {
-    // base  → key itself
-    // shift → key's shift_action (if any)
-    // alt   → key's alt_action   (if any)
-    const base = _pads[key];
-    if (!base) return null;
-    if (_layer === 'base')  return base;
-    if (_layer === 'shift') return base.shift_action || null;
-    if (_layer === 'alt')   return base.alt_action   || null;
-    return null;
+  function _fromDraft() {
+    return {
+      name: _draft.name || '',
+      pads: Object.values(_draft.pads),
+      knobs: Object.values(_draft.knobs),
+    };
+  }
+
+  async function load() {
+    _result('');
+    _draft = _emptyDraft(); _loaded = false; _setDirty(false);
+    if (!_info || !_info.ok) { _renderAll(); return; }
+    _result(`reading page ${_page + 1} from the Fire…`);
+    try {
+      const r = await fetch('/api/fire_pages/' + _page);
+      const d = await r.json();
+      if (!d.ok) { _result('could not read the page: ' + (d.error || 'no answer'), 'bad'); }
+      else if (!d.data) { _result('the page on the Fire is not readable here: ' + (d.invalid || '?'), 'bad'); }
+      else { _draft = _toDraft(d.data); _loaded = true; _result(''); }
+    } catch (e) {
+      _result('could not read the page (network)', 'bad');
+      console.error('[fire page read]', e);
+    }
+    _renderAll();
+  }
+
+  async function reload() {
+    if (_busy) return;
+    if (_dirty && !confirm('Drop the changes not sent and read the page from the Fire again?')) return;
+    await loadInfo();
+    _renderBankTabs();
+    await load();
+  }
+
+  function _renderAll() {
+    const nm = $('fup-name');
+    if (nm) nm.value = _draft.name || '';
+    _renderGrid();
+    _renderKnobs();
+    _setDirty(_dirty);
+  }
+
+  // ── Layer ────────────────────────────────────────────────────
+  function setLayer(layer) {
+    _layer = layer === 'shift' ? 1 : 0;
+    ['base', 'shift'].forEach((l, i) => {
+      const t = $('ucs-tab-' + l);
+      if (t) t.className = 'btn' + (i === _layer ? ' accent' : '');
+    });
+    _renderGrid();
+    if (_sel !== null) _openEditor(_sel);
+  }
+
+  // ── Grid ─────────────────────────────────────────────────────
+  function _short(t) {
+    return {note: 'N', note_latch: 'NL', cc_hold: 'CH', cc_toggle: 'CT', cc_press: 'CP', pc: 'PC'}[t] || '?';
   }
 
   function _renderGrid() {
-    const grid = document.getElementById('ucs-grid');
+    const grid = $('ucs-grid');
     if (!grid) return;
     let h = '';
     for (let row = 0; row < 4; row++) {
       h += '<div class="ucs-row">';
       for (let col = 0; col < 16; col++) {
-        const key    = `${row},${col}`;
-        const assign = _layerKey(key);
-        const sel    = _sel === key ? ' sel' : '';
-        const hasBase = !!_pads[key];
-        const cls    = assign ? ' assigned' : (hasBase && _layer !== 'base' ? ' has-base' : '');
-        const label  = assign
-          ? `<span class="ucs-pad-type">${assign.type.toUpperCase()[0]}</span><span class="ucs-pad-num">${assign.number}</span>`
-          : `<span class="ucs-pad-rc">${col+1}</span>`;
-        h += `<div class="ucs-pad${cls}${sel}" onclick="UCS.select(${row},${col})">${label}</div>`;
+        const pad = row * 16 + col;
+        const a = _draft.pads[`${pad},${_layer}`];
+        const base = _draft.pads[`${pad},0`];
+        const sel = _sel === pad ? ' sel' : '';
+        const cls = a ? ' assigned' : (base && _layer ? ' has-base' : '');
+        const tint = base ? ` style="--padc:${_rgb(base.colour)}"` : '';
+        const label = a
+          ? `<span class="ucs-pad-type">${_short(a.type)}</span><span class="ucs-pad-num">${a.number}</span>`
+          : `<span class="ucs-pad-rc">${col + 1}</span>`;
+        h += `<div class="ucs-pad${cls}${sel}${base ? ' tinted' : ''}"${tint} onclick="UCS.select(${row},${col})" title="pad ${pad} (row ${row + 1}, column ${col + 1})">${label}</div>`;
       }
-      h += `<span class="ucs-row-label">R${row}</span></div>`;
+      h += `<span class="ucs-row-label">R${row + 1}</span></div>`;
     }
     grid.innerHTML = h;
   }
 
-  // ── Pad selection & editor ───────────────────────────────────
+  // ── Pad editor ───────────────────────────────────────────────
   function select(row, col) {
-    const key = `${row},${col}`;
-    _sel = key;
+    _sel = row * 16 + col;
     _renderGrid();
-    _openEditor(row, col);
+    _openEditor(_sel);
   }
 
-  function _openEditor(row, col) {
-    const key    = `${row},${col}`;
-    const base   = _pads[key] || {};
-    let   assign = base;
-    if (_layer === 'shift') assign = base.shift_action || {};
-    if (_layer === 'alt')   assign = base.alt_action   || {};
+  function _openEditor(pad) {
+    const a = _draft.pads[`${pad},${_layer}`];
+    const base = _draft.pads[`${pad},0`];
+    const row = Math.floor(pad / 16), col = pad % 16;
+    $('ucs-ed-title').textContent = `PAD R${row + 1} C${col + 1} · ${_layer ? 'SHIFT' : 'BASE'}` + (a ? '' : ' · not set');
+    const v = a || {type: 'note', number: 36, on: 100, off: 0, channel: 1,
+                    colour: base ? base.colour : 16};
+    $('ucs-type').value = v.type;
+    $('ucs-number').value = v.number;
+    $('ucs-on').value = v.on;
+    $('ucs-off').value = v.off;
+    $('ucs-channel').value = v.channel;
+    $('ucs-colour').value = String(v.colour);
+    onType(); onColour();
+    $('ucs-editor').style.display = '';
+  }
 
-    const el = id => document.getElementById(id);
-    el('ucs-ed-title').textContent = `PAD (${row},${col}) · ${_layer.toUpperCase()}`;
-    el('ucs-number').value  = assign.number  !== undefined ? assign.number  : 60;
-    el('ucs-value').value   = assign.value   !== undefined ? assign.value   : 100;
-    el('ucs-channel').value = assign.channel !== undefined ? assign.channel : 1;
-    el('ucs-port').value    = assign.port    || (_ports[0]?.key || 'pisound');
-    el('ucs-latch').checked = !!assign.latch;
-    _setTypeBtn(assign.type || 'note');
-    el('ucs-editor').style.display = '';
+  function onType() {
+    const t = $('ucs-type').value;
+    const isNote = t === 'note' || t === 'note_latch';
+    $('ucs-number-lbl').textContent = isNote ? 'NOTE' : (t === 'pc' ? 'PROGRAM' : 'CC');
+    $('ucs-on-lbl').textContent = isNote ? 'VELOCITY' : 'ON';
+    const showOn = t !== 'pc', showOff = t === 'cc_hold' || t === 'cc_toggle';
+    [['ucs-on-lbl', showOn], ['ucs-on', showOn], ['ucs-off-lbl', showOff], ['ucs-off', showOff]]
+      .forEach(([id, on]) => { $(id).style.display = on ? '' : 'none'; });
+    const help = $('ucs-type-help');
+    if (help) help.textContent = (TYPE_HELP[t] || '') +
+      (_layer ? ' The Fire shows the BASE colour.' : '');
+  }
+
+  function onColour() {
+    const sw = $('ucs-swatch');
+    if (sw) sw.style.background = _rgb(parseInt($('ucs-colour').value));
   }
 
   function closeEditor() {
     _sel = null;
-    document.getElementById('ucs-editor').style.display = 'none';
+    const ed = $('ucs-editor');
+    if (ed) ed.style.display = 'none';
     _renderGrid();
   }
 
-  function setType(t) { _setTypeBtn(t); }
-
-  function _setTypeBtn(t) {
-    ['note','cc','pc'].forEach(x => {
-      const b = document.getElementById('ucs-type-' + x);
-      if (b) b.className = 'btn' + (x === t ? ' accent' : '');
-    });
-    const vr = document.getElementById('ucs-value-row');
-    if (vr) vr.style.display = (t === 'pc') ? 'none' : '';
+  function _num(id, lo, hi, what) {
+    const v = Number($(id).value);
+    if (!Number.isInteger(v) || v < lo || v > hi) throw new Error(`${what} must be ${lo}-${hi}`);
+    return v;
   }
 
-  function _curType() {
-    if (document.getElementById('ucs-type-pc')?.className.includes('accent')) return 'pc';
-    return document.getElementById('ucs-type-cc')?.className.includes('accent') ? 'cc' : 'note';
+  function savePad() {
+    if (_sel === null) return;
+    let p;
+    try {
+      p = {pad: _sel, layer: _layer, type: $('ucs-type').value,
+           number: _num('ucs-number', 0, 127, 'NUMBER'),
+           on: $('ucs-on').style.display === 'none' ? 127 : _num('ucs-on', 0, 127, 'ON'),
+           off: $('ucs-off').style.display === 'none' ? 0 : _num('ucs-off', 0, 127, 'OFF'),
+           channel: _num('ucs-channel', 1, 16, 'CHANNEL'),
+           colour: parseInt($('ucs-colour').value)};
+    } catch (e) { _result(e.message, 'bad'); return; }
+    _draft.pads[`${_sel},${_layer}`] = p;
+    _setDirty(true);
+    _result('');
+    _renderGrid();
+    _openEditor(_sel);
+    _flash('universal-card');
   }
 
-  function preview() { /* live feedback could go here */ }
+  function clearPad() {
+    if (_sel === null) return;
+    delete _draft.pads[`${_sel},${_layer}`];
+    _setDirty(true);
+    closeEditor();
+  }
 
-  async function savePad() {
-    if (!_sel) return;
-    const [row, col] = _sel.split(',').map(Number);
-    const id = x => document.getElementById(x);
-    const assignment = {
-      type:    _curType(),
-      number:  parseInt(id('ucs-number').value),
-      value:   parseInt(id('ucs-value').value),
-      channel: parseInt(id('ucs-channel').value),
-      port:    id('ucs-port').value,
-      latch:   id('ucs-latch').checked,
-    };
+  function onName() {
+    _draft.name = $('fup-name').value;
+    _setDirty(true);
+  }
 
-    const payload = { row, col, bank: _bank };
-    if (_layer === 'base') {
-      Object.assign(payload, assignment);
-    } else {
-      // shift/alt: send as sub-action — must have a base first
-      if (!_pads[_sel]) {
-        alert('Assign base layer first before adding SHIFT/ALT sub-actions.');
-        return;
-      }
-      payload[_layer + '_action'] = assignment;
-      // Merge existing base into payload so engine keeps it
-      const base = _pads[_sel];
-      Object.assign(payload, {
-        type: base.type, number: base.number, value: base.value,
-        channel: base.channel, port: base.port, latch: base.latch || false,
-      });
+  // ── Knobs (4 banks × 4) ──────────────────────────────────────
+  function _renderKnobs() {
+    const tabs = $('fup-kbanks');
+    if (tabs) tabs.innerHTML = KBANK_NAMES.map((n, b) =>
+      `<button class="btn${b === _kbank ? ' accent' : ''}" onclick="UCS.setKBank(${b})" title="knob bank ${b + 1}">${n}</button>`).join('');
+    const grid = $('fup-kgrid');
+    if (!grid) return;
+    grid.innerHTML = [0, 1, 2, 3].map(k => {
+      const slot = _kbank * 4 + k;
+      const kn = _draft.knobs[slot] || null;
+      const t = kn ? kn.type : '';
+      const opt = (v, l) => `<option value="${v}"${t === v ? ' selected' : ''}>${l}</option>`;
+      return `<div class="km-knob">
+        <div class="km-knob-label">KNOB ${k + 1}</div>
+        <select class="km-sel" id="fk-type-${k}" onchange="UCS.setKnob(${k})">
+          ${opt('', '(nothing)')}${opt('cc', 'CC')}${opt('pb', 'PITCH BEND')}
+        </select>
+        <div class="fk-row"${kn ? '' : ' style="display:none"'}>
+          <label class="ucs-lbl">CH</label>
+          <input class="ucs-num fk-num" id="fk-ch-${k}" type="number" min="1" max="16" value="${kn ? kn.channel : 1}" onchange="UCS.setKnob(${k})">
+          <label class="ucs-lbl"${t === 'pb' ? ' style="display:none"' : ''}>CC</label>
+          <input class="ucs-num fk-num" id="fk-cc-${k}" type="number" min="0" max="127" value="${kn ? kn.cc : 74}" onchange="UCS.setKnob(${k})"${t === 'pb' ? ' style="display:none"' : ''}>
+          <label class="ucs-lbl">START</label>
+          <input class="ucs-num fk-num" id="fk-st-${k}" type="number" min="0" max="127" value="${kn ? kn.start : 64}" onchange="UCS.setKnob(${k})">
+        </div>
+        <div class="km-cur">${kn ? _esc(kn.type === 'pb' ? `pitch bend · ch${kn.channel}` : `CC${kn.cc} · ch${kn.channel}`) : 'does nothing'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function setKBank(b) { _kbank = b; _renderKnobs(); }
+
+  function setKnob(k) {
+    const slot = _kbank * 4 + k;
+    const t = $('fk-type-' + k).value;
+    if (!t) { delete _draft.knobs[slot]; }
+    else {
+      const old = _draft.knobs[slot];
+      let ch, cc, st;
+      try {
+        ch = _num('fk-ch-' + k, 1, 16, 'CH');
+        cc = _num('fk-cc-' + k, 0, 127, 'CC');
+        st = _num('fk-st-' + k, 0, 127, 'START');
+      } catch (e) { _result(e.message, 'bad'); return; }
+      if (!old && t === 'pb') st = 64;      // a new pitch bend knob starts centred
+      _draft.knobs[slot] = {slot, type: t, channel: ch, cc, start: st};
     }
-
-    try {
-      await fetch('/api/universal_pads', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      // Update local cache
-      if (_layer === 'base') {
-        _pads[_sel] = { ...assignment, _latched_on: false };
-      } else {
-        _pads[_sel] = _pads[_sel] || {};
-        _pads[_sel][_layer + '_action'] = assignment;
-      }
-      _renderGrid();
-      _flash('universal-card');
-    } catch(e) { console.error('[ucs save]', e); }
+    _setDirty(true);
+    _result('');
+    _renderKnobs();
   }
 
-  async function clearPad() {
-    if (!_sel) return;
-    const [row, col] = _sel.split(',').map(Number);
+  // ── Send / clear ─────────────────────────────────────────────
+  function _setDirty(on) {
+    _dirty = !!on;
+    const el = $('fup-dirty');
+    if (el) el.textContent = _dirty ? '● changes not sent to the Fire yet' : (_loaded ? 'same as on the Fire' : '');
+  }
+
+  function _result(msg, kind) {
+    const el = $('fup-result');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'fup-result' + (kind ? ' ' + kind : '');
+  }
+
+  async function send() {
+    if (_busy) return;
+    if (!_info || !_info.ok) { _result(_info && _info.error ? _info.error : 'no Fire', 'bad'); return; }
+    _busy = true;
+    const btn = $('fup-send-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'SENDING…'; }
+    _result(`writing page ${_page + 1} to the Fire…`);
     try {
-      await fetch('/api/universal_pads/clear', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({row, col, bank: _bank})
-      });
-      delete _pads[_sel];
-      closeEditor();
-    } catch(e) { console.error('[ucs clear pad]', e); }
+      const r = await fetch('/api/fire_pages/' + _page, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(_fromDraft())});
+      const d = await r.json();
+      if (d.ok && d.verified) {
+        _draft = _toDraft(d.data); _loaded = true; _setDirty(false);
+        _renderAll();
+        _result(`saved on the Fire: page ${_page + 1}, ${d.len} bytes, read back and checked`, 'good');
+        _flash('universal-card');
+      } else {
+        _result('NOT saved: ' + (d.error || 'no answer'), 'bad');
+      }
+    } catch (e) {
+      _result('NOT saved: cannot reach the ORC', 'bad');
+      console.error('[fire page write]', e);
+    } finally {
+      _busy = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'SEND TO FIRE'; }
+      await loadInfo();
+      _renderBankTabs();
+    }
   }
 
   async function clearAll() {
-    if (!confirm('Clear every pad in BANK ' + (_bank + 1) + '?')) return;
+    if (_busy) return;
+    if (!confirm(`Empty page ${_page + 1} ON THE FIRE (every pad and knob)?`)) return;
+    _busy = true;
+    _result(`clearing page ${_page + 1} on the Fire…`);
     try {
-      await fetch('/api/universal_pads/clear', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({all: true, bank: _bank})
-      });
-      _pads = {};
-      closeEditor();
-      _renderGrid();
-    } catch(e) { console.error('[ucs clear all]', e); }
+      const r = await fetch(`/api/fire_pages/${_page}/clear`, {method: 'POST'});
+      const d = await r.json();
+      if (d.ok && d.verified) {
+        _draft = _emptyDraft(); _loaded = true; _setDirty(false);
+        closeEditor(); _renderAll();
+        _result(`page ${_page + 1} is empty on the Fire`, 'good');
+      } else {
+        _result('NOT cleared: ' + (d.error || 'no answer'), 'bad');
+      }
+    } catch (e) {
+      _result('NOT cleared: cannot reach the ORC', 'bad');
+      console.error('[fire page clear]', e);
+    } finally {
+      _busy = false;
+      await loadInfo();
+      _renderBankTabs();
+    }
   }
 
   function _flash(cardId) {
-    const el = document.getElementById(cardId);
+    const el = $(cardId);
     if (!el) return;
     el.classList.add('flash');
     setTimeout(() => el.classList.remove('flash'), 600);
   }
 
-  return { init, load, loadPorts, scanPorts, setLayer, setBank, select,
-           setType, preview, savePad, clearPad, clearAll, closeEditor };
+  return { init, reload, setLayer, setBank, select, onType, onColour, onName,
+           savePad, clearPad, clearAll, closeEditor, setKBank, setKnob, send };
 })();
 
 document.addEventListener('DOMContentLoaded', UCS.init);

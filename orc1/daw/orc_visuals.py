@@ -43,6 +43,7 @@ import math
 import os
 import queue
 import random
+import re
 import signal
 import sys
 import threading
@@ -132,6 +133,29 @@ KNOBS = {
     74: "glow_react", 75: "glow_lfo",       # brighter on beats / pulse
     76: "sway_react", 77: "sway_lfo",       # nudged on beats / drift (figure 8)
     78: "trail_react", 79: "trail_lfo",     # longer trails on beats / breathe
+    # RASTER BARS + DEPTH BLUR (2026-10-24): on top of ANY bend mode
+    80: "bg_bars",       # copper bars: 0 = off .. full (each band its own colour)
+    81: "bg_bars_size",  # how tall a bar is (4 .. 64 scanline rows)
+    82: "bg_bars_speed", # 64 = still; either side rolls them up / down; beats shove them
+    83: "bg_dof",        # depth blur: 0 = sharp; the skew modes blur what is far away
+    # PICTURE LOOK (2026-10-24): for your pictures, and any tile too
+    84: "bg_wrap",       # buckets over BG_WRAPS: repeat / mirror (no seam) / once
+    85: "bg_crisp",      # 0 = the picture's own greys; else cut to black / white at this level
+    86: "bg_invert",     # >= 64 = black <-> white
+    87: "bg_thick",      # fatten thin lines (0 = off; cuts at the middle if CRISP is 0)
+    # LAYERS + COLOUR (2026-10-24, owner: an automatable lightshow for a
+    # projector over a band, so every look is a CC). Each layer has its own
+    # level (0 = gone: background alone, lines alone), hue, saturation and a
+    # palette SLOT (vis_palettes: set up on /visuals, picked by the knob).
+    88: "lines_level",   # the lines layer, trails included: 0 = off .. 127 = full (squared)
+    89: "bg_master",     # the background layer on top of LEVEL / REACT: 0 = off .. 127 = full
+    90: "lines_hue",     # 64 = as drawn; -180 .. +180 degrees round the wheel
+    91: "lines_sat",     # 64 = as drawn; 0 = white / grey; up = more vivid
+    92: "lines_cycle",   # the lines' hue turning by itself: 0 = still
+    93: "bg_hue",        # 64 = as now; -180 .. +180 degrees (BG HUE CYCLE = CC 43)
+    94: "bg_sat",        # 64 = as now; 0 = grey; up = more vivid
+    95: "lines_pal",     # 0 range = the scene's own colours, then palette slots 1..8
+    96: "bg_pal",        # 0 range = the rainbow, then palette slots 1..8
 }
 MOD_TARGETS = ("size", "spin", "glow", "sway", "trail")
 LFO_SYNC = ("free", "4 bars", "2 bars", "1 bar", "1/2 bar", "1/4 bar")
@@ -140,16 +164,50 @@ LFO_SYNC_BARS = (None, 4.0, 2.0, 1.0, 0.5, 0.25)
 KNOB_DEFAULT = {29: 12,                   # ATTACK ~ 20 ms
                 32: 8, 33: 38,            # = 30 Hz .. 150 Hz, the kick band
                 34: 0, 35: 0, 36: 0, 38: 0, 44: 0, 46: 24, 49: 127, 50: 0, 51: 56, 52: 0, 54: 56,
-                58: 0, 59: 8, 60: 38, 62: 0, **{cc: 0 for cc in range(70, 80)}}
+                58: 0, 59: 8, 60: 38, 62: 0, **{cc: 0 for cc in range(70, 80)},
+                80: 0, 83: 0, 84: 0, 85: 0, 86: 0, 87: 0,
+                88: 127, 89: 127, 92: 0, 95: 0, 96: 0}
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vis_patterns                                   # noqa: E402
 import vis_shapes as VS                               # noqa: E402
 import vis_logos                                      # noqa: E402
+import vis_palettes                                   # noqa: E402
 
 BG_PATTERNS = vis_patterns.BUILTIN                    # drawn by make_pattern
-BG_MODES = ("wave", "interlace", "squeeze", "two layers", "wave + squeeze")
+# "skew walls" + "skew floor" (2026-10-24, after GameHut / Coding Secrets on The
+# Adventures of Batman & Robin, Mega Drive): the Genesis's two scroll tables at
+# once. Walls = per-COLUMN vertical scroll (16 px strips, as on the Genesis;
+# 20 of them filled its 320 px screen, 80 fill 1280): each strip slides up/down by its distance from its
+# wall's centre, times how far that wall sits from the screen centre, so walls
+# lean away at the sides and swing round as they scroll past (the buildings).
+# Floor = per-LINE horizontal scroll: rows further from the horizon slide
+# faster, so a floor and a ceiling run off to a black horizon (parallax).
+# Spin = the same two tables as three shears = a chunky rotation that rocks;
+# stretch = scanlines repeat toward the bottom (the Batwing stage's buildings
+# stretching to the street); floor + skyline = the floor plus a far row of
+# buildings above the horizon scrolling at a quarter speed (2026-10-24 later).
+# Only ever APPEND here: a saved knob value is remapped by count (MODES_N in
+# the state file), like the SET knob.
+BG_MODES = ("wave", "interlace", "squeeze", "two layers", "wave + squeeze",
+            "skew walls", "skew floor", "spin", "stretch", "floor + skyline")
+LEGACY_MODES_N = 5       # a state file without "modes_n" is from the 5-mode days
 MASK_SHAPES = ("off", "circle", "rounded", "hexagon", "diamond", "triangle", "star")
+# how the background texture fills the screen (REPEAT, CC 84). repeat = the
+# old behaviour (a tile is one seamless repeat); mirror = every other copy
+# flipped, so ANY picture repeats without a seam (but half the copies read
+# backwards); once = one copy centred on the screen, black around it.
+BG_WRAPS = ("repeat", "mirror", "once")
+# How a beat moves the background (2026-10-24 tuning, measured off-screen).
+# SWAY: the beat's swell (Presence.sway, 0..1) multiplies BG WARP by 1 + this.
+# WARP is a wall's lean / a spin's angle / a stretch in the newer modes, and
+# x 2.5 there lurched the whole picture (a beat moved spin 70, walls 52,
+# floor 14, floor + skyline 7), so those swell less. SURGE: a beat also
+# pushes the newer modes' scroll forward (x 1 + this at full swell), so the
+# floor rushes at you and the walls slide on the beat; built up over time,
+# so the motion stays smooth. The five wave modes are as owner tuned them.
+BG_SWAY = {5: 0.6, 7: 0.4, 8: 0.6}     # skew walls, spin, stretch; the rest 1.5
+BG_SURGE = 2.0
 # each shape's INSCRIBED radius (the biggest circle round its centre that stays
 # inside), in the shader's units (size 1 = half the screen height). FIT keeps
 # the scene inside that circle. Calibrated by rendering each mask on the Pi's
@@ -196,6 +254,10 @@ def load_knobs():
         if isinstance(saved.get("bg_set"), int):
             was = st.get("sets_n", LEGACY_SETS_N)
             k[50] = remap_set_knob(k[50], was if isinstance(was, int) else LEGACY_SETS_N, sets_count())
+        if isinstance(saved.get("bg_mode"), int):
+            # same trick for the BEND MODE knob (CC 35): 5 -> 10 modes moved the ranges
+            was = st.get("modes_n", LEGACY_MODES_N)
+            k[35] = remap_set_knob(k[35], was if isinstance(was, int) else LEGACY_MODES_N, len(BG_MODES))
     except Exception:
         pass
     return k
@@ -207,10 +269,40 @@ def save_state(knobs, scene, cycling):
         tmp = STATE + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"knobs": {KNOBS[cc]: v for cc, v in knobs.items()},
-                       "scene": scene, "cycling": cycling, "sets_n": sets_count()}, f)
+                       "scene": scene, "cycling": cycling, "sets_n": sets_count(),
+                       "modes_n": len(BG_MODES)}, f)
         os.replace(tmp, STATE)
     except Exception as e:
         print(f"[visuals] state save: {e}", flush=True)
+
+
+class StateSaver:
+    """save_state() on its own thread. The frame loop used to write the file
+    itself, and an SD card that stalls for a moment froze the picture:
+    MEASURED 2026-10-24, 4 of an hour's 6 hitches were "save" (109-351 ms)
+    while owner moved knobs. put() only hands over a copy and returns; the
+    thread writes the newest one (older ones still waiting are skipped)."""
+
+    def __init__(self, save=None):
+        self._save = save or save_state
+        self._lock = threading.Lock()
+        self._next = None
+        self._wake = threading.Event()
+        threading.Thread(target=self._run, daemon=True, name="visuals-save").start()
+
+    def put(self, knobs, scene, cycling):
+        with self._lock:
+            self._next = (dict(knobs), scene, cycling)
+        self._wake.set()
+
+    def _run(self):
+        while True:
+            self._wake.wait()
+            self._wake.clear()
+            with self._lock:
+                job, self._next = self._next, None
+            if job is not None:
+                self._save(*job)
 
 
 # ---------------------------------------------------------------- music state
@@ -294,22 +386,118 @@ class Music:
         self.rate = self.rate * 0.85 + (0.15 / max(dt, 0.05))
 
 
-def midi_thread(music):
-    import mido
-    while True:
-        name = next((n for n in mido.get_input_names()
-                     if "orc1-synth-bus" in n.lower()), None)
-        if not name:
-            time.sleep(3)
+def find_bus(names):
+    """The brain's internal MIDI bus among the input names, or None."""
+    return next((n for n in names if "orc1-synth-bus" in n.lower()), None)
+
+
+MIDI_CLIENT = "orc-visuals-in"      # our own ALSA client name (the subscription check finds it)
+SEQ_CLIENTS = "/proc/asound/seq/clients"
+
+
+def seq_listening(text, me=MIDI_CLIENT):
+    """The kernel's sequencer listing (/proc/asound/seq/clients) -> True when
+    some port of the client named `me` is Connected From the port named
+    ORC1-Synth-Bus, i.e. the brain's CURRENT bus is still feeding us."""
+    bus, mine, cname, sub = set(), [], None, False
+    for ln in text.splitlines():
+        m = re.match(r'Client\s+(\d+)\s*:\s*"([^"]*)"', ln)
+        if m:
+            cid, cname = m.group(1), m.group(2)
             continue
-        print(f"[visuals] MIDI in: {name}", flush=True)
+        m = re.match(r'\s+Port\s+(\d+)\s*:\s*"([^"]*)"', ln)
+        if m and cname is not None:
+            if "orc1-synth-bus" in m.group(2).lower():
+                bus.add(f"{cid}:{m.group(1)}")
+            sub = cname == me
+            continue
+        m = re.match(r"\s+Connected From:\s*(.*)", ln)
+        if m and sub:
+            mine += [a.split("[")[0].strip() for a in m.group(1).split(",")]
+    return any(a in bus for a in mine)
+
+
+def _safe_cb(music):
+    """rtmidi's callback -> music.on_msg, never raising into the rtmidi thread
+    (it used to be this thread's own loop, where an error was logged and the
+    port reopened): log it, at most every 5 s."""
+    import mido
+    last = [0.0]
+
+    def cb(event, _data=None):
         try:
-            with mido.open_input(name) as port:
-                for msg in port:
-                    music.on_msg(msg)
+            music.on_msg(mido.Message.from_bytes(event[0]))
         except Exception as e:
-            print(f"[visuals] MIDI error: {e}, retrying", flush=True)
-            time.sleep(2)
+            if time.monotonic() - last[0] > 5.0:
+                last[0] = time.monotonic()
+                print(f"[visuals] MIDI message error: {e}", flush=True)
+    return cb
+
+
+def _read_seq():
+    try:
+        with open(SEQ_CLIENTS) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.0, stop=None):
+    """Listen to the brain's bus (ORC1-Synth-Bus) and follow it when the brain
+    restarts. A restart destroys the bus and makes a new one, usually under a
+    new ALSA client number; a port opened on the old one then just goes quiet
+    (no error), so every knob silently stopped reaching the visuals after a
+    brain restart until the kiosk restarted (2026-10-24, measured: the
+    renderer still on 132:0, the new bus on 139:0).
+    So: ONE rtmidi client of our own (MIDI_CLIENT) for the whole run (listing
+    + reopening reuse it: mido's get_input_names made and dropped two ALSA
+    clients per call), and every check_s the kernel's listing says whether
+    that client is still Connected From the CURRENT bus. Not = reopen. That
+    also catches a bus recreated under the same name and number (the
+    subscription goes with the old port). No listing (not Linux): reopen when
+    the bus's name changes. Messages arrive on rtmidi's callback."""
+    if rt is None:
+        import rtmidi
+        rt = rtmidi.MidiIn(name=MIDI_CLIENT)
+        rt.ignore_types(sysex=True, timing=True, active_sense=True)   # notes + CCs only
+    cb = _safe_cb(music)
+    name = None
+    while stop is None or not stop():
+        try:
+            ports = rt.get_ports()
+        except Exception:
+            ports = []
+        now = find_bus(ports)
+        text = read_seq()
+        fine = name is not None and now == name and (text is None or seq_listening(text))
+        if name is not None and not fine:
+            print(f"[visuals] MIDI bus {name} lost (now {now}): reconnecting", flush=True)
+            try:
+                rt.close_port()
+            except Exception:
+                pass
+            name = None
+        if name is None and now:
+            try:
+                rt.open_port(ports.index(now))
+                # after EVERY open: python-rtmidi's close_port() drops the
+                # callback (measured on the Pi 2026-10-24: set once, a close +
+                # reopen delivered nothing; the visuals went deaf at their
+                # first reconnect)
+                try:
+                    rt.cancel_callback()
+                except Exception:
+                    pass
+                rt.set_callback(cb)
+                name = now
+                print(f"[visuals] MIDI in: {name}", flush=True)
+            except Exception as e:
+                print(f"[visuals] MIDI error: {e}, retrying", flush=True)
+        sleep(check_s)
+    try:
+        rt.close_port()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- audio tap
@@ -932,7 +1120,83 @@ def audio_amount(v):
     return min(2.0, (max(0, v) / 64.0) ** 1.5)
 
 
+# ---------------------------------------------------------- layers + colour
+
+def layer_gain(v):
+    """A LEVEL knob (LINES LEVEL / BACKGROUND LEVEL) -> its gain: 0 = off,
+    127 = 1 (= the old look), squared so the bottom fades gently."""
+    return (max(0, min(127, v)) / 127.0) ** 2
+
+
+def sat_mult(v):
+    """A SATURATION knob -> a multiplier on the colour's distance from grey:
+    64 = 1 (as drawn), 0 = grey / white, 127 = 2 (more vivid)."""
+    return max(0, min(127, v)) / 64.0
+
+
+def hue_deg(v):
+    """A HUE knob -> degrees round the wheel: 64 = 0, 0 = -180, 127 = ~+177."""
+    return 180.0 * (v - 64) / 64.0
+
+
+def palette_grad(pal, h):
+    """A palette (list of (r, g, b) 0..1) as a loop, read at h (array, 0..1
+    wraps) -> colours [n, 3]: blends from one colour to the next and back to
+    the first, so a hue that turns round the wheel walks the whole palette."""
+    pal = np.asarray(pal, "f4").reshape(-1, 3)
+    n = len(pal)
+    x = (np.asarray(h, "f4") % 1.0) * n
+    i = np.floor(x).astype(int) % n
+    f = (x - np.floor(x))[:, None]
+    f = f * f * (3.0 - 2.0 * f)                         # smooth through each colour
+    return pal[i] * (1.0 - f) + pal[(i + 1) % n] * f
+
+
+def recolour(rgb, sat=1.0, pal=None):
+    """The LINES layer's colour knobs on every segment's colour (rows of r, g,
+    b, any scale: additive lines + old_light go above 1). pal = a palette or
+    None: the segment's hue picks a place on the palette loop and its
+    brightness (max of r, g, b) is kept. sat = sat_mult(): pulls toward (0)
+    or pushes away from (> 1) the grey of the same brightness, so 0 = white
+    lines at full brightness. Returns rgb itself, untouched, at sat 1 and no
+    palette (the old look, bit for bit)."""
+    if pal is None and sat == 1.0:
+        return rgb
+    v = rgb.max(axis=1)
+    if pal is not None:
+        mn = rgb.min(axis=1)
+        c = np.maximum(v - mn, 1e-6)
+        r, g, b = rgb[:, 0], rgb[:, 1], rgb[:, 2]
+        h = np.where(v == r, (g - b) / c, np.where(v == g, 2.0 + (b - r) / c, 4.0 + (r - g) / c)) / 6.0
+        out = palette_grad(pal, h) * v[:, None]
+    else:
+        out = rgb
+    if sat != 1.0:
+        out = np.maximum(v[:, None] + (out - v[:, None]) * sat, 0.0)
+    return out.astype("f4")
+
+
 # ------------------------------------------------------------- background
+
+def fit_texture(g, max_side):
+    """A grey image array -> one no bigger than max_side on either side
+    (the GPU's GL_MAX_TEXTURE_SIZE), shrunk by whole-number steps."""
+    k = -(-max(g.shape) // max_side)                     # ceil
+    return g if k <= 1 else g[::k, ::k]
+
+
+def cache_evict(cache, keep_tiles, keep_pics, pic_set):
+    """Drop the oldest file tiles beyond keep_tiles, and the oldest PICTURES
+    beyond keep_pics (a picture is up to 4 MB, a tile ~64 KB: the visuals
+    session is capped at 200 MB). Built-ins (set 0) always stay. -> the
+    dropped keys. `cache` keeps insertion order (oldest first)."""
+    pics = [k for k in cache if k[0] == pic_set]
+    tiles = [k for k in cache if k[0] not in (0, pic_set)]
+    gone = pics[:max(0, len(pics) - keep_pics)] + tiles[:max(0, len(tiles) - keep_tiles)]
+    for k in gone:
+        cache.pop(k, None)
+    return gone
+
 
 def make_pattern(name, n=256, shift=0.0):
     """One seamless grey tile, float32 [n, n] in 0..1: every feature repeats a
@@ -1028,6 +1292,20 @@ def bg_params(kn, H):
         "scale": 64.0 * 8 ** u("bg_scale") * H / 720.0,    # built-in tile px
         "unit": 1.5 * 4 ** ((kn["bg_scale"] - 64) / 64.0) * H / 720.0,  # px per file-tile unit
         "cycle": 0.5 * u("bg_cycle") ** 2,                 # palette turns/s
+        "bars": u("bg_bars"),                              # 0 .. 1
+        "bars_rows": 4.0 * 16 ** u("bg_bars_size"),        # rows per bar, 4 .. 64
+        "bars_rate": 3.0 * (kn["bg_bars_speed"] - 64) / 64.0,   # bars/s, - = the other way
+        # mipmap levels, 0 .. 7: a tile square can be ~128 texels, so it takes ~7
+        # halvings to melt it (at 5 a big checker still looked crisp)
+        "dof": 7.0 * u("bg_dof"),
+        "wrap": bucket(kn["bg_wrap"], BG_WRAPS),
+        # CRISP 1..127 -> the cut level 0.05 .. 0.95 (0 = off)
+        "crisp": 0.0 if kn["bg_crisp"] <= 0 else 0.05 + 0.9 * (kn["bg_crisp"] - 1) / 126.0,
+        "invert": 1 if kn["bg_invert"] >= 64 else 0,
+        # extra mipmap levels, 0 .. 3 on a squared curve: the low half fattens
+        # lines gently (64 ~ 0.75), the top end melts them into blobs (owner
+        # liked the blobs: "looks fantastic"), so both are on the one knob
+        "thick": 3.0 * u("bg_thick") ** 2,
     }
 
 
@@ -1230,6 +1508,79 @@ def rgb(h, l=0.6, a=1.0):
 
 
 WEIGHT = [1.0]        # the WEIGHT knob's glow-width factor, set each frame
+OLD_LIGHT = [True]    # the scene's Scene.old_light, set each frame
+OLD_LIGHT_MAX = 8.0   # cap: a near-zero-length segment would otherwise blow up
+LINE_COLS = 13        # a.xy b.xy  pa.xy (before a)  nb.xy (after b)  r g b  radius  flags
+LINE_MAX = 10000      # segments a frame (= the old 60000-vertex cap)
+# the 6 vertices of every segment's quad: (end: 0 = a, 1 = b, side)
+LINE_CORNERS = np.array([[0, 1], [0, -1], [1, 1], [1, 1], [0, -1], [1, -1]], "f4")
+# flags: 1 = joined (round caps, corners split), 2 = has a point before a, 4 = after b
+
+
+def line_quads(rows):
+    """CPU twin of LINE_VS's quad (tests + off-screen tools): Lines.array
+    rows -> (n * 6, 3) corners [x, y, side], in the order the GPU draws them."""
+    a, b, r = rows[:, 0:2], rows[:, 2:4], rows[:, 11:12]
+    joined = (rows[:, 12:13].astype(int) & 1) > 0
+    d = b - a
+    ln = np.maximum(np.hypot(d[:, 0], d[:, 1]), 1e-4)[:, None]
+    t = d / ln
+    n = np.stack([-t[:, 1], t[:, 0]], 1)
+    ext = np.where(joined, 1.0, 0.5)
+    end, side = LINE_CORNERS[:, 0], LINE_CORNERS[:, 1]
+    base = np.where(end[None, :, None] < 0.5, (a - t * r * ext)[:, None], (b + t * r * ext)[:, None])
+    pos = base + (n * r)[:, None, :] * side[None, :, None]
+    return np.concatenate([pos, np.broadcast_to(side[None, :, None], pos.shape[:2] + (1,))],
+                          2).reshape(-1, 3).astype("f4")
+
+
+def link_joints(R):
+    """R = the joined rows of Lines.array (a view, filled in place): for each
+    segment end, the far point of the ONE other segment OF THE SAME LINE
+    (same colour + width) that shares that end exactly (cols 4:6 before a,
+    6:8 after b) + the flags. Shared ends are bit-for-bit equal (cut from the
+    same points). Rows in drawing order mostly chain (b_i == a_i+1): one
+    compare links those; only the ends left over (a ring's closing corner, a
+    contour cell's neighbour) are sorted. Same line only: where a tube ring
+    closes, its struts end on the same point (4 ends), and a corner split
+    between two widths would show a step. Every numpy call costs ~0.05 ms on
+    the Pi, so this stays short (2026-10-24)."""
+    n = len(R)
+    K = R[:, 0:4].view(np.uint64)                # each end's (x, y) bits as one int
+    A = R[:, 8:12].view(np.uint64)               # colour + width bits
+    ln_id = A[:, 0] * np.uint64(0x9E3779B97F4A7C15) ^ A[:, 1]   # one int per line look
+    ka, kb = K[:, 0], K[:, 1]
+    link = (kb[:-1] == ka[1:]) & (ln_id[:-1] == ln_id[1:])
+    has_a = np.zeros(n, bool)
+    has_b = np.zeros(n, bool)
+    has_a[1:] = link
+    has_b[:-1] = link
+    R[1:, 4:6] = R[:-1, 0:2]                     # the previous segment's a
+    R[:-1, 6:8] = R[1:, 2:4]                     # the next segment's b
+    ia, ib = np.flatnonzero(~has_a), np.flatnonzero(~has_b)
+    if len(ia) + len(ib) >= 2:
+        rows = np.concatenate([ia, ib])
+        is_b = np.arange(len(rows)) >= len(ia)
+        pt = np.concatenate([ka[ia], kb[ib]])
+        lid = ln_id[rows]
+        keys = pt ^ (lid * np.uint64(0xC2B2AE3D27D4EB4F))     # point + line look, one int
+        o = np.argsort(keys, kind="stable")
+        eq = keys[o[1:]] == keys[o[:-1]]
+        pad = np.concatenate([[False], eq, [False]])
+        two = np.flatnonzero(pad[1:-1] & ~pad[:-2] & ~pad[2:])   # exactly two ends meet
+        e1, e2 = o[two], o[two + 1]
+        keep = ((rows[e1] != rows[e2])           # not a zero-length segment's own ends
+                & (pt[e1] == pt[e2]) & (lid[e1] == lid[e2]))     # (and no hash coincidence)
+        x = np.concatenate([e1[keep], e2[keep]])
+        y = np.concatenate([e2[keep], e1[keep]])
+        rx, ry = rows[x], rows[y]
+        far = np.where(is_b[y][:, None], R[ry, 0:2], R[ry, 2:4])   # the partner's OTHER end
+        xa = ~is_b[x]
+        R[rx[xa], 4:6] = far[xa]
+        R[rx[~xa], 6:8] = far[~xa]
+        has_a[rx[xa]] = True
+        has_b[rx[~xa]] = True
+    R[:, 12] = 1.0 + 2.0 * has_a + 4.0 * has_b
 
 
 def line_weight(v):
@@ -1241,28 +1592,38 @@ def line_weight(v):
 
 
 class Lines:
-    """Collects one frame's lines as plain segments, then builds every glow
-    quad in ONE numpy pass (6 verts / segment). MEASURED 2026-09-29: a numpy
-    build per add() call cost ~99% of a core on tube / warp (hundreds of
-    short lines a frame); batched, the per-line cost is a few list appends."""
+    """Collects one frame's lines as plain segments, then hands the GPU one
+    row per segment (array()). MEASURED 2026-09-29: a numpy build per add()
+    call cost ~99% of a core on tube / warp (hundreds of short lines a
+    frame); batched, the per-line cost is a few list appends."""
 
     def __init__(self):
-        self.seg = []          # (ax, ay, bx, by, r, g, b, radius)
+        self.seg = []          # plain (join=False): (ax, ay, bx, by, r, g, b, radius)
         self.blocks = []       # numpy (n, 8) blocks of the same columns
+        self.jseg = []         # joined (the default), same columns
+        self.jblocks = []      # joined numpy blocks
 
-    def add_segments(self, ab, col, width):
-        """ab = (n, 4) array of segment ends [ax, ay, bx, by], one colour."""
+    def add_segments(self, ab, col, width, join=True):
+        """ab = (n, 4) array of segment ends [ax, ay, bx, by], one colour.
+        Joined (default): round ends, and where two segments share an end
+        exactly, that corner is split cleanly (link_joints)."""
         if len(ab):
             blk = np.empty((len(ab), 8), "f4")
             blk[:, 0:4] = ab
             blk[:, 4:7] = col
             blk[:, 7] = width * 3.0
-            self.blocks.append(blk)
+            (self.jblocks if join else self.blocks).append(blk)
 
-    def add(self, pts, col, width, closed=False):
+    def add(self, pts, col, width, closed=False, join=True):
+        """Joined (default): the segments meet cleanly at the corners (round
+        ends, each corner split along its bisector), so no doubled hot dot
+        and no square stubs past a corner; on a curve of short segments
+        those dots were the "dotted line" look (owner, 2026-10-24: every
+        scene joined, brightness matched with Scene.gain). join=False = the
+        old overlapping ends."""
         r = width * 3.0                          # glow reaches 3x the core
         c0, c1, c2 = col
-        seg = self.seg
+        seg = self.jseg if join else self.seg
         prev = None
         for q in pts:
             if prev is not None:
@@ -1274,11 +1635,13 @@ class Lines:
 
     def _stack(self):
         # built ONCE per frame: radius() (FIT) and array() both need it; two
-        # builds of tube's segment list cost ~1.5 ms a frame (measured)
-        n = (len(self.seg), len(self.blocks))
+        # builds of tube's segment list cost ~1.5 ms a frame (measured).
+        # Rows: the plain ones (seg, blocks), then the joined (jseg, jblocks).
+        n = (len(self.seg), len(self.blocks), len(self.jseg), len(self.jblocks))
         if getattr(self, "_S_n", None) == n:
             return self._S
-        parts = ([np.asarray(self.seg, dtype="f4")] if self.seg else []) + self.blocks
+        parts = (([np.asarray(self.seg, dtype="f4")] if self.seg else []) + self.blocks
+                 + ([np.asarray(self.jseg, dtype="f4")] if self.jseg else []) + self.jblocks)
         S = None if not parts else (np.concatenate(parts) if len(parts) > 1 else parts[0])
         self._S, self._S_n = S, n
         return S
@@ -1295,13 +1658,18 @@ class Lines:
         return float(np.sqrt(np.partition(d2, k)[k]))      # the 95th percentile, cheaply
 
     def array(self, fit=None):
-        """fit = (c0, k, c1): scale the points about c0 by k and move them to
-        c1 (Fit.plan) BEFORE the glow quads are built = same line width.
-        k may be a 2x2 matrix (camera(): scale + rotate)."""
+        """-> one row per segment (LINE_COLS floats); the GPU builds each
+        glow quad from its row (LINE_VS, one instance per segment).
+        fit = (c0, k, c1): scale the points about c0 by k and move them to
+        c1 (Fit.plan) before the quads are built = same line width. k may
+        be a 2x2 matrix (camera(): scale + rotate). MEASURED 2026-10-24:
+        spreading every segment into 6 vertices in numpy cost ~3 ms a frame
+        on ridgeline; per segment, with the corner maths on the GPU, it's
+        a fraction."""
         S = self._stack()
         if S is None:
             return None
-        a, b, col, r = S[:, 0:2], S[:, 2:4], S[:, 4:7], S[:, 7:8] * WEIGHT[0]
+        a, b = S[:, 0:2], S[:, 2:4]
         if fit is not None:
             c0, k, c1 = fit
             if np.ndim(k) == 2:
@@ -1310,17 +1678,31 @@ class Lines:
             else:
                 a = (a - c0) * k + c1
                 b = (b - c0) * k + c1
-        d = b - a
-        ln = np.maximum(np.hypot(d[:, 0], d[:, 1]), 1e-4)[:, None]
-        n = np.stack([-d[:, 1], d[:, 0]], 1) / ln * r
-        t = d / ln * r * 0.5                     # overlap = soft joints
-        a0, b0 = a - t, b + t
         m = len(S)
-        v = np.empty((m, 6, 6), "f4")
-        v[:, :, 0:2] = np.stack([a0 + n, a0 - n, b0 + n, b0 + n, a0 - n, b0 - n], 1)
-        v[:, :, 2] = np.array([1, -1, 1, 1, -1, -1], "f4")
-        v[:, :, 3:6] = col[:, None, :]
-        return v.reshape(-1, 6)
+        j0 = m - len(self.jseg) - sum(len(q) for q in self.jblocks)   # joined rows: [j0:]
+        out = np.empty((m, LINE_COLS), "f4")
+        out[:, 0:2], out[:, 2:4] = a, b
+        out[:, 8:11] = S[:, 4:7]
+        out[:, 11] = S[:, 7] * WEIGHT[0]
+        out[:j0, 4:8] = 0.0
+        out[:j0, 12] = 0.0                       # plain: the old overlapping quad
+        if j0 < m:
+            # link_joints fills a segment's before / after points only where it
+            # HAS a neighbour; start them at 0, or the rest keep np.empty's
+            # garbage (sometimes NaN: the GPU ignores an unflagged one, but it
+            # made "every scene draws finite geometry" fail now and then, 2026-10-24)
+            out[j0:, 4:8] = 0.0
+            link_joints(out[j0:])                # BEFORE old light: it tells lines apart by colour
+            if OLD_LIGHT[0]:
+                # the brightness the scene was tuned on: a plain segment's
+                # quad ran half a glow past each end, so it gave (length +
+                # radius) / length times a joined one's light (doubled at
+                # every joint = the dots). Joined + this = the same light,
+                # spread evenly.
+                dJ = out[j0:, 2:4] - out[j0:, 0:2]
+                lJ = np.maximum(np.hypot(dJ[:, 0], dJ[:, 1]), 1e-3)
+                out[j0:, 8:11] *= np.minimum(1.0 + out[j0:, 11] / lJ, OLD_LIGHT_MAX)[:, None]
+        return out
 
 
 class Scene:
@@ -1328,6 +1710,7 @@ class Scene:
     zoom = 1.0        # >1 = trails rush outward (tunnel feel)
     spin = 0.0        # trail rotation per frame, radians
     step = 1.0        # 60 fps frames this frame stands for (x speed knob)
+    old_light = True  # joined lines keep the old overlapping lines' brightness (Lines.array)
     ctx = None        # SceneCtx: the audio tap + the MIDI state (render loop)
 
     def __init__(self, w, h):
@@ -1352,6 +1735,7 @@ class SceneCtx:
 
 class Tunnel(Scene):
     decay, zoom = 0.72, 1.012
+    old_light = False   # owner judged the joined tunnel as it is (2026-10-24)
 
     def draw(self, L, f, hue, p):
         W, H = self.W, self.H
@@ -1402,6 +1786,7 @@ class Mystify(Scene):
 
 class Tube(Scene):
     decay, zoom = 0.62, 1.006
+    old_light = False   # owner judged the joined tube as it is (2026-10-24)
 
     def draw(self, L, f, hue, p):
         W, H = self.W, self.H
@@ -1424,9 +1809,8 @@ class Tube(Scene):
                   .5 + z * 2.5 + p * z * 2, True)
             if j + 1 < len(rs):
                 nxt = rs[j + 1][1]
-                for k in range(0, seg, 2):
-                    L.add([ring[k], nxt[k]], rgb(hue - 20 + z * 100, .5, z * .7),
-                          .4 + z * 1.5)
+                L.add_segments(np.array([ring[k] + nxt[k] for k in range(0, seg, 2)], "f4"),
+                               rgb(hue - 20 + z * 100, .5, z * .7), .4 + z * 1.5)
 
 
 class Harmonograph(Scene):
@@ -2082,34 +2466,153 @@ void main(){
 }"""
 
 LINE_VS = """#version 140
-in vec2 pos; in float side; in vec3 col;
-out float d; out vec3 c; uniform vec2 res;
-void main(){ d = side; c = col;
+// one INSTANCE per segment (a Lines.array row); the 6 vertices of its quad
+// come from LINE_CORNERS: end (0 = a, 1 = b) and side (+1 / -1). The quad
+// is mirrored on the CPU by line_quads().
+in float end, side;
+in vec2 a, b, pa, nb; in vec3 col; in float rad, flags;
+out float d; out vec3 c; out float u, sl, ca, cb; uniform vec2 res;
+
+// a joined corner: the plane through the shared end, square to the bisector
+// of the two segments' directions; > 0 = this segment's side. e = the
+// neighbour's direction INTO the corner, along the travel. (Here, per
+// vertex on the GPU: on the CPU it cost ~1 ms a frame.)
+float corner(vec2 e, vec2 t, vec2 n, float along){
+  float el = length(e);
+  if (el < 1e-6) return 1.0;
+  vec2 h = e / el + t;
+  float hl = length(h);
+  if (hl < 1e-3) return 1.0;           // a hairpin: no clean split, no clip
+  h /= hl;
+  return along * dot(h, t) + side * dot(h, n);
+}
+
+void main(){
+  vec2 dd = b - a;
+  float ln = max(length(dd), 1e-4);
+  vec2 t = dd / ln, n = vec2(-t.y, t.x);
+  int fl = int(flags + 0.5);
+  bool jn = (fl & 1) != 0;
+  float ext = jn ? 1.0 : 0.5;          // plain: half a glow of overlap; joined: a whole round cap
+  vec2 pos = (end < 0.5 ? a - t * rad * ext : b + t * rad * ext) + n * rad * side;
+  d = side; c = col;
+  sl = jn ? ln / rad : 0.0;            // along the segment, in glow radii
+  u = jn ? (end < 0.5 ? -1.0 : sl + 1.0) : 0.0;
+  ca = (fl & 2) != 0 ? corner(a - pa, t, n, u) : 1.0;
+  cb = (fl & 4) != 0 ? -corner(nb - b, t, n, u - sl) : 1.0;
   gl_Position = vec4(pos / res * 2.0 - 1.0, 0, 1) * vec4(1, -1, 1, 1); }"""
 
 LINE_FS = """#version 140
-in float d; in vec3 c; out vec4 o;
+in float d; in vec3 c; in float u, sl, ca, cb; out vec4 o;
 void main(){
-  float x = d * d;
+  // a joined corner: the neighbour draws the far side of the bisector. A
+  // 1-px crossfade, not a hard cut: a pixel centred ON the bisector was
+  // drawn by both or by neither (float rounding), a 1-px sparkle.
+  float w = clamp(0.5 + ca / max(fwidth(ca), 1e-6), 0.0, 1.0)
+          * clamp(0.5 + cb / max(fwidth(cb), 1e-6), 0.0, 1.0);
+  if (w <= 0.0) discard;
+  float e = max(max(-u, u - sl), 0.0); // past a joined end: a round cap (plain lines: 0)
+  float x = d * d + e * e;
   float f = exp(-x * 30.0) + 0.28 * exp(-x * 4.0);   // hot core + soft glow
-  o = vec4(c * f, 1.0);
+  o = vec4(c * f * w, 1.0);
 }"""
 
 BG_FS = """#version 140
 // the background, rendered at 1/Composer.BG_DIV resolution (px = full-res
 // pixels): an EarthBound-style bent pattern; each ~224th of the screen is one
-// "scanline" row whose read is shifted by A*sin(F*row + S*t)
+// "scanline" row whose read is shifted by A*sin(F*row + S*t). Modes 5-9 are
+// the Mega Drive fake-3D scroll tricks (see BG_MODES).
 out vec4 o;
 uniform sampler2D pat;
 uniform float t, div;
 uniform int bg_mode;
 uniform float bg_amp, bg_freq, bg_speed, bg_cycle, bg_hue, rowh;
+uniform vec2 res;              // the full screen, px (the skew modes' centre)
+uniform float bg_trav;        // the skew modes' scroll so far (BG SPEED x time, + beat pushes)
 uniform vec2 bg_tile;          // one tile's size on screen, px (any shape)
+uniform float bg_bars;         // RASTER BARS amount: 0 = off
+uniform float bg_bars_rows;    // scanline rows per bar
+uniform float bg_bars_ph;      // the bars' roll, in bars (the renderer advances it)
+uniform float bg_dof;          // DEPTH BLUR: the most blur, in mipmap levels (0 = sharp)
+uniform int bg_wrap;           // REPEAT: 0 repeat, 1 mirror, 2 once (BG_WRAPS)
+uniform float bg_crisp;        // CRISP: the black/white cut level, 0 = off
+uniform int bg_invert;         // INVERT: 1 = black <-> white
+uniform float bg_thick;        // THICKEN: extra mipmap levels read before the cut
+uniform vec2 bg_texsize;       // the texture's size, texels (THICKEN's footprint)
+uniform float bg_sat;          // BG SATURATION: x on the colour's distance from grey (1 = as before)
+uniform int bg_pal_n;          // BG PALETTE: 0 = the rainbow, else this many colours in bg_pal
+uniform vec3 bg_pal[4];
 
 vec3 hsv(float h, float s, float v) {
   vec3 k = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   return v * mix(vec3(1.0), k, s);
 }
+
+// the background's colour at hue h (wraps) and brightness v. No palette: the
+// rainbow at saturation 0.75 x BG SATURATION below the middle (= exactly the
+// old colour at 1), and 0.75 .. 1 across the top half (0.75 x 2 would hit 1
+// at 2/3 of the knob and the rest would do nothing).
+// A palette: a loop through its colours (vis_palettes), smooth between them,
+// then BG SATURATION pulls it toward / pushes it from the grey of its brightness.
+vec3 bgcol(float h, float v) {
+  if (bg_pal_n <= 0)
+    return hsv(h, bg_sat <= 1.0 ? 0.75 * bg_sat : min(1.0, 0.75 + 0.25 * (bg_sat - 1.0)), v);
+  float x = fract(h) * float(bg_pal_n);
+  int i = int(floor(x)) % bg_pal_n, j = (i + 1) % bg_pal_n;
+  float f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  vec3 c = mix(bg_pal[i], bg_pal[j], f);
+  float m = max(c.r, max(c.g, c.b));
+  return v * max(vec3(m) + (c - vec3(m)) * bg_sat, 0.0);
+}
+
+// every pattern read goes through here. The tile has mipmaps (smaller, blurrier
+// copies made by the GPU when the tile is loaded): blur = which copy to read,
+// 0 = the full-size tile, exactly what the plain read gave before DEPTH BLUR.
+// Then the PICTURE LOOK, all off (= the old read) at their defaults:
+//   REPEAT  mirror = every other copy flipped (no seam); once = one copy
+//           centred on the screen, black outside it (a scrolling mode brings
+//           it round again: one copy per screen-and-a-bit, never two at once)
+//   THICKEN reads a blurrier copy, where a thin line has spread wider, and
+//           cuts it at a lower level: the line comes back fatter
+//   CRISP   cuts the grey at a level: pure black / white (the cut softens
+//           with DEPTH BLUR, so a blurred picture still looks blurred)
+//   INVERT  black <-> white
+// tile = the size on screen this read uses (px), e.g. the skyline's smaller one
+float samp(vec2 uv, float blur, vec2 tile) {
+  vec2 u = uv;
+  if (bg_wrap == 2) {
+    u = uv - 0.5 * res / tile + 0.5;                     // the screen centre = the picture's
+    // the skew/floor/spin/stretch modes add a scroll that grows forever: wrap
+    // it, or the one copy slides off and never comes back (2026-10-24 review)
+    vec2 span = res / tile + 1.0, m = 0.5 * (span - 1.0);
+    u = mod(u + m, span) - m;                            // [0, 1] (no scroll) is unchanged
+    if (u.x < 0.0 || u.y < 0.0 || u.x > 1.0 || u.y > 1.0) return 0.0;
+  } else if (bg_wrap == 1) {
+    u = 1.0 - abs(mod(uv, 2.0) - 1.0);                   // 0..1..0..1: a mirror at every edge
+  }
+  float b = max(blur, 0.0);
+  float cut = bg_crisp > 0.0 ? bg_crisp : (bg_thick > 0.0 ? 0.5 : 0.0);
+  // CRISP / THICKEN read the copy where one texel = one background pixel
+  // (fp: how many texels a pixel covers, as mipmap levels): a picture shrunk
+  // on screen keeps its thin lines whole instead of breaking into dots.
+  // THICKEN then reads bg_thick levels blurrier (the line has spread) and
+  // cuts lower. With both off: the plain read, as before.
+  float fp = cut > 0.0
+      ? max(0.0, log2(max(div * bg_texsize.x / tile.x, div * bg_texsize.y / tile.y))) : 0.0;
+  float v = textureLod(pat, u, b + fp + bg_thick).r;
+  if (cut > 0.0) {
+    cut *= exp2(-bg_thick - 0.5 * fp);                   // a spread line is dimmer: cut lower
+    float w = 0.02 + 0.06 * b;
+    v = smoothstep(cut - w, cut + w, v);
+  }
+  if (bg_invert == 1) v = 1.0 - v;
+  return v;
+}
+
+// the 16 px Genesis column x (centre) and the scanline row y (centre) a pixel sits in
+float colx(float x) { float w = 16.0 * res.y / 720.0; return (floor(x / w) + 0.5) * w; }
+float rowy(float y) { return (floor(y / rowh) + 0.5) * rowh; }
 
 float layer(vec2 px, float amp, float freq, float speed, int mode, vec2 tile, float ph) {
   float row = floor(px.y / rowh);
@@ -2119,18 +2622,132 @@ float layer(vec2 px, float amp, float freq, float speed, int mode, vec2 tile, fl
   else if (mode == 1) q.x += (mod(row, 2.0) < 1.0) ? off : -off;
   else if (mode == 2) q.y += off;
   else { q.x += off; q.y += 0.6 * amp * sin(0.7 * freq * row - speed * t + ph); }
-  return texture(pat, q / tile).r;
+  return samp(q / tile, bg_dof, tile);
+}
+
+// SKEW WALLS (Batman & Robin's buildings). The screen is cut into 16 px columns;
+// the pattern scrolls sideways and is grouped into walls (WALLS knob = BG FREQ
+// sets how many across the screen). Each column is slid UP/DOWN by
+//   lean * (wall's distance from screen centre) * (column's distance from wall centre)
+// so a wall dead centre is flat, walls to the sides lean away, and as a wall
+// scrolls across the centre its lean swings from one way to the other.
+// DEPTH BLUR: the more a wall leans (the further away it is), the blurrier.
+float walls(vec2 px, float amp, float freq, float speed, vec2 tile) {
+  float s = bg_trav * tile.x * 0.15;              // the sideways scroll, px
+  float n = 1.0 + freq * 20.0;                    // walls across the screen
+  float P = res.x / n;                            // one wall's width, px
+  // the 16 px columns ride WITH the scroll (cut in world x, not screen x):
+  // cut on the screen, each column flipped between wall and gap all at once,
+  // so the black gaps jumped 8 px every few frames while the pattern glided
+  // (MEASURED 2026-10-24: gap edges moved on 30 of 89 frames, in 4 px steps)
+  float cw = 16.0 * res.y / 720.0;
+  float wx = (floor((px.x + s) / cw) + 0.5) * cw; // this column's centre in world x (still chunky)
+  float wi = floor(wx / P);
+  float xl = wx - (wi + 0.5) * P;                 // the column's offset in its wall, -P/2 .. P/2
+  if (abs(xl) > 0.42 * P) return 0.0;             // a black gap between walls
+  // the wall's centre vs the screen centre, -1 .. 1 (a wall half off-screen
+  // leans no harder than one at the edge, or its columns alias to mush)
+  float k = clamp(((wi + 0.5) * P - s - 0.5 * res.x) / (0.5 * res.x), -1.0, 1.0);
+  float lean = amp / (40.0 * res.y / 720.0);      // BG WARP: 64 ~ a 3:4 slope at the edge
+  vec2 q = vec2(px.x + s, px.y + lean * k * xl);
+  return samp(q / tile, bg_dof * abs(k), tile);
+}
+
+// SKEW FLOOR (line-scroll parallax). The horizon is the screen's middle; a
+// floor below and (ceiling = true) a ceiling above. Each scanline row is a
+// depth: rows far from the horizon are near and slide fast, rows by the horizon
+// slide slowly and fade to black. BG WARP bends the far end sideways (a road
+// curving away), BG FREQ sets how fast the curve wanders. DEPTH BLUR: far rows
+// blur, the rows nearest you stay sharp.
+float floorlines(vec2 px, float amp, float freq, float speed, vec2 tile, bool ceiling) {
+  float y = rowy(px.y);                           // one depth per row (chunky scanlines)
+  if (!ceiling && y > 0.5 * res.y) return 0.0;    // (GL's y runs up: above the horizon)
+  float d = abs(y - 0.5 * res.y) / (0.5 * res.y); // 0 at the horizon .. 1 at the edge
+  if (d < 0.08) return 0.0;                       // shortcut: the fade below is 0 here anyway
+  float z = 1.0 / d;                              // depth: far = big
+  float s = bg_trav * tile.x * 0.3;               // the near rows' scroll, px
+  float bend = amp * 2.0 * (1.0 - d) * (1.0 - d) * sin(freq * 4.0 * t);   // the road curves far away
+  // every row moves the same WORLD distance s, but a far row's pixels cover
+  // more world (x 0.5 * z), so on screen the near rows move fastest = parallax
+  vec2 q = vec2((px.x - 0.5 * res.x + bend) * 0.5 * z + s, 0.25 * res.y * z);
+  // fade to black toward the horizon: far rows squeeze many tiles into one
+  // pixel and turn to moire, so they never show at full brightness
+  return samp(q / tile, bg_dof * (1.0 - d), tile) * smoothstep(0.08, 0.45, d);
+}
+
+// FLOOR + SKYLINE: the floor (no ceiling), and above the horizon a row of
+// buildings filled with the pattern (its windows), scrolling at a quarter of
+// the nearest floor's speed: a far layer = a second parallax layer. Building
+// heights are a fixed pseudo-random per building; the sky stays black.
+float skyline(vec2 px, float amp, float freq, float speed, vec2 tile) {
+  if (px.y < 0.5 * res.y) return floorlines(px, amp, freq, speed, tile, false);
+  float yh = rowy(px.y) - 0.5 * res.y;            // height above the horizon, px
+  float s = bg_trav * tile.x * 0.3 * 0.25;        // the far layer: a quarter of the near floor
+  float bw = 0.07 * res.x;                        // one building's width
+  float cw = 16.0 * res.y / 720.0;
+  float bx = (floor((px.x + s) / cw) + 0.5) * cw; // world-anchored columns (see walls): no gap jumps
+  float bi = floor(bx / bw);
+  float hsh = fract(sin(bi * 12.9898) * 43758.5453);          // the same height every time
+  float h = (0.15 + 0.55 * hsh) * 0.5 * res.y;
+  if (bx - bi * bw < 0.12 * bw || yh > h) return 0.0;         // gap between buildings / sky
+  return 0.8 * samp(vec2(bx, yh) / (tile * 0.35), bg_dof, tile * 0.35);      // the farthest layer: the full blur
+}
+
+// SPIN: the two scroll tables again, used for a ROTATION (a rotation is three
+// shears in a row: sideways by row, up/down by column, sideways by row). Each
+// shear is chunky (whole scanline rows, whole 16 px columns), so it turns like
+// a Genesis faking it. It rocks: BG WARP = how far (up to ~1 radian),
+// BG FREQ = how fast it rocks, BG SPEED = a sideways drift underneath.
+float spin(vec2 px, float amp, float freq, float speed, vec2 tile) {
+  float a = clamp(amp / (30.0 * res.y / 720.0), 0.0, 3.0) * 0.35 * sin(freq * 10.0 * t);
+  float ta = tan(0.5 * a), sa = sin(a);
+  float x1 = px.x - 0.5 * res.x - ta * (rowy(px.y) - 0.5 * res.y);       // shear 1: by row
+  float y2 = px.y - 0.5 * res.y + sa * (colx(x1 + 0.5 * res.x) - 0.5 * res.x);   // shear 2: by column
+  float x3 = x1 - ta * (rowy(y2 + 0.5 * res.y) - 0.5 * res.y);           // shear 3: by row
+  vec2 q = vec2(x3 + 0.5 * res.x + bg_trav * tile.x * 0.15, y2 + 0.5 * res.y);
+  return samp(q / tile, bg_dof, tile);
+}
+
+// STRETCH (the Batwing stage's buildings stretching down to the street): every
+// scanline row reads a source row, and toward the bottom of the screen the
+// same source rows repeat, so the pattern stretches downward. It pumps:
+// BG WARP = how much, BG FREQ = how fast it pumps, BG SPEED = sideways scroll.
+float stretch(vec2 px, float amp, float freq, float speed, vec2 tile) {
+  float u = 1.0 - rowy(px.y) / res.y;             // 0 = the top of the screen .. 1 = the bottom
+  float k = clamp(amp / (30.0 * res.y / 720.0), 0.0, 4.0) * (0.6 + 0.4 * sin(freq * 10.0 * t));
+  float us = 1.0 - pow(1.0 - u, 1.0 + k);         // flat near the bottom = rows repeat there
+  // + a slow climb, so the stretched bottom rows keep cycling through the
+  // pattern instead of sitting on one repeated row (a mortar line = a black band)
+  vec2 q = vec2(px.x + bg_trav * tile.x * 0.15, (1.0 - us) * res.y + bg_trav * tile.y * 0.05);
+  return samp(q / tile, bg_dof, tile);
 }
 
 void main(){
   vec2 px = gl_FragCoord.xy * div;
   float v;
-  if (bg_mode == 3)
+  if (bg_mode == 5)
+    v = walls(px, bg_amp, bg_freq, bg_speed, bg_tile);
+  else if (bg_mode == 6)
+    v = floorlines(px, bg_amp, bg_freq, bg_speed, bg_tile, true);
+  else if (bg_mode == 7)
+    v = spin(px, bg_amp, bg_freq, bg_speed, bg_tile);
+  else if (bg_mode == 8)
+    v = stretch(px, bg_amp, bg_freq, bg_speed, bg_tile);
+  else if (bg_mode == 9)
+    v = skyline(px, bg_amp, bg_freq, bg_speed, bg_tile);
+  else if (bg_mode == 3)
     v = 0.5 * (layer(px, bg_amp, bg_freq, bg_speed, 0, bg_tile, 0.0)
              + layer(px, bg_amp * 0.7, bg_freq * 1.3, -bg_speed * 0.8, 1, bg_tile * 1.5, 1.7));
   else
     v = layer(px, bg_amp, bg_freq, bg_speed, bg_mode == 4 ? 3 : bg_mode, bg_tile, 0.0);
-  o = vec4(hsv(bg_hue + v * 0.35 + t * bg_cycle, 0.75, v), 1.0);   // gaps stay black
+  float hue = bg_hue + v * 0.35 + t * bg_cycle;
+  // RASTER BARS (the copper-bar trick: a new colour on every scanline band).
+  // Bands of bg_bars_rows rows each get their own hue step and a bright-middle
+  // gradient; bg_bars_ph rolls them. At bg_bars 0 this changes nothing.
+  float ph = floor(floor(px.y / rowh) / 2.0) * 2.0 / bg_bars_rows + bg_bars_ph;
+  hue += bg_bars * floor(ph) * 0.13;
+  float lit = mix(1.0, 0.2 + 0.8 * sin(3.14159265 * fract(ph)), bg_bars);
+  o = vec4(bgcol(hue, v * lit), 1.0);   // gaps stay black
 }"""
 
 MASK_FS = """#version 140
@@ -2231,6 +2848,7 @@ class Composer:
         self.bgp["pat"].value = 0
         self.bgp["div"].value = float(self.BG_DIV)
         self.bgp["rowh"].value = H / 224.0            # EarthBound's 224 scanlines
+        self.bgp["res"].value = (float(W), float(H))  # the skew modes need the screen centre
         self.maskp["res"].value = (W, H)
         self.show["img"].value = 0
         self.show["bgt"].value = 1
@@ -2257,8 +2875,12 @@ class Composer:
             self.mask_va.render(moderngl.TRIANGLE_STRIP)
         return True
 
-    def background(self, pat_tex, amt, mode, amp, freq, speed, tile, cycle, hue, t):
-        """Render the background (small) when it shows at all."""
+    def background(self, pat_tex, amt, mode, amp, freq, speed, tile, cycle, hue, t,
+                   bars=0.0, bars_rows=16.0, bars_ph=0.0, dof=0.0,
+                   wrap=0, crisp=0.0, invert=0, thick=0.0, sat=1.0, pal=None, trav=None):
+        """Render the background (small) when it shows at all. sat =
+        sat_mult(BG SATURATION); pal = a palette's (r, g, b) list or None.
+        trav = the skew modes' scroll so far (None = t * speed, steady)."""
         self.amt = amt if (pat_tex is not None and amt > 0.001) else 0.0
         if not self.amt:
             return
@@ -2271,6 +2893,21 @@ class Composer:
         g["bg_cycle"].value = float(cycle)
         g["bg_hue"].value = float(hue)
         g["t"].value = float(t)
+        g["bg_trav"].value = float(t * speed if trav is None else trav)
+        g["bg_bars"].value = float(bars)
+        g["bg_bars_rows"].value = float(bars_rows)
+        g["bg_bars_ph"].value = float(bars_ph)
+        g["bg_dof"].value = float(dof)
+        g["bg_wrap"].value = int(wrap)
+        g["bg_crisp"].value = float(crisp)
+        g["bg_invert"].value = int(invert)
+        g["bg_thick"].value = float(thick)
+        g["bg_texsize"].value = tuple(float(x) for x in pat_tex.size)
+        g["bg_sat"].value = float(sat)
+        pal = list(pal or [])[:4]
+        g["bg_pal_n"].value = len(pal)
+        if pal:
+            g["bg_pal"].value = [tuple(float(x) for x in c) for c in pal + [pal[-1]] * (4 - len(pal))]
         self.bg_fbo.use()
         self.ctx.disable(moderngl.BLEND)
         pat_tex.use(0)
@@ -2351,8 +2988,10 @@ def main():
     for fb in fbo:
         fb.clear(0, 0, 0, 1)
 
-    vbo = ctx.buffer(reserve=6 * 4 * 60000, dynamic=True)
-    line_va = ctx.vertex_array(line, [(vbo, "2f 1f 3f", "pos", "side", "col")])
+    vbo = ctx.buffer(reserve=LINE_COLS * 4 * LINE_MAX, dynamic=True)
+    line_va = ctx.vertex_array(line, [
+        (ctx.buffer(LINE_CORNERS.tobytes()), "1f 1f", "end", "side"),
+        (vbo, "2f 2f 2f 2f 3f 1f 1f /i", "a", "b", "pa", "nb", "col", "rad", "flags")])
 
     # background pattern tile: one grey texture, re-made when the pattern (and
     # maybe its shape) changes. Tiles come from vis_patterns' sets.
@@ -2367,9 +3006,10 @@ def main():
                 t.release()
             t = ctx.texture((cols, rows), 1, dtype="f1", alignment=1)
             t.repeat_x = t.repeat_y = True
-            t.filter = (moderngl.LINEAR, moderngl.LINEAR)
             pat["tex"] = t
         t.write(data)
+        t.build_mipmaps()               # the blurrier copies DEPTH BLUR reads (cheap, per tile change)
+        t.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
         pat["units"] = units
     sets = vis_patterns.pattern_sets(BG_PATTERNS)
     tile_want = queue.Queue()
@@ -2381,7 +3021,10 @@ def main():
     # keeps the built-ins + the last TILE_KEEP file tiles (memory cap 200M).
     pat_cache = {}
     TILE_KEEP = 16
-    cust = {"t": -99.0, "sig": vis_patterns.custom_sig()}
+    PIC_KEEP = 4                        # pictures held in memory at once (<= 4 MB each)
+    max_tex = int(ctx.info.get("GL_MAX_TEXTURE_SIZE", 2048) or 2048)
+    cust = {"t": -99.0, "sig": vis_patterns.custom_sig(), "pal": vis_palettes.sig()}
+    pals = vis_palettes.as_rgb()        # the palette SLOTS (re-read when /visuals saves them)
 
     def _build_patterns():
         for i, n in enumerate(BG_PATTERNS):
@@ -2398,21 +3041,31 @@ def main():
             try:
                 g, units = vis_patterns.load_tile(folder, slug)
             except Exception as e:
-                tile_failed.add(key)
+                with pat_lock:
+                    tile_failed.add(key)
                 print(f"[visuals] pattern {folder}/{names[key[1]]}: {e}", flush=True)
                 continue
-            files = [k for k in pat_cache if k[0] != 0]
-            for old in files[:max(0, len(files) - TILE_KEEP + 1)]:
-                pat_cache.pop(old, None)
-                tile_asked.discard(old)
-            now_names = sets[key[0]][2]
-            if key[1] >= len(now_names) or now_names[key[1]] != slug:
-                tile_asked.discard(key)       # an upload/delete moved it: ask again
-                continue
-            # image rows run top-down, a texture's bottom-up: flip, so a
-            # skull tile isn't upside down
-            pat_cache[key] = ((g[::-1] * 255).astype("u1").tobytes(),
-                              (g.shape[1], g.shape[0]), units)
+            try:
+                g = fit_texture(g, max_tex)   # a picture bigger than the GPU allows: shrink it
+                # image rows run top-down, a texture's bottom-up: flip, so a
+                # skull tile isn't upside down. Pictures arrive as bytes already.
+                g8 = g if g.dtype == np.uint8 else (g * 255).astype("u1")
+                entry = (g8[::-1].tobytes(), (g.shape[1], g.shape[0]), units)
+                del g, g8
+                pic_set = len(sets) - 1       # PICTURES is always the last set
+                is_pic = key[0] == pic_set
+                with pat_lock:                # the frame loop also prunes pat_cache
+                    for old in cache_evict(pat_cache, TILE_KEEP - (0 if is_pic else 1),
+                                           PIC_KEEP - (1 if is_pic else 0), pic_set):
+                        tile_asked.discard(old)
+                    now_names = sets[key[0]][2]
+                    if key[1] >= len(now_names) or now_names[key[1]] != slug:
+                        tile_asked.discard(key)   # an upload/delete moved it: ask again
+                        continue
+                    pat_cache[key] = entry
+            except Exception as e:            # never let this thread die: no tile would load again
+                print(f"[visuals] pattern {folder}/{slug}: {e}", flush=True)
+    pat_lock = threading.Lock()
     threading.Thread(target=_build_patterns, daemon=True).start()
     comp = Composer(ctx, W, H)
     presence = Presence()
@@ -2421,6 +3074,9 @@ def main():
     LOGOS = LogoBank()
     t0 = time.monotonic()
     bg_clock = 0.0
+    bars_ph = 0.0              # the RASTER BARS' roll (in bars)
+    bg_trav = 0.0              # the newer bend modes' scroll so far (beats push it)
+    lines_ph = 0.0             # the lines' LINES CYCLE hue turn (degrees)
 
     music = Music()
     threading.Thread(target=midi_thread, args=(music,), daemon=True).start()
@@ -2449,6 +3105,7 @@ def main():
     cpu_sum, cpu_max, swap_sum = 0.0, 0.0, 0.0   # frame cost, for the fps log
     jit = []                     # |measured frame time - the refresh step it stands for|
     last = rep_t
+    phase = {}                          # the last frame's time per step (the hitch log)
     cc_hold = None           # a CC 20 pick overrides cycling until CC 20 = 0
     audio = AudioTap()
     aud = {"lvl": 0.0, "beat_t": -99.0, "beat2_t": -99.0, "pub_t": 0.0}
@@ -2459,6 +3116,7 @@ def main():
     tempo, mlfo = Tempo(), ModLFO()
     sctx = SceneCtx(audio, music)
     save_t, saved = 0.0, None
+    saver = StateSaver()
 
     while True:
         for ev in pygame.event.get():
@@ -2515,6 +3173,12 @@ def main():
         raw_dt = now - last               # what really happened (the log)
         dt = min(frame_dt(raw_dt, refresh, vsync), 0.1)
         last = now
+        if raw_dt > 0.09 and frames > 2:
+            # one line per visible hitch, with where the LAST frame's time went
+            # (2026-10-24: the 30 s summary couldn't say what a 500 ms stall was)
+            print(f"[visuals] hitch {time.strftime('%H:%M:%S')} {raw_dt * 1000:.0f} ms: "
+                  + " ".join(f"{k} {v * 1000:.0f}" for k, v in phase.items())
+                  + f" other {(raw_dt - sum(phase.values())) * 1000:.0f}", flush=True)
 
         # audio (the mixer's master, read off skipback's ring). owner
         # 2026-09-29: the first cut was "very jumpy, even at the lowest
@@ -2588,16 +3252,28 @@ def main():
         hue += dh * 0.04
         hue += 0.03 * step                                # slow drift
 
+        kraw = {KNOBS[cc]: v for cc, v in music.knobs.items()}
+        # the lines' own colour (2026-10-24): HUE turns them, CYCLE keeps them
+        # turning (0.5 x knob^2 turns/s, like the background's), on top of COLOUR
+        lines_ph = (lines_ph + dt * 360.0 * 0.5 * (kraw["lines_cycle"] / 127.0) ** 2) % 360.0
         L = Lines()
         LOGOS_KNOB[0] = music.knobs[52]                   # the LOGO knob, for logo/shape4d
         WEIGHT[0] = line_weight(music.knobs[53])
-        scene.draw(L, f, hue + kn["colour"] * 180.0, p)
-        kraw = {KNOBS[cc]: v for cc, v in music.knobs.items()}
+        OLD_LIGHT[0] = scene.old_light
+        lines_g, bg_g = layer_gain(kraw["lines_level"]), layer_gain(kraw["bg_master"])
+        if lines_g > 0:                   # LINES LEVEL 0: nothing to see, so nothing to draw
+            scene.draw(L, f, hue + kn["colour"] * 180.0 + hue_deg(kraw["lines_hue"]) + lines_ph, p)
         mp = mask_params(kraw)
         c_scr = (W / 2.0, H / 2.0)
         fitp = fitter.plan(L.radius(c_scr) if mp["shape"] and mp["fit"] > 0 else 0.0,
                            mp, W, H, dt)
         data = L.array(camera(fitp, mods, W, H))
+        if data is not None:
+            # SATURATION + PALETTE on the stored colours, after the joints are
+            # linked (colour tells lines apart there); identity at their defaults
+            li = vis_palettes.slot_of(kraw["lines_pal"])
+            data[:, 8:11] = recolour(data[:, 8:11], sat_mult(kraw["lines_sat"]),
+                                     None if li is None else pals[li])
 
         # trails: frame-rate independent (a per-60fps-frame value ** frames)
         fr = dt * 60.0
@@ -2619,31 +3295,41 @@ def main():
         fade_va.render(moderngl.TRIANGLE_STRIP)
         # 2) add this frame's lines, additively
         if data is not None:
-            data = data[:60000]
+            data = data[:LINE_MAX]
             vbo.orphan()                  # never wait on last frame's draw
             vbo.write(data.tobytes())
             ctx.enable(moderngl.BLEND)
             ctx.blend_func = moderngl.ONE, moderngl.ONE
-            line_va.render(moderngl.TRIANGLES, vertices=len(data))
+            line_va.render(moderngl.TRIANGLES, vertices=6, instances=len(data))
         # 3) show it: background (small), mask (on change), composite
         # background: rests at black, the music lifts it (Presence)
         bp = bg_params(kraw, H)
         # your CUSTOM uploads / deletes show up within a second, no restart
         if now - cust["t"] > 1.0:
             cust["t"] = now
+            psig = vis_palettes.sig()                 # palettes saved on /visuals
+            if psig != cust["pal"]:
+                cust["pal"] = psig
+                pals = vis_palettes.as_rgb()
             sig = vis_patterns.custom_sig()
             if sig != cust["sig"]:
                 cust["sig"] = sig
-                sets[:] = vis_patterns.pattern_sets(BG_PATTERNS)
-                ci = len(sets) - 1
-                for k_ in [k_ for k_ in pat_cache if k_[0] == ci]:
-                    pat_cache.pop(k_, None)
-                for s_ in (tile_asked, tile_failed):
-                    s_.difference_update({k_ for k_ in s_ if k_[0] == ci})
-                if pat["key"] is not None and pat["key"][0] == ci:
+                new_sets = vis_patterns.pattern_sets(BG_PATTERNS)
+                # CUSTOM and PICTURES (the last two sets) are the ones you change
+                mine = {i for i, st in enumerate(new_sets) if st[1] in (vis_patterns.CUSTOM, vis_patterns.PICTURES)}
+                with pat_lock:                # the tile builder thread writes these too
+                    sets[:] = new_sets
+                    for k_ in [k_ for k_ in pat_cache if k_[0] in mine]:
+                        pat_cache.pop(k_, None)
+                    for s_ in (tile_asked, tile_failed):
+                        s_.difference_update({k_ for k_ in s_ if k_[0] in mine})
+                if pat["key"] is not None and pat["key"][0] in mine:
                     pat["key"] = None         # reload it (it may have been replaced)
-        si = bucket(kraw["bg_set"], sets)
-        key = (si, bucket(kraw["bg_pattern"], sets[si][2])) if sets[si][2] else pat["key"]
+        # (not `si`: that is the SCENE index of the cycle above; reusing it here
+        # made every cycle step jump to scene number "pattern set + 1", so on the
+        # PICTURES set the cycle kept making a fresh ridgeline: 2026-10-24)
+        bset = bucket(kraw["bg_set"], sets)
+        key = (bset, bucket(kraw["bg_pattern"], sets[bset][2])) if sets[bset][2] else pat["key"]
         if key != pat["key"]:
             entry = pat_cache.get(key)
             if entry is not None:               # not built yet = keep the last
@@ -2656,15 +3342,29 @@ def main():
                     music.note_v * math.exp(-(now - music.note_t) * 4.0),
                     audio_k * bg_pulse(music.knobs, a_p, b_p), 0.7 * audio_k * aud["lvl"])
         amt = presence.step(dt, drive, bp["rest"], bp["react"], bp["lfo_hz"])
+        amt *= bg_g                                   # BACKGROUND LEVEL: 0 = off whatever plays
+        bi = vis_palettes.slot_of(kraw["bg_pal"])
         u = pat["units"]
-        comp.background(pat["tex"], amt, bucket(kraw["bg_mode"], BG_MODES),
-                        bp["amp"] * (1.0 + 1.5 * presence.sway), bp["freq"], bp["speed"],
+        bars_dir = -1.0 if bp["bars_rate"] < 0 else 1.0
+        bars_ph = (bars_ph + dt * (bp["bars_rate"] + bars_dir * 2.0 * hit * bp["bars"])) % 1000.0
+        bmode = bucket(kraw["bg_mode"], BG_MODES)
+        bg_trav = (bg_trav + dt * bp["speed"] * (1.0 + BG_SURGE * presence.sway)) % 20000.0
+        comp.background(pat["tex"], amt, bmode,
+                        bp["amp"] * (1.0 + BG_SWAY.get(bmode, 1.5) * presence.sway), bp["freq"], bp["speed"],
                         (bp["scale"], bp["scale"]) if u is None else
                         (u[0] * bp["unit"], u[1] * bp["unit"]),
-                        bp["cycle"], ((hue + kn["colour"] * 180.0) % 360.0) / 360.0,
-                        bg_clock % 3600.0)
+                        bp["cycle"],
+                        ((hue + kn["colour"] * 180.0 + hue_deg(kraw["bg_hue"])) % 360.0) / 360.0,
+                        bg_clock % 3600.0, bp["bars"], bp["bars_rows"], bars_ph, bp["dof"],
+                        bp["wrap"], bp["crisp"], bp["invert"], bp["thick"],
+                        sat_mult(kraw["bg_sat"]),
+                        None if bi is None else pals[bi], bg_trav)
         comp.set_mask(mp["shape"], mp["size"], mp["soft"], mp["pos"])
-        comp.show_frame(tex[dst], flash, 2.0 ** (kn["bright"] * 1.5) * mods["glow"])
+        # LINES LEVEL scales the lines layer, trails included (0 = background
+        # only). The snare flash lights the whole picture, so it follows the
+        # brighter layer: both off = black, flash included (a projector blackout)
+        comp.show_frame(tex[dst], flash * max(lines_g, bg_g),
+                        2.0 ** (kn["bright"] * 1.5) * mods["glow"] * lines_g)
         if state["shot"]:
             state["shot"] = False
             save_shot(ctx, W, H)
@@ -2677,16 +3377,21 @@ def main():
         swap_sum += t_swap - t_cpu
         cur = dst
 
-        # knob positions + scene -> disk (at most every 2 s, only on change)
+        # knob positions + scene -> disk (at most every 2 s, only on change),
+        # written by the saver's thread: a stalled SD card can't freeze a frame
         snap = (tuple(sorted(music.knobs.items())), name, cycling)
         if snap != saved and now - save_t > 2.0:
-            save_state(music.knobs, name, cycling)
+            saver.put(music.knobs, name, cycling)
             saved, save_t = snap, now
+        t_save = time.monotonic()
 
         if vsync:
             clock.tick()                  # the swap waits for the refresh
         else:
             clock.tick(fps)
+        t_tick = time.monotonic()
+        phase = {"frame": t_cpu - now, "flip": t_swap - t_cpu, "save": t_save - t_swap,
+                 "tick": t_tick - t_save}
         frames += 1
         late += raw_dt > 0.05             # a frame 50%+ late = a visible hitch
         worst = max(worst, raw_dt)

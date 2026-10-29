@@ -27,6 +27,8 @@ const R = {
   pct: v => Math.round(v / 1.27) + '%',
   off: v => v <= 0 ? 'off' : Math.round(v / 1.27) + '%',
   mid: v => (v === 64 ? '0' : (v > 64 ? '+' : '') + Math.round((v - 64) / 0.64)),
+  satL: v => v === 64 ? 'as drawn' : v <= 0 ? 'white' : '×' + (v / 64).toFixed(2),
+  satB: v => v === 64 ? 'as before' : v <= 0 ? 'grey' : '×' + (v / 64).toFixed(2),
 };
 
 // The knob table: key -> [cc, label, card group, hint, readout]. Group null =
@@ -44,7 +46,7 @@ const KNOB = {
   band2_lo:    [59, 'BACKGROUND BEAT BAND LOW', null, '', null],
   band2_hi:    [60, 'BACKGROUND BEAT BAND HIGH', null, '', null],
   band2_on:    [62, 'BACKGROUND OWN BAND', null, '', null],
-  size:        [55, 'SIZE', 'lines', 'the whole picture, bigger or smaller', R.size],
+  size:        [55, 'SIZE', 'lines', 'size of the lines (the background is not affected)', R.size],
   angle:       [56, 'ANGLE', 'lines', 'turn the whole picture', R.angle],
   speed:       [21, 'SPEED', 'lines', 'how fast the scene moves', R.speed],
   beat:        [26, 'BEAT', 'lines', 'the scene\'s own built-in kick reaction', R.mid],
@@ -72,6 +74,24 @@ const KNOB = {
   bg_speed:    [41, 'WAVE SPEED', 'bg-bend', 'how fast the waves travel', R.pct],
   bg_scale:    [42, 'SCALE', 'bg-look', 'tile size', R.mid],
   bg_cycle:    [43, 'HUE CYCLE', 'bg-look', 'how fast its colours turn (0 = still)', R.off],
+  bg_bars:     [80, 'RASTER BARS', 'bg-look', 'copper bars: bands of colour down the screen (0 = off)', R.off],
+  bg_bars_size: [81, 'BAR SIZE', 'bg-look', 'how tall each bar is', R.mid],
+  bg_bars_speed: [82, 'BAR ROLL', 'bg-look', 'middle = still; either side rolls them; beats shove them', R.mid],
+  bg_dof:      [83, 'DEPTH BLUR', 'bg-look', 'blur the background behind the sharp lines; the skew modes blur what is far away', R.off],
+  bg_wrap:     [84, 'PICTURE REPEAT', null, '', null],
+  bg_crisp:    [85, 'CRISP', 'bg-pic', 'cut to pure black and white at this level (0 = the picture\'s own greys)', R.off],
+  bg_invert:   [86, 'INVERT', null, '', null],
+  bg_thick:    [87, 'THICKEN', 'bg-pic', 'fatten thin lines (with CRISP 0 it cuts at the middle)', R.off],
+  // LAYERS + COLOUR (2026-10-24): every look a CC, for a show that runs itself
+  lines_level: [88, 'LINES LEVEL', 'layer', 'the lines and their trails (0 = off: just the background)', R.off],
+  bg_master:   [89, 'BACKGROUND LEVEL', 'layer', 'the whole background, over its own LEVEL / REACT (0 = off)', R.off],
+  lines_hue:   [90, 'HUE', 'lines-col', 'turn the lines round the colour wheel (on top of COLOUR)', R.angle],
+  lines_sat:   [91, 'SATURATION', 'lines-col', '0 = white lines, middle = as drawn, up = more vivid', R.satL],
+  lines_cycle: [92, 'HUE CYCLE', 'lines-col', 'the lines\' colours turn by themselves (0 = still)', R.off],
+  bg_hue:      [93, 'HUE', 'bg-col', 'turn the background round the colour wheel', R.angle],
+  bg_sat:      [94, 'SATURATION', 'bg-col', '0 = grey, middle = as it was, up = more vivid', R.satB],
+  lines_pal:   [95, 'LINES PALETTE', null, '', null],
+  bg_pal:      [96, 'BACKGROUND PALETTE', null, '', null],
   mask_shape:  [44, 'PEEPHOLE SHAPE', null, '', null],
   mask_size:   [45, 'SIZE', 'mask', 'middle = about the screen height', R.mid],
   mask_soft:   [46, 'SOFT', 'mask', 'hard edge .. soft vignette', R.pct],
@@ -84,7 +104,8 @@ const KNOB = {
 const SCENE_CC = 20;
 const GROUP_EL = { aud: 'aud-knobs', lines: 'lines-knobs', trails: 'trails-knobs', lfo: 'lfo-knobs',
                    'bg-show': 'bg-show-knobs', 'bg-bend': 'bg-bend-knobs', 'bg-look': 'bg-look-knobs',
-                   mask: 'mask-knobs', 'mask-fit': 'mask-fit-knobs' };
+                   mask: 'mask-knobs', 'mask-fit': 'mask-fit-knobs', 'bg-pic': 'bg-pic-knobs',
+                   layer: 'layer-knobs', 'lines-col': 'lines-col-knobs', 'bg-col': 'bg-col-knobs' };
 const MOD_TARGETS = ['size', 'spin', 'glow', 'sway', 'trail'];
 // the beat band(s): 1 = the shapes' (and the background's, unless it has its
 // OWN BAND), 2 = the background's own. Dragging the spectrum edits dragBand.
@@ -96,17 +117,27 @@ const own2 = () => (knobs.band2_on ?? 0) >= 64;
 const DEFAULTS = { attack: 12, band_lo: 8, band_hi: 38, band2_lo: 8, band2_hi: 38, band2_on: 0, bg_pattern: 0, bg_mode: 0, bg_level: 0, bg_lfo: 0,
                    mask_shape: 0, mask_soft: 24, mask_fit: 127, bg_set: 0, mask_room: 56, logo: 0, gate: 56,
                    lfo_sync: 0, size_react: 0, size_lfo: 0, spin_react: 0, spin_lfo: 0, glow_react: 0,
-                   glow_lfo: 0, sway_react: 0, sway_lfo: 0, trail_react: 0, trail_lfo: 0 };
+                   glow_lfo: 0, sway_react: 0, sway_lfo: 0, trail_react: 0, trail_lfo: 0,
+                   bg_bars: 0, bg_dof: 0, bg_wrap: 0, bg_crisp: 0, bg_invert: 0, bg_thick: 0,
+                   lines_level: 127, bg_master: 127, lines_cycle: 0, lines_pal: 0, bg_pal: 0 };
 // BACKGROUND + PEEPHOLE + LFO SYNC button lists. MUST match orc_visuals.py
 // BG_PATTERNS / BG_MODES / MASK_SHAPES / LFO_SYNC (the renderer splits 0..127
 // into equal ranges; a button sends its range's middle). The suite checks.
 const BG_PATTERNS = ['checker', 'stripes', 'dots', 'truchet', 'waves', 'diamonds',
                      'rings', 'plaid', 'bricks', 'zigzag'];
-const BG_MODES = ['wave', 'interlace', 'squeeze', 'two layers', 'wave + squeeze'];
+const BG_MODES = ['wave', 'interlace', 'squeeze', 'two layers', 'wave + squeeze',
+                  'skew walls', 'skew floor', 'spin', 'stretch', 'floor + skyline'];
 const MASK_SHAPES = ['off', 'circle', 'rounded', 'hexagon', 'diamond', 'triangle', 'star'];
 const LFO_SYNC = ['free', '4 bars', '2 bars', '1 bar', '1/2 bar', '1/4 bar'];
+const BG_WRAPS = ['repeat', 'mirror', 'once'];
+const BG_INVERTS = ['normal', 'inverted'];
+// PALETTE knobs: off + one range per slot (= vis_palettes.SLOTS; the suite checks)
+const PAL_SLOTS = 8;
+const PAL_NAMES = ['off'].concat(Array.from({ length: PAL_SLOTS }, (_, i) => String(i + 1)));
 const PICKS = [[35, 'bg_mode', BG_MODES, 'bg-modes'], [44, 'mask_shape', MASK_SHAPES, 'mask-shapes'],
-               [58, 'lfo_sync', LFO_SYNC, 'lfo-sync']];
+               [58, 'lfo_sync', LFO_SYNC, 'lfo-sync'], [84, 'bg_wrap', BG_WRAPS, 'bg-wraps'],
+               [86, 'bg_invert', BG_INVERTS, 'bg-inverts'],
+               [95, 'lines_pal', PAL_NAMES, 'lines-pals'], [96, 'bg_pal', PAL_NAMES, 'bg-pals']];
 // pattern SETS (built-in / hero / monster 1..) come from /api/visuals/patterns;
 // SET = CC 50, PATTERN = CC 34 over the chosen set's names
 let patSets = null, patShown = null;
@@ -168,6 +199,7 @@ function build(d) {
     document.getElementById(el).innerHTML = names.map((n, i) =>
       `<button class="flag" data-i="${i}" onclick="pick(${cc}, '${key}', ${i}, ${names.length})">${n.toUpperCase()}</button>`).join('');
   document.getElementById('midi-list').innerHTML = midiList();
+  palLoad();
   built = true;
   showAll();
 }
@@ -261,14 +293,14 @@ function showPatterns() {
   if (!patSets) return;
   const si = bucketOf(knobs.bg_set ?? 0, patSets.length), set = patSets[si];
   const box = document.getElementById('bg-patterns');
-  const custom = set.folder === 'custom';
+  const custom = set.folder === 'custom', pics = set.folder === 'pictures';
   if (patShown !== si) {
     patShown = si;
     box.innerHTML = set.names.length ? set.names.map((n, i) => set.folder
       ? `<button class="pthumb" data-i="${i}" title="${esc(n)}" onclick="pick(34, 'bg_pattern', ${i}, ${set.names.length})"
-           style="background-image:url('/api/visuals/pattern/${set.folder}/${encodeURIComponent(n)}.png')"></button>`
+           style="background-image:url('/api/visuals/pattern/${set.folder}/${encodeURIComponent(n)}.png')${pics ? ';background-size:contain;background-repeat:no-repeat;background-position:center' : ''}"></button>`
       : `<button class="flag" data-i="${i}" onclick="pick(34, 'bg_pattern', ${i}, ${set.names.length})">${esc(n.toUpperCase())}</button>`).join('')
-      : `<span style="font-size:10px;color:var(--muted)">no patterns of your own yet: upload one below</span>`;
+      : `<span style="font-size:10px;color:var(--muted)">no ${pics ? 'pictures' : 'patterns of your own'} yet: upload one below</span>`;
     box.querySelectorAll('button').forEach(b => { b.disabled = !visCh; });
   }
   const cur = set.names.length ? bucketOf(knobs.bg_pattern ?? 0, set.names.length) : -1;
@@ -278,6 +310,37 @@ function showPatterns() {
   if (nm) nm.textContent = set.names[cur] || '';
   document.getElementById('pat-custom').style.display = custom ? '' : 'none';
   document.getElementById('pat-del').style.display = custom && cur >= 0 ? '' : 'none';
+  document.getElementById('pat-pictures').style.display = pics ? '' : 'none';
+  document.getElementById('pic-del').style.display = pics && cur >= 0 ? '' : 'none';
+}
+
+// your own art / images: the PICTURES set (always the last set)
+async function picUpload() {
+  const f = document.getElementById('pic-file').files[0], m = document.getElementById('pic-msg');
+  if (!f) { m.textContent = 'pick an image first'; return; }
+  if (f.size > 16 * 1024 * 1024) { m.innerHTML = '<span style="color:var(--danger)">too big (16 MB max)</span>'; return; }
+  const fd = new FormData(); fd.append('file', f);
+  m.textContent = 'uploading + converting...';
+  try {
+    const d = await fetch('/api/visuals/pictures', { method: 'POST', body: fd }).then(r => r.json());
+    if (!d.ok) { m.innerHTML = `<span style="color:var(--danger)">${esc(d.error || 'failed')}</span>`; return; }
+    m.innerHTML = `added <b>${esc(d.name)}</b>` + (d.warning ? ` <span style="color:var(--warn,#fbbf24)">· ${esc(d.warning)}</span>` : '');
+    await patLoad();
+    const set = patSets.find(st => st.folder === 'pictures') || { names: [] }, i = set.names.indexOf(d.name);
+    if (i >= 0 && visCh) pick(34, 'bg_pattern', i, set.names.length);   // show it right away
+  } catch (e) { m.textContent = 'no answer from the Pi'; }
+}
+
+async function picDelete() {
+  const si = bucketOf(knobs.bg_set ?? 0, patSets.length), set = patSets[si];
+  const name = set.names[bucketOf(knobs.bg_pattern ?? 0, set.names.length)];
+  if (set.folder !== 'pictures' || !name || !confirm(`Delete your picture "${name}"?`)) return;
+  const m = document.getElementById('pic-msg');
+  try {
+    const d = await fetch(`/api/visuals/pattern/pictures/${encodeURIComponent(name)}.png`, { method: 'DELETE' }).then(r => r.json());
+    m.innerHTML = d.ok ? `deleted ${esc(name)}` : `<span style="color:var(--danger)">${esc(d.error || 'failed')}</span>`;
+  } catch (e) { m.textContent = 'no answer from the Pi'; }
+  await patLoad();
 }
 
 async function patUpload() {
@@ -290,7 +353,7 @@ async function patUpload() {
     if (!d.ok) { m.innerHTML = `<span style="color:var(--danger)">${esc(d.error || 'failed')}</span>`; return; }
     m.innerHTML = `added <b>${esc(d.name)}</b>` + (d.warning ? ` <span style="color:var(--warn,#fbbf24)">· ${esc(d.warning)}</span>` : '');
     await patLoad();
-    const set = patSets[patSets.length - 1], i = set.names.indexOf(d.name);
+    const set = patSets.find(st => st.folder === 'custom') || { names: [] }, i = set.names.indexOf(d.name);
     if (i >= 0 && visCh) pick(34, 'bg_pattern', i, set.names.length);   // show it right away
   } catch (e) { m.textContent = 'no answer from the Pi'; }
 }
@@ -370,7 +433,9 @@ async function visLoad() {
     document.querySelectorAll('.card input[type=range]').forEach(i => { i.disabled = !visCh; });
     // picker buttons too: unbound, a click would light up, send nothing and snap back
     document.querySelectorAll('#bg-sets button, #bg-patterns button, #bg-modes button, #mask-shapes button, '
-                              + '#lfo-sync button, #logo-list button').forEach(b => { b.disabled = !visCh; });
+                              + '#lfo-sync button, #logo-list button, #bg-wraps button, #bg-inverts button, '
+                              + '#lines-pals button, #bg-pals button')
+      .forEach(b => { b.disabled = !visCh; });
     const b = document.getElementById('vis-bind');
     const sig = visCh + '|' + d.free.join(',');      // redraw only on change, or
     if (b.dataset.sig !== sig) {                     // the picker resets under you
@@ -801,6 +866,119 @@ async function logoDelete() {
 
 document.getElementById('logo-box').addEventListener('toggle', () => { logoShown = null; logoShow(); });
 drawTicks();
+// ── PALETTES (2026-10-24): 8 slots of 1-4 colours, set up here, picked live
+// by LINES PALETTE (CC 95) / BACKGROUND PALETTE (CC 96). Saved to the Pi on
+// every change (the renderer re-reads them within a second).
+let pals = null, palMax = 4;
+const palTimers = {};
+const palGrad = p => p.length === 1 ? p[0] : `linear-gradient(90deg, ${p.concat([p[0]]).join(', ')})`;
+
+async function palLoad() {
+  try {
+    const d = await fetch('/api/visuals/palettes').then(r => r.json());
+    if (!d.ok) return;
+    pals = d.slots; palMax = d.max_colours || 4;
+    palShow();
+  } catch (e) { /* the editor just stays empty */ }
+}
+
+function palShow() {
+  if (!pals) return;
+  const html = pals.map((p, i) => `
+    <div class="vrow" style="grid-template-columns:auto 1fr auto">
+      <span class="vl">${i + 1}</span>
+      <span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+        ${p.map((c, j) => `<input type="color" value="${c}" title="colour ${j + 1}" data-pi="${i}" data-pj="${j}"
+             oninput="palSet(${i}, ${j}, this.value, this)" style="width:28px;height:22px;padding:0;border:0;background:none">`).join('')}
+        <button class="flag" onclick="palAdd(${i})" ${p.length >= palMax ? 'disabled' : ''} title="add a colour">+</button>
+        <button class="flag" onclick="palDel(${i})" ${p.length <= 1 ? 'disabled' : ''} title="drop the last colour">−</button>
+      </span>
+      <span class="pal-sw" data-pi="${i}" style="width:64px;height:14px;border-radius:3px;background:${palGrad(p)}"></span>
+    </div>`).join('');
+  document.querySelectorAll('.pal-edit').forEach(el => { el.innerHTML = html; });
+  palSwatches();
+}
+
+function palMsg(html) { document.querySelectorAll('.pal-msg').forEach(el => { el.innerHTML = html; }); }
+
+// the LINES / BACKGROUND PALETTE buttons show a swatch of their palette
+// (inside the button, so the lit "on" button still reads)
+function palSwatches() {
+  if (!pals) return;
+  for (const el of ['lines-pals', 'bg-pals'])
+    document.querySelectorAll(`#${el} .flag`).forEach(b => {
+      const i = +b.dataset.i;
+      if (i > 0 && pals[i - 1])
+        b.innerHTML = `${i} <span style="display:inline-block;width:22px;height:8px;border-radius:2px;`
+          + `vertical-align:middle;background:${palGrad(pals[i - 1])}"></span>`;
+    });
+}
+
+function palSet(i, j, c, from) {
+  pals[i][j] = c;
+  // the same colour in the other copies of the editor (not a rebuild: that
+  // would drop the picker being dragged)
+  document.querySelectorAll(`.pal-edit input[data-pi="${i}"][data-pj="${j}"]`).forEach(el => {
+    if (el !== from) el.value = c;
+  });
+  palChanged(i);
+}
+function palAdd(i) { pals[i].push(pals[i][pals[i].length - 1]); palShow(); palSave(i); }
+function palDel(i) { pals[i].pop(); palShow(); palSave(i); }
+function palChanged(i) {
+  document.querySelectorAll(`.pal-sw[data-pi="${i}"]`).forEach(sw => { sw.style.background = palGrad(pals[i]); });
+  palSwatches();
+  palSave(i);
+}
+
+// saves ONE palette (the server keeps the others as they are on disk), so two
+// open pages each only change the slot they edit; the reply = every slot, so
+// edits made elsewhere show up here too
+function palSave(i) {
+  clearTimeout(palTimers[i]);
+  palTimers[i] = setTimeout(async () => {
+    try {
+      const d = await fetch('/api/visuals/palettes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot: i, colours: pals[i] }) }).then(r => r.json());
+      if (!d.ok) { palMsg(`<span style="color:var(--danger)">${esc(d.error || 'failed')}</span>`); return; }
+      palMsg('saved');
+      const others = d.slots.some((p, k) => k !== i && JSON.stringify(p) !== JSON.stringify(pals[k]));
+      d.slots[i] = pals[i];                     // keep what is being edited here
+      pals = d.slots;
+      if (others) palShow(); else palSwatches();
+    } catch (e) { palMsg('no answer from the Pi'); }
+  }, 400);
+}
+
+async function palReset() {
+  if (!confirm('Put all 8 palettes back to the defaults?')) return;
+  const d = await fetch('/api/visuals/palettes').then(r => r.json());
+  pals = d.defaults; palShow();
+  const r = await fetch('/api/visuals/palettes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slots: pals }) }).then(r => r.json());
+  palMsg(r.ok ? 'defaults saved' : `<span style="color:var(--danger)">${esc(r.error || 'failed')}</span>`);
+}
+
+// ── TABS (2026-10-24): PLAY, LINES, BACKGROUND, LISTEN, SETUP. Every card is
+// always in the page (only hidden), so nothing the script looks up goes
+// missing; the tab is remembered per browser and can be linked (#setup).
+const TABS = ['play', 'lines', 'background', 'peephole', 'listen', 'setup'];
+function showTab(name) {
+  if (!TABS.includes(name)) name = 'play';
+  document.querySelectorAll('.vtab').forEach(el => el.classList.toggle('on', el.dataset.tab === name));
+  document.querySelectorAll('#vtabs .flag').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  try { localStorage.setItem('orc1-visuals-tab', name); } catch (e) { /* private window: fine */ }
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  logoShown = null;                         // the logo preview draws at its real width once shown
+  if (typeof logoShow === 'function' && logoNames.length) logoShow();
+}
+(() => {
+  let t = location.hash.slice(1);
+  if (!TABS.includes(t)) { try { t = localStorage.getItem('orc1-visuals-tab'); } catch (e) { t = null; } }
+  showTab(t);
+})();
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+
 visLoad();
 setInterval(visLoad, 2000);
 logoLoad();

@@ -38,6 +38,7 @@ _test_surface.py. The brain calls poll() about once a second from a daemon threa
 
 import json
 import os
+import threading
 
 import orc1_padmap
 
@@ -52,6 +53,25 @@ class SurfaceLink:
         self.armed_path = armed_path
         self.links = {}             # profile name -> {"port", "ident", "out", "sig", "ch", "show"}
         self._said = set()
+        # poll() (the link thread) and paint_pad() (a hold light, the tap blink) share one port
+        self._send_lock = threading.RLock()
+        self.painted = 0            # +1 per full colour send: a blinker re-sends what it showed
+
+    def paint_pad(self, name, pad, rgb):
+        """Set ONE pad's colour on profile `name`'s Fire right now (0A, count 1): a grab pad lit while held, the tap
+        pad's blink. rgb = (r, g, b) 0-7. False if that Fire is not linked. Never raises."""
+        with self._send_lock:
+            link = self.links.get(name)
+            if not link or link.get("out") is None:
+                return False
+            try:
+                r, g, b = (max(0, min(7, int(v))) for v in rgb)
+                link["out"].send(self.mido.Message(
+                    "sysex", data=orc1_padmap.ORC_HDR + [0x0A, int(pad) & 0x3F, 1, r, g, b]))
+                return True
+            except Exception as e:
+                self._say_once(("paint", name, type(e).__name__), f"{name}: cannot paint pad {pad} ({e})")
+                return False
 
     def _armed(self):
         try:
@@ -108,6 +128,10 @@ class SurfaceLink:
                 link["show"] = True
 
     def poll(self):
+        with self._send_lock:
+            self._poll()
+
+    def _poll(self):
         try:
             outs = list(self.mido.get_output_names())
         except Exception as e:
@@ -164,6 +188,7 @@ class SurfaceLink:
                     link["out"] = self.mido.open_output(port)
                     link.update(port=port, ident=ident)
                 self._send_all(link, frames)
+                self.painted += 1
                 link.update(sig=sig, ch=ch, show=False)
                 if ident is not None:
                     self._set_armed(key, ch)
@@ -174,3 +199,81 @@ class SurfaceLink:
                 self._say_once(("send", name, type(e).__name__), f"{name}: cannot reach {port} ({e}); will retry")
                 self._close(link)
                 link.update(sig=None)
+
+
+# -- TAP TEMPO pad blink (2026-10-19) -------------------------------------------------
+# owner: "can we get a blinking tap tempo pad for the clock?". Any surface pad whose action
+# is tap tempo (orc1_padmap.TAP_ACTION) blinks the ORC clock's beat. Phase-locked to the
+# clock's own beat boundary (ArpEngine.beat_phase: `since` resets on the real pulse), the
+# rule the Mixtrack metronome LED learned: never free-run a timer off a BPM estimate.
+#   ORC on its own clock (taps set it): rest = the pad's colour, dim; each beat = the
+#     colour at full; beat 1 of the bar = white.
+#   ORC following an OUTSIDE clock (the Fire's clock out, a DIN master): the same blink in
+#     GREY, because a tap does nothing then (the outside clock sets the tempo).
+#   No clock running: the dim rest colour, steady.
+# Only sends when a pad's shown colour CHANGES (2 small SysEx per beat), and nothing at all
+# when no profile has a tap pad.
+
+FLASH_S = 0.09
+DEFAULT_TAP_RGB = (0, 7, 0)
+
+
+def _dim(rgb):
+    return tuple((max(1, v // 3) if v else 0) for v in rgb)
+
+
+def tap_colour(base, flash, downbeat, external):
+    """PURE: the (r, g, b) a tap pad shows. base = its configured colour."""
+    if external:
+        return (6, 6, 6) if flash and downbeat else ((3, 3, 3) if flash else (1, 1, 1))
+    if flash:
+        return (7, 7, 7) if downbeat else tuple(base)
+    return _dim(base)
+
+
+class TapBlinker:
+    def __init__(self, link, surfaces):
+        """link: a SurfaceLink (paint_pad, painted); surfaces() -> [(name, device)] (PadMap.surfaces)."""
+        self.link, self.surfaces = link, surfaces
+        self._pads = []             # [(name, pad, base rgb)], refreshed by refresh()
+        self._last_since = None
+        self._flash_until = 0.0
+        self._downbeat = False
+        self._shown = {}            # (name, pad) -> rgb last sent
+        self._painted = None
+
+    def refresh(self):
+        """Re-read which pads are tap pads (call ~2x a second, not every tick)."""
+        pads = []
+        for name, dev in self.surfaces():
+            for pad in orc1_padmap.tap_pads(dev):
+                c = (dev["pads"].get(f"note:{pad}") or {}).get("color")
+                pads.append((name, pad, orc1_padmap.COLOR_RGB.get(c, DEFAULT_TAP_RGB)))
+        self._pads = pads
+        return bool(pads)
+
+    def tick(self, now, beat, bar, external):
+        """now = monotonic s; beat = (since_beat, beat_s) or None (no clock); bar = (since_bar, bar_s) or None;
+        external = the ORC is following an outside clock."""
+        if not self._pads:
+            return
+        if self.link.painted != self._painted:          # a full repaint overwrote what we showed
+            self._painted = self.link.painted
+            self._shown.clear()
+        if beat is None:
+            self._last_since = None
+            self._flash_until = 0.0
+        else:
+            since, beat_s = beat
+            if self._last_since is None or since < self._last_since - 1e-3:
+                # a NEW beat (the phase wrapped). Beat 1 = the bar line is under half a beat ago.
+                if self._last_since is not None:
+                    self._flash_until = now + FLASH_S
+                    self._downbeat = bool(bar and beat_s > 0 and bar[0] < 0.5 * beat_s)
+            self._last_since = since
+        flash = now < self._flash_until
+        for name, pad, base in self._pads:
+            rgb = tap_colour(base, flash, self._downbeat, external)
+            if self._shown.get((name, pad)) != rgb:
+                if self.link.paint_pad(name, pad, rgb):
+                    self._shown[(name, pad)] = rgb

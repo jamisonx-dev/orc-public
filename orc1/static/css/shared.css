@@ -1,5 +1,6 @@
 /* ORC-1 · shared.css — design system tokens + all component classes
-   Implements: ORC-1 Design System (standalone).html
+   Implements: the ORC-1 design system (original standalone mock-up: archived
+   in the sandbox, _archive/root_strays_20261025/, not part of this repo)
    Phase 1 of the web reorg — replaces main.css as the base stylesheet.
    Per-page CSS files add layout-only overrides on top of this. */
 
@@ -162,6 +163,25 @@ body::after {
 .dot.live  { background: var(--live); box-shadow: 0 0 10px var(--live-glow); }
 .dot.stale { background: var(--warn); box-shadow: none; }
 .dot.dead  { background: var(--danger); box-shadow: none; }
+
+/* Lost-contact banner (shared.js watchdog, 2026-10-28): shown when /state has
+   not answered for 5 s, so dead presses are never silent. */
+.orc-lost {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1001;
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  background: var(--danger);
+  color: var(--bright);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px;
+  letter-spacing: .06em;
+  text-align: center;
+}
+.orc-lost.show { display: block; }
+.orc-lost.back { background: var(--live); color: var(--bg); }
 
 /* ─── SECTION LABEL ───────────────────────────────────────── */
 .section-lbl {

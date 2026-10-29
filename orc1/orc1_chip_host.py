@@ -90,16 +90,33 @@ class ChipHost:
         # -- Chip patch restore (auto-remember-last) ----------------------------
         # set_cc is idempotent per voice. CC13 (master) + coupling 72/73/76 are
         # skipped (bus-owned / ephemeral join) -- see S._CHIP_PERSIST_SKIP.
+        # Engine-wide CCs are applied ONCE from the "_engine" key. An old file
+        # with them under voices is migrated first (S._chip_params_migrate keeps
+        # the value the old replay ended on = the last voice in file order, so
+        # nothing audible changes) and written back in the new shape right here,
+        # before JACK starts, so /chip and scene capture see "_engine" at once.
         _cn = 0
-        for _voice, _ccs in S._load_chip_params().items():
+        _chip_raw = S._load_chip_params()
+        _chip_saved, _dropped = S._chip_params_migrate(_chip_raw)
+        if _chip_saved != _chip_raw:
+            try:
+                S._write_chip_params(_chip_saved)
+                print(f"[chip-host] chip params migrated to the _engine shape; kept "
+                      f"{_chip_saved.get(S._CHIP_ENGINE_KEY)}, dropped (voice, cc, "
+                      f"value) {_dropped}", flush=True)
+            except Exception as e:
+                print(f"[chip-host] chip params migration not written: {e}", flush=True)
+        for _voice, _ccs in _chip_saved.items():
             if not isinstance(_ccs, dict):
                 continue
+            _apply_v = (S._CHIP_ENGINE_APPLY_VOICE
+                        if _voice == S._CHIP_ENGINE_KEY else _voice)
             for _cc, _val in _ccs.items():
                 try:
                     _cc = int(_cc)
                     if _cc in S._CHIP_PERSIST_SKIP:
                         continue
-                    self.chip.set_cc(_voice, _cc, int(_val))
+                    self.chip.set_cc(_apply_v, _cc, int(_val))
                     _cn += 1
                 except Exception:
                     pass
@@ -219,7 +236,10 @@ class ChipHost:
                     self._bus_levels_dirty = True
                 elif cc not in S._CHIP_PERSIST_SKIP:
                     # Patch persistence; coupling 72/73/76 stay out (ephemeral join).
-                    self._chip_param_pending.setdefault(voice, {})[cc] = val
+                    # Engine-wide CCs (ADSR / filter / octave / AA / ring mod) are
+                    # ONE value whichever voice they came in on -> one key.
+                    _pk = S._CHIP_ENGINE_KEY if S._chip_cc_is_engine(voice, cc) else voice
+                    self._chip_param_pending.setdefault(_pk, {})[cc] = val
                     self._chip_params_dirty = True
                 # (The old synth auto-enabled stereo_mode when CC76 spread turned
                 #  on; here get_p1p2_stereo carries the spread directly, so there is

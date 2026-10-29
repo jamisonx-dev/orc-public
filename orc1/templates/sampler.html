@@ -23,25 +23,6 @@
     </div>
     <div id="oneshot-slots"></div>
   </div>
-
-  <div class="card blue" id="skipback-card">
-    <div class="card-label"><span>SKIPBACK · TRACK 0 INPUT</span>
-      <button class="rescan-btn" onclick="loadSkipback()">↻ REFRESH</button>
-    </div>
-    <div class="flags" style="margin-bottom:8px">
-      <button class="flag" onclick="skipbackPreset('l12')">L12 MASTER</button>
-    </div>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:10px">
-      <span style="color:var(--label)">L</span>
-      <select id="sb-l" class="orc-select"></select>
-      <span style="color:var(--label)">R</span>
-      <select id="sb-r" class="orc-select"></select>
-    </div>
-    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-      <button class="flag accent" onclick="applySkipback()">APPLY</button>
-      <span id="sb-status" style="font-size:9px;color:var(--muted)"></span>
-    </div>
-  </div>
 {% endblock %}
 
 {% block page_js %}<script src="/static/js/sampler.js"></script>{% endblock %}

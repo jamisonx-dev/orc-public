@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import orc1_kikpad as K
 
-EXPECTED = 118
+EXPECTED = 84
 passed = failed = 0
 
 
@@ -62,7 +62,7 @@ class Engine:
         self.save_all_result = True
 
     def __getattr__(self, fn):
-        if not fn.startswith(("sampler_", "skipback_", "module_cc", "visuals_")):
+        if not fn.startswith(("sampler_", "skipback_")):
             raise AttributeError(fn)
 
         def f(*a):
@@ -80,13 +80,10 @@ HOME = tempfile.mkdtemp(prefix="kp_surface_")
 NOW = [1000.0]
 
 
-VIS_AUDIO = os.path.join(HOME, "vis_audio.json")
-
-
 def make(home=HOME):
     e = Engine()
     s = K.KikpadSurface(e, home=home, clock=lambda: NOW[0], wall=lambda: NOW[0],
-                        log=lambda m: None, vis_audio=VIS_AUDIO, n_sets=5)
+                        log=lambda m: None)
     outs = []
 
     def opener(name):
@@ -348,42 +345,23 @@ try:
     s.handle(Msg("sysex", data=(1, 2, 3)))
     check("unknown message types are ignored", True)
 
-    # ==== VISUALS page ===========================================================
-    # -- the tables must be the renderer's own (parsed from daw/orc_visuals.py) ----
-    vsrc = open(os.path.join(HERE, "daw", "orc_visuals.py"), encoding="utf-8").read()
-    vtree = ast.parse(vsrc)
-    r_knobs = r_scenes = r_scene_cc = None
-    for node in vtree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
-            nm = node.targets[0].id
-            if nm == "KNOBS":
-                r_knobs = ast.literal_eval(node.value)
-            elif nm == "SCENE_CC":
-                r_scene_cc = ast.literal_eval(node.value)
-            elif nm == "SCENES":
-                r_scenes = [k.value for k in node.value.keys]
-            elif nm == "KNOB_DEFAULT":                # has a {cc: 0 for cc in range(..)} splat
-                r_kdef = eval(compile(ast.Expression(node.value), "KNOB_DEFAULT", "eval"),
-                              {"__builtins__": {}, "range": range})
-    check("VIS_KNOBS = the renderer's KNOBS (name -> CC)",
-          r_knobs is not None and K.VIS_KNOBS == {v: k for k, v in r_knobs.items()})
-    fresh_knobs = make()[0].vis["knobs"]
-    check("VIS_DEFAULT = the renderer's KNOB_DEFAULT (by name), and a fresh surface starts there "
-          "(not 64: a first nudge must not jump an off MOVEMENT knob to half)",
-          K.VIS_DEFAULT == {r_knobs[cc]: v for cc, v in r_kdef.items()}
-          and fresh_knobs == {n: r_kdef.get(K.VIS_KNOBS[n], 64) for n in K.VIS_KNOBS})
-    check("scene CC = the renderer's SCENE_CC", K.VIS_SCENE_CC == r_scene_cc)
-    check("VIS_SCENES = the renderer's SCENES, in order", list(K.VIS_SCENES) == r_scenes)
-    n = len(K.VIS_SCENES)
-    check("scene_value(i) lands on scene i through the renderer's mapping",
-          all((K.scene_value(i) - 1) * n // 127 == i for i in range(n))
-          and all(1 <= K.scene_value(i) <= 127 for i in range(n)))
-    check("bucket_mid(i, n) buckets back to i, any list size 1..128",
-          all(K.bucket(K.bucket_mid(i, m), m) == i for m in range(1, 129) for i in range(m)))
-    banked = [nm for b in K.VIS_BANKS for nm in b if nm is not None]
-    check("encoder banks reach every knob once (bg_mode + mask_shape are pads)",
-          sorted(banked + ["bg_mode", "mask_shape"]) == sorted(K.VIS_KNOBS)
-          and len(banked) == len(set(banked)))
+    # ==== no VISUALS page (2026-10-24, owner: the KIKPAD only stood in as a test
+    # controller for the visuals; the two are not meant to go together) ============
+    ksrc = open(os.path.join(HERE, "orc1_kikpad.py"), encoding="utf-8").read()
+    kcode = ksrc.split('"""', 2)[2]                 # the code, past the module docstring
+    check("the surface has no visuals page: it never calls module_cc / visuals_power and "
+          "reads no visuals file", "module_cc" not in kcode and "visuals" not in kcode
+          and not any(n.startswith(("VIS_", "vis_", "_vis")) for n in dir(K))
+          and not any(n.startswith(("vis", "_vis")) for n in dir(K.KikpadSurface)))
+    release(s, P(0, 0))                      # still held from the no-paint check above
+    e.calls.clear()
+    before = s.frame()
+    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_RIGHT, velocity=127))
+    press(s, P(0, 0))
+    check("RIGHT changes nothing: the sampler page stays (LEFT lit), pads still grab",
+          s.frame()[1][K.BT_LEFT] and not s.frame()[1][K.BT_RIGHT]
+          and e.calls[-1] == ("sampler_capture_bars", "A", 1) and before[1][K.BT_LEFT])
+    release(s, P(0, 0))
 
     # -- brain: module_cc resolves the module live, unbound = silent ----------------
     seg = ast.get_source_segment(src, defs["module_cc"])
@@ -398,122 +376,6 @@ try:
     sent.clear()
     check("module_cc to an unbound module sends nothing", ns["module_cc"]("nobody", 21, 5) is False
           and sent == [])
-
-    # -- page switching -------------------------------------------------------------
-    with open(os.path.join(HOME, ".orc1_visuals_state.json"), "w") as f:
-        json.dump({"knobs": {"speed": 70, "mask_fit": 127, "mask_shape": 0, "bg_mode": 0,
-                             "bg_set": 0, "logo": 10}, "scene": "tube", "cycling": False}, f)
-    if os.path.exists(VIS_AUDIO):
-        os.remove(VIS_AUDIO)
-    s, e, outs = make()
-    RIGHT, LEFT = K.BTN_BASE + K.BT_RIGHT, K.BTN_BASE + K.BT_LEFT
-    press(s, P(2, 0))                                  # deck A stutter held ...
-    s.handle(Msg("note_on", note=RIGHT, velocity=127))
-    check("RIGHT = visuals page; a held sampler stutter is released on the way",
-          s.page == "visuals" and e.calls[-1] == ("sampler_beat_repeat_off", "A"))
-    pads, btns = s.frame()
-    check("RIGHT lit, LEFT dark, MS1 = encoder bank 1", btns[K.BT_RIGHT] and not btns[K.BT_LEFT]
-          and btns[K.BT_MS1])
-
-    # -- renderer stopped: only START works ----------------------------------------
-    e.calls.clear()
-    tap(s, P(0, 3))
-    s.handle(Msg("control_change", control=0, value=65))
-    check("stopped: scene pads + encoders do nothing", e.calls == [])
-    check("stopped: START pad orange, scenes dim", pads[K.VIS_POWER] == K.ORANGE
-          and pads[P(0, 0)] == K.DIM_GREY)
-    tap(s, K.VIS_POWER)
-    check("START tap = visuals_power(True)", e.calls == [("visuals_power", True)])
-    tap(s, K.VIS_POWER)
-    check("a second tap while starting doesn't start twice", len(e.calls) == 1)
-    NOW[0] += 0.0
-    p1 = s.frame()[0][K.VIS_POWER]
-    NOW[0] += 0.25
-    p2 = s.frame()[0][K.VIS_POWER]
-    check("START blinks while starting", {p1, p2} == {K.WHITE, K.BLACK})
-
-    # -- renderer running ------------------------------------------------------------
-    open(VIS_AUDIO, "w").close()
-    os.utime(VIS_AUDIO, (NOW[0], NOW[0]))
-    s.refresh()
-    pads, btns = s.frame()
-    check("running (fresh audio file): START pad green", s.vis["running"]
-          and pads[K.VIS_POWER] == K.GREEN)
-    check("state file read: playing scene (tube) white", pads[P(0, 2)] == K.WHITE
-          and pads[P(0, 0)] != K.WHITE)
-    check("FIT on from the state file = cyan", pads[P(3, 7)] == K.CYAN)
-    e.calls.clear()
-    s.handle(Msg("control_change", control=0, value=65))
-    check("encoder 1 (bank MS1) = speed, from the saved 70", e.calls[-1] == ("module_cc", "visuals", 21, 72))
-    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_MS4, velocity=127))
-    s.handle(Msg("control_change", control=6, value=65))
-    check("MS4 bank, encoder 7 = logo, one value per click", e.calls[-1] == ("module_cc", "visuals", 52, 11))
-    plog = []
-    s._log = plog.append                    # the handler swallows errors: collect them
-    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_MS1 + 4, velocity=127))
-    s.handle(Msg("control_change", control=0, value=65))
-    sz = e.calls[-1]
-    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_MS1 + 5, velocity=127))
-    s.handle(Msg("control_change", control=4, value=65))
-    tr = e.calls[-1]
-    n_mod = len(e.calls)
-    s.handle(Msg("control_change", control=7, value=65))
-    check("MS5 bank enc 1 = camera SIZE (CC55); MS6 enc 5 = trail react (CC78); "
-          "MS6 enc 8 is empty (sends nothing, no error); MS6 lit",
-          sz[:3] == ("module_cc", "visuals", 55) and tr[:3] == ("module_cc", "visuals", 78)
-          and len(e.calls) == n_mod and s.frame()[1][K.BT_MS1 + 5] and not plog)
-    s._log = lambda m: None
-    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_MS4, velocity=127))
-    tap(s, P(1, 3))
-    check("scene pad 11 (chladni) = CC20 at its value",
-          e.calls[-1] == ("module_cc", "visuals", 20, K.scene_value(11)))
-    check("... and it lights at once", s.frame()[0][P(1, 3)] == K.WHITE)
-    tap(s, P(2, 0))
-    check("CYCLE = CC20 0, lit green", e.calls[-1] == ("module_cc", "visuals", 20, 0)
-          and s.frame()[0][P(2, 0)] == K.GREEN)
-    tap(s, P(2, 3))
-    check("peephole pad 3 = rounded (shape 2) via mask_shape",
-          e.calls[-1] == ("module_cc", "visuals", 44, K.bucket_mid(2, 7))
-          and s.frame()[0][P(2, 3)] == K.WHITE)
-    tap(s, P(3, 7))
-    check("FIT toggles off (127 -> 0)", e.calls[-1] == ("module_cc", "visuals", 49, 0))
-    tap(s, P(3, 2))
-    check("bend mode 3rd = squeeze", e.calls[-1] == ("module_cc", "visuals", 35, K.bucket_mid(2, 5)))
-    tap(s, P(4, 4))
-    check("pattern set 5 (of 5)", e.calls[-1] == ("module_cc", "visuals", 50, K.bucket_mid(4, 5)))
-    n_calls = len(e.calls)
-    tap(s, P(4, 5))
-    check("no 6th set pad when there are 5 sets", len(e.calls) == n_calls)
-    tap(s, K.VIS_POWER)
-    check("STOP needs SET (a bare tap while running does nothing)", len(e.calls) == n_calls)
-    s.handle(Msg("note_on", note=K.BTN_BASE + K.BT_SET, velocity=127))
-    tap(s, K.VIS_POWER)
-    s.handle(Msg("note_off", note=K.BTN_BASE + K.BT_SET, velocity=0))
-    check("SET + START pad = visuals_power(False)", e.calls[-1] == ("visuals_power", False))
-
-    # -- the lagging state file doesn't snap back what was just turned --------------
-    with open(os.path.join(HOME, ".orc1_visuals_state.json"), "w") as f:
-        json.dump({"knobs": {"speed": 70, "trails": 99, "logo": 10},
-                   "scene": "tube", "cycling": False}, f)
-    os.utime(os.path.join(HOME, ".orc1_visuals_state.json"), (NOW[0] + 1, NOW[0] + 1))
-    os.utime(VIS_AUDIO, (NOW[0], NOW[0]))
-    s.refresh()
-    check("a knob just turned keeps our value (72, not the file's 70)",
-          s.vis["knobs"]["speed"] == 72)
-    check("an untouched knob follows the file (trails 99: the web moved it)",
-          s.vis["knobs"]["trails"] == 99)
-    check("a scene just picked isn't snapped back", s.vis["scene"] != "tube" or s.vis["cycling"])
-    NOW[0] += K.VIS_TOUCH_S + 0.5
-    os.utime(os.path.join(HOME, ".orc1_visuals_state.json"), (NOW[0], NOW[0]))
-    os.utime(VIS_AUDIO, (NOW[0], NOW[0]))
-    s.refresh()
-    check("after the touch window the file wins again", s.vis["knobs"]["speed"] == 70
-          and s.vis["scene"] == "tube")
-    NOW[0] += K.VIS_RUN_S + 1
-    s.refresh()
-    check("audio file goes stale = renderer counted as stopped", not s.vis["running"])
-    s.handle(Msg("note_on", note=LEFT, velocity=127))
-    check("LEFT = back to the sampler page", s.page == "sampler" and s.frame()[1][K.BT_LEFT])
 finally:
     shutil.rmtree(HOME, ignore_errors=True)
 

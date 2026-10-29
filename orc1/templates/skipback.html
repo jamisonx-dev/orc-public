@@ -4,6 +4,11 @@
 
 {% block content %}
 
+  <div class="card" id="skipback-compact-card">
+    <div class="card-label">RECORDING NOW</div>
+    <div id="skipback-compact-body"><span style="font-size:10px;color:var(--muted)">loading…</span></div>
+  </div>
+
   <div class="card" id="sb-ram-card">
     <div class="card-label"><span>SKIPBACK · MULTITRACK</span>
       <span id="sb-ram-txt" style="font-size:11px;font-family:var(--fs)">—</span>
@@ -85,4 +90,5 @@
 
 {% block page_js %}
 <script src="/static/js/skipback.js"></script>
+<script src="/static/js/sb_status.js"></script>
 {% endblock %}

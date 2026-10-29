@@ -30,6 +30,17 @@ while [ -z "$TARGET" ]; do
     sleep 2; elapsed=$((elapsed + 2))
 done
 [ -z "$TARGET" ] && { echo "[orc1-jackd] No playback card; defaulting to L12"; TARGET="L12"; }
+# HAND-OVER (2026-10-23). The card we fall back to (usually the pisound) may have
+# its own per-card jackd (orc1-jackd@<card>, modules moved there from /patch). A
+# card opens in one jackd only: we got "device already in use" every restart and
+# skipback stayed down until the L-12 came back (measured 2026-10-23). The main
+# server owns its card, so stop that server first; orc1_jackd_card_start.sh then
+# idles as a stand-in while we hold the card, its modules fall back to this (main)
+# server -- same jacks -- and it takes the card back when we leave it.
+if systemctl is-active --quiet "orc1-jackd@$TARGET"; then
+    echo "[orc1-jackd] hw:$TARGET has its own server (orc1-jackd@$TARGET) -- taking the card over"
+    sudo -n /usr/bin/systemctl stop "orc1-jackd@$TARGET"
+fi
 if [ "$TARGET" = "L12" ]; then
     echo "[orc1-jackd] Priming Zoom L-12 playback endpoint..."
     aplay -D hw:L12 -f S32_LE -r 48000 -c 2 /dev/zero & PRIME=$!

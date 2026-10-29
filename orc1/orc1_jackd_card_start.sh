@@ -16,6 +16,30 @@
 set -u
 CARD="${1:?usage: orc1_jackd_card_start.sh <CARD>}"
 
+# STAND-IN (2026-10-23). When the MAIN (nameless) jackd is on this card -- it
+# fell back here because the L-12 went away, see orc1_jackd_start.sh -- the card
+# is taken. Don't fight for it: stay up as a stand-in so the modules bound to this
+# unit still start, find no "<card>" server and fall back to the main one, which
+# drives these same jacks. When the main server leaves the card, exit so
+# Restart=on-failure brings the real per-card server back. Same idea as the
+# pisound-out bridge idling (pisound_out_start.sh).
+main_on_card() {
+    local p a pre
+    for p in $(pgrep -x jackd); do
+        a="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)"
+        pre=" ${a%%-dalsa*} "
+        case "$pre" in *" -n "*) continue ;; esac      # a named (per-card) server
+        case " $a " in *" -dhw:$CARD "*) return 0 ;; esac
+    done
+    return 1
+}
+if main_on_card; then
+    echo "[orc1-jackd@$CARD] the main jackd is on hw:$CARD -- standing in until it leaves"
+    while main_on_card; do sleep 2; done
+    echo "[orc1-jackd@$CARD] main jackd left hw:$CARD -- restarting as the real server"
+    exit 1
+fi
+
 # Card index, anchored on the closing bracket so "M3" never matches "M3Pro".
 IDX="$(awk -v c="$CARD" '$0 ~ "^ *[0-9]+ \\["c" *\\]" {print $1; exit}' \
         /proc/asound/cards 2>/dev/null)"

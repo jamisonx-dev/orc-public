@@ -37,7 +37,7 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EXPECTED = 44
+EXPECTED = 45
 _res = []
 HOSTS_STOP = "orc1-bbkit orc1-chip orc1-mono orc1-poly orc1-sampler orc1-drum".split()
 HOSTS_START = "orc1-drum orc1-sampler orc1-poly orc1-chip orc1-mono orc1-bbkit".split()
@@ -450,6 +450,19 @@ def test_sources():
     check("api_restart: engines-off refusal, then the scripts, BEFORE any plain systemctl restart",
           0 < i_mark < i_scr < i_sys and "        if service in _RESTART_SCRIPTS:\n" in seg,
           f"{i_mark} {i_scr} {i_sys}")
+    # the PLAY page's RESTART button (brain cmd RESTART_ORC, 2026-10-25): the
+    # gentle script in its OWN transient unit (a child of orc1 dies when the
+    # script stops orc1), never a plain restart of orc1.
+    brain = open(os.path.join(HERE, "orc1.py"), encoding="utf-8").read()
+    i = brain.find('elif action == "RESTART_ORC":')
+    j = brain.find("\n    elif ", i + 1)
+    j2 = brain.find("\n    if action", i + 1)
+    br = brain[i:min(k for k in (j, j2) if k > 0)] if i > 0 else ""
+    code = "\n".join(l.split("#")[0] for l in br.splitlines())
+    check("RESTART_ORC runs orc1_gentle_restart.sh via systemd-run, no plain restart of orc1",
+          "systemd-run" in code and "orc1_gentle_restart.sh" in code
+          and '"orc1.service"' not in code and '"restart", "orc1' not in code,
+          repr(code[:200]))
     # nothing else carries its own six-host loop any more
     loops = []
     for rel in ("orc1_gentle_restart.sh", os.path.join("daw", "daw_mode.sh")):

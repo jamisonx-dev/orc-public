@@ -85,6 +85,22 @@ function _remapSaved() {
     const ch = String(_voiceCh(tag));
     mapped[ch] = Object.assign(mapped[ch] || {}, ccs);
   }
+  // Engine-wide CCs (2026-10-26) are saved ONCE under "_engine" (orc1_synth
+  // _chip_cc_is_engine): one value shows on every voice's controls. The GB wave
+  // keeps its own ADSR, so it only shares the ring mod (12/14/15).
+  const eng = _savedRaw._engine;
+  if (eng && typeof eng === 'object') {
+    for (const tag of Object.values(_SYNTH_VOICE)) {
+      const ch = String(_voiceCh(tag));
+      if (tag === 'gb') {
+        const ring = {};
+        for (const k of ['12', '14', '15']) if (eng[k] !== undefined) ring[k] = eng[k];
+        mapped[ch] = Object.assign(mapped[ch] || {}, ring);
+      } else {
+        mapped[ch] = Object.assign(mapped[ch] || {}, eng);
+      }
+    }
+  }
   const gch = String(CH_GB_WAVE);
   mapped[gch] = Object.assign(mapped[gch] || {}, _gbWaveCC);
   _savedParamsCC = mapped;

@@ -6,22 +6,29 @@
 {% block content %}
 <div class="page" id="ctrl-page">
 
-  <!-- UNIVERSAL PADS ──────────────────────────────────────── -->
+  <p class="card-sub" id="ctrl-scope">FIRE UNIVERSAL PAGES are for the Akai Fire running the ORC Fire firmware (v0.31 or newer): the pages are stored ON the Fire, so they work with no Pi. FIRE KNOB MAP and CHORD ROW ROUTING apply only to a Fire running Akai's own firmware. The ORC surface pads are set on PADS.</p>
+
+  <!-- FIRE UNIVERSAL PAGES (stored on the Fire) ──────────────────── -->
   <section class="card" id="universal-card">
-    <div class="card-hdr">UNIVERSAL CONTROL SURFACE</div>
-    <p class="card-sub">4 rows × 16 columns · each pad sends a note, CC or program change</p>
+    <div class="card-hdr">FIRE UNIVERSAL PAGES</div>
+    <p class="card-sub">8 pages stored on the Fire · 4 rows × 16 pads, a BASE and a SHIFT assignment each · 4 knob banks per page · on the Fire: tap PERFORM twice, GRID &lt; &gt; = page</p>
+
+    <div class="fup-status" id="fup-status">looking for the Fire…</div>
 
     <div class="ucs-toolbar">
-      <span class="km-label">BANK</span>
-      <span id="ucs-banks" title="Pad bank — the Fire pages between these with GRID &lt; &gt;"></span>
-      <span class="km-label" style="margin-left:12px">LAYER</span>
-      <button class="btn accent" onclick="UCS.setLayer('base')"  id="ucs-tab-base">BASE</button>
-      <button class="btn"        onclick="UCS.setLayer('shift')" id="ucs-tab-shift">SHIFT</button>
-      <button class="btn"        onclick="UCS.setLayer('alt')"   id="ucs-tab-alt">ALT</button>
-      <button class="btn" style="margin-left:auto"
-              onclick="UCS.scanPorts()" id="ucs-scan-btn"
-              title="Scan for newly-connected USB/RTP MIDI outputs">SCAN PORTS</button>
-      <button class="btn" onclick="UCS.clearAll()">CLEAR BANK</button>
+      <span class="km-label">PAGE</span>
+      <span id="ucs-banks" class="fup-pages" title="The Fire's 8 pages (GRID &lt; &gt; on the Fire)"></span>
+    </div>
+    <div class="ucs-toolbar">
+      <span class="km-label">NAME</span>
+      <input class="ucs-num fup-name" id="fup-name" type="text" maxlength="8" spellcheck="false"
+             placeholder="(none)" title="Shown on the Fire's screen, up to 8 letters" oninput="UCS.onName()">
+      <span class="km-label" style="margin-left:8px">LAYER</span>
+      <button class="btn accent" onclick="UCS.setLayer('base')"  id="ucs-tab-base" title="What a pad does">BASE</button>
+      <button class="btn"        onclick="UCS.setLayer('shift')" id="ucs-tab-shift" title="What a pad does while SHIFT is held (none set = it plays BASE)">SHIFT</button>
+      <span class="fup-gap"></span>
+      <button class="btn" onclick="UCS.reload()" title="Read this page from the Fire again (drops changes not sent)">RELOAD</button>
+      <button class="btn" onclick="UCS.clearAll()" title="Empty this page on the Fire">CLEAR PAGE</button>
     </div>
 
     <!-- 4×16 pad grid -->
@@ -31,35 +38,42 @@
     <div class="ucs-editor" id="ucs-editor" style="display:none">
       <div class="ucs-ed-hdr">
         <span id="ucs-ed-title">PAD —</span>
-        <button class="btn" onclick="UCS.clearPad()">CLEAR PAD</button>
-        <button class="btn" onclick="UCS.closeEditor()">✕</button>
+        <button class="btn" onclick="UCS.clearPad()" title="This pad does nothing on this layer">CLEAR PAD</button>
+        <button class="btn" onclick="UCS.closeEditor()" title="Close">✕</button>
       </div>
       <div class="ucs-ed-fields">
         <label class="ucs-lbl">TYPE</label>
-        <div class="ucs-seg">
-          <button class="btn" id="ucs-type-note" onclick="UCS.setType('note')">NOTE</button>
-          <button class="btn" id="ucs-type-cc"   onclick="UCS.setType('cc')">CC</button>
-          <button class="btn" id="ucs-type-pc"   onclick="UCS.setType('pc')">PC</button>
-        </div>
-        <label class="ucs-lbl">NUMBER <span class="ucs-hint">(note/CC/PC)</span></label>
-        <input class="ucs-num" id="ucs-number" type="number" min="0" max="127" value="60"
-               oninput="UCS.preview()">
-        <div id="ucs-value-row">
-        <label class="ucs-lbl">VALUE <span class="ucs-hint">(vel/CC val)</span></label>
-        <input class="ucs-num" id="ucs-value" type="number" min="0" max="127" value="100"
-               oninput="UCS.preview()">
-        </div>
+        <select class="ucs-sel" id="ucs-type" onchange="UCS.onType()"></select>
+        <label class="ucs-lbl" id="ucs-number-lbl">NUMBER</label>
+        <input class="ucs-num" id="ucs-number" type="number" min="0" max="127" value="36">
+        <label class="ucs-lbl" id="ucs-on-lbl">ON</label>
+        <input class="ucs-num" id="ucs-on" type="number" min="0" max="127" value="100">
+        <label class="ucs-lbl" id="ucs-off-lbl">OFF</label>
+        <input class="ucs-num" id="ucs-off" type="number" min="0" max="127" value="0">
         <label class="ucs-lbl">CHANNEL</label>
-        <input class="ucs-num" id="ucs-channel" type="number" min="1" max="16" value="1"
-               oninput="UCS.preview()">
-        <label class="ucs-lbl">PORT</label>
-        <select class="ucs-sel" id="ucs-port"><!-- populated by UCS.loadPorts() --></select>
-        <label class="ucs-lbl">LATCH</label>
-        <input type="checkbox" id="ucs-latch">
-        <span class="ucs-hint">hold = toggle instead of gate</span>
+        <input class="ucs-num" id="ucs-channel" type="number" min="1" max="16" value="1">
+        <label class="ucs-lbl">COLOUR</label>
+        <span class="fup-colrow"><select class="ucs-sel" id="ucs-colour" onchange="UCS.onColour()"></select><span class="fup-swatch" id="ucs-swatch"></span></span>
       </div>
-      <button class="btn accent ucs-save" onclick="UCS.savePad()">SAVE PAD</button>
+      <div class="ucs-hint" id="ucs-type-help"></div>
+      <button class="btn accent ucs-save" onclick="UCS.savePad()">SET PAD</button>
     </div>
+
+    <!-- per-page knobs: 4 banks × 4 -->
+    <div class="fup-knobs">
+      <div class="ucs-toolbar">
+        <span class="km-label">KNOBS</span>
+        <span id="fup-kbanks" title="KNOB MODE on the Fire steps the bank (CHANNEL / MIXER / USER 1 / USER 2 lights)"></span>
+      </div>
+      <div class="km-grid" id="fup-kgrid"></div>
+      <div class="ucs-hint">A knob sends a CC or pitch bend and remembers its value; START = its value at power-on (pitch bend 64 = centre).</div>
+    </div>
+
+    <div class="fup-send">
+      <button class="btn accent" id="fup-send-btn" onclick="UCS.send()" title="Write this page to the Fire, then read it back to check">SEND TO FIRE</button>
+      <span class="fup-dirty" id="fup-dirty"></span>
+    </div>
+    <div class="fup-result" id="fup-result"></div>
   </section>
 
   <!-- KNOB MAP ────────────────────────────────────────────── -->
@@ -70,10 +84,6 @@
     <div class="km-controls">
       <label class="km-label">VIEW</label>
       <select id="km-view" onchange="CTRL.loadKnobmap()"></select>
-      <span id="km-bank-wrap" style="display:none;margin-left:8px">
-        <label class="km-label">PAGE</label>
-        <select id="km-bank" onchange="CTRL.onKmBankChange()"></select>
-      </span>
       <div class="km-layers" id="km-layers">
         <button class="btn accent" onclick="CTRL.setLayer('base')"  id="km-tab-base">BASE</button>
         <button class="btn"        onclick="CTRL.setLayer('shift')" id="km-tab-shift">SHIFT</button>
@@ -106,12 +116,6 @@
         <span id="km-cc-status" style="font-size:9px;color:var(--muted)"></span>
       </div>
       <div style="margin-top:3px;font-size:8px;color:var(--muted)">Assigns the chosen knob (in the current view and layer) to send a CC on any port and channel. synth = internal bus, pisound = DIN out. On the synth port the channel can be a module, which follows its /matrix channel.</div>
-    </div>
-    <!-- FADER ROWS (universal only) — a row of 16 pads as a horizontal CC fader -->
-    <div id="uk-fader-panel" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-      <span style="font-size:9px;color:var(--label);font-family:var(--fh);letter-spacing:.1em">FADER ROWS (this page)</span>
-      <div id="uk-fader-rows" style="margin-top:5px"></div>
-      <div style="margin-top:3px;font-size:8px;color:var(--muted)">Turn a pad row into a horizontal CC fader (16 pads = one 0–127 level). While set, it replaces that row's per-pad assignments.</div>
     </div>
     <p class="card-note">Changes apply immediately and persist across restarts.</p>
   </section>

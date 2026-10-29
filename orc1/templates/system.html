@@ -127,14 +127,45 @@
     </div>
   </div>
 
+  <div class="card" id="net-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>WIFI &amp; FILES</span>
+      <a class="flag" id="net-open" href="#" target="_blank" style="text-decoration:none">OPEN FULL PAGE &#8599;</a>
+    </div>
+    <iframe id="net-frame" title="WiFi and files" style="width:100%;height:560px;border:0;background:transparent"></iframe>
+    <div style="font-size:9px;color:var(--muted)">
+      Served on port 5003; works when this page is down. Accepts connections only from the Pi, its hotspot
+      and the home network. Passwords typed there go straight to NetworkManager.
+    </div>
+    <script>(function(){var u='http://'+location.hostname+':5003/';
+      document.getElementById('net-frame').src=u+'?embed=1';
+      document.getElementById('net-open').href=u;
+      var l=document.querySelector('a[href="http://pibox.local:5002"]');if(l)l.href='http://'+location.hostname+':5002';})();</script>
+  </div>
+
   <div class="card" style="border-color:var(--danger-border)">
     <div class="card-label">SYSTEM CONTROLS</div>
     <div class="flags" style="margin-bottom:8px">
-      <a class="flag warn" href="http://pibox.local:5002" target="_blank"
+      <button class="flag purple" type="button" id="orc-restart" onclick="orcRestart()"
+              title="Restarts the engine and sound modules; the Pi stays on">↺ RESTART ORC</button>
+      <span id="orc-restart-msg" style="font-size:10px;color:var(--warn);align-self:center"></span>
+    </div>
+    <div class="flags" id="power-btns" style="margin-bottom:8px">
+      <button class="flag warn" type="button" onclick="powerAsk('reboot')">⟳ REBOOT</button>
+      <button class="flag danger" type="button" onclick="powerAsk('shutdown')">⏻ SHUT DOWN</button>
+      <a class="flag" href="http://pibox.local:5002" target="_blank"
          style="text-decoration:none">FULL DASHBOARD ↗</a>
     </div>
+    <div id="power-confirm" hidden style="border:1px solid var(--danger-border);border-radius:var(--radius);padding:8px;margin-bottom:8px">
+      <div id="power-msg" style="font-size:11px;color:var(--bright);margin-bottom:8px"></div>
+      <div class="flags">
+        <button class="flag danger" type="button" id="power-go" onclick="powerGo()"></button>
+        <button class="flag" type="button" onclick="powerCancel()">CANCEL</button>
+      </div>
+    </div>
+    <div id="power-status" style="font-size:10px;color:var(--warn)"></div>
     <div style="font-size:9px;color:var(--muted)">
-      Reboot and shutdown are on the system dashboard (opens in a new tab).
+      Only works from the Pi, its hotspot or the home network.
     </div>
   </div>
 

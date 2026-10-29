@@ -1,0 +1,143 @@
+/* PLAY page: SCENES card + the pieces of the planned shared kit it uses
+   (fold-out that remembers open/closed, status chip, param row). Kept in this
+   file until the kit lands in shared.css (plan Part 2, step 1). */
+
+/* ── fold-out (<details data-fold>) ─────────────────────────────────────── */
+.fold { margin-top: 8px; }
+.fold > summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--fh);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--label);
+  padding: 8px 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: '▸'; color: var(--accent); font-size: 11px; }
+.fold[open] > summary::before { content: '▾'; }
+.fold > summary .fold-count { margin-left: auto; font-family: var(--fs); font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.fold.card > summary { padding: 0; }
+.fold.card[open] > summary { margin-bottom: 8px; }
+
+/* ── status chip ────────────────────────────────────────────────────────── */
+.sc-chip {
+  font-family: var(--fh);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1px solid var(--dim);
+  color: var(--muted);
+}
+.sc-chip.live { color: var(--live); border-color: rgba(34,224,151,.4); background: rgba(34,224,151,.08); }
+.sc-chip.accent { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+.sc-chip.warn { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
+.sc-chip.danger { color: var(--danger); border-color: var(--danger-border); background: var(--danger-bg); }
+
+/* ── PLAY layout bits ───────────────────────────────────────────────────── */
+.panic-row { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
+.sc-help { font-size: 10px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+.sc-help a { color: var(--accent); }
+.sc-status { font-size: 11px; color: var(--body); line-height: 1.5; min-height: 16px; }
+.sc-status .sc-pend { color: var(--warn); }
+.sc-status .sc-bad { color: var(--danger); }
+.sc-status details { margin-top: 2px; }
+.sc-status summary { cursor: pointer; color: var(--muted); font-size: 10px; }
+.sc-status ul { margin: 4px 0 0 16px; padding: 0; font-size: 10px; color: var(--muted); }
+
+/* filled slots, as named chips */
+.sc-filled { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.sc-slot {
+  font-family: var(--fs);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--bright);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-slot b { color: var(--accent); font-weight: 400; margin-right: 4px; }
+.sc-slot.sel { border-color: var(--live); box-shadow: 0 0 0 1px var(--live) inset; }
+.sc-slot.pend { border-color: var(--warn); }
+.sc-none { font-size: 10px; color: var(--muted); font-style: italic; }
+
+/* the 128-slot grid */
+.sc-grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+.sc-cell {
+  font-family: var(--fs);
+  font-size: 10px;
+  padding: 5px 0;
+  min-width: 0;
+  text-align: center;
+  border-radius: 2px;
+  border: 1px solid var(--dim);
+  background: var(--btn-bg);
+  color: var(--dead);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sc-cell.filled { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+.sc-cell.sel { color: var(--live); border-color: var(--live); }
+.sc-cell.pend { color: var(--warn); border-color: var(--warn); }
+@media (max-width: 480px) { .sc-grid { grid-template-columns: repeat(8, 1fr); } .sc-cell { padding: 8px 0; font-size: 11px; } }
+
+/* ── the slot editor ────────────────────────────────────────────────────── */
+.sc-ed { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sc-ed-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.sc-ed-title { font-family: var(--fh); font-size: 14px; font-weight: 900; color: var(--bright); letter-spacing: .06em; }
+.sc-field { display: flex; flex-direction: column; gap: 3px; }
+.sc-field > span { font-family: var(--fh); font-size: 8px; letter-spacing: .15em; color: var(--label); }
+.sc-in, .sc-sel {
+  background: var(--bg);
+  color: var(--bright);
+  border: 1px solid var(--dim);
+  border-radius: 2px;
+  padding: 5px 6px;
+  font-family: var(--fs);
+  font-size: 12px;
+  min-width: 0;
+}
+.sc-in:focus, .sc-sel:focus { outline: none; border-color: var(--accent); }
+.sc-in.need { border-color: var(--warn-border); }
+.sc-in::placeholder { color: var(--warn); opacity: .8; }
+.sc-name { width: 180px; max-width: 100%; }
+.sc-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
+.sc-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.sc-actions .flag[disabled] { opacity: .4; pointer-events: none; }
+.sc-confirm { border: 1px solid var(--danger-border); border-radius: var(--radius); padding: 8px; margin-bottom: 8px; font-size: 11px; color: var(--bright); }
+.sc-confirm .flags { margin-top: 8px; }
+.sc-msg { font-size: 11px; min-height: 15px; color: var(--muted); margin-bottom: 4px; }
+.sc-msg.ok { color: var(--live); }
+.sc-msg.bad { color: var(--danger); }
+.sc-count { font-size: 10px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* setting groups */
+.sc-grp { border-top: 1px solid var(--border); margin-top: 0; }
+.sc-grp > summary { padding: 9px 2px; }
+.sc-grp-body { padding: 0 0 8px; }
+.sc-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 2px; }
+.sc-sub-lbl { font-family: var(--fh); font-size: 8px; letter-spacing: .15em; color: var(--accent); }
+.sc-tickall { font-size: 9px; padding: 2px 7px; }
+
+/* param row: tick · label · value */
+.prow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.prow:last-child { border-bottom: none; }
+.prow-tick { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; cursor: pointer; }
+.prow-tick input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--accent); }
+.prow-lbl { font-size: 10px; color: var(--body); text-transform: uppercase; letter-spacing: .03em; line-height: 1.3; overflow-wrap: anywhere; }
+.prow.off .prow-lbl { color: var(--muted); }
+.prow-val { flex: 0 0 auto; width: 120px; display: flex; justify-content: flex-end; }
+.prow-val .sc-in, .prow-val .sc-sel { width: 100%; }
+.prow-dash { color: var(--dead); font-size: 11px; }

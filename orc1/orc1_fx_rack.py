@@ -90,6 +90,7 @@ CATEGORIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 CATEGORY_ORDER = ["Reverb", "Delay", "EQ/Filter", "Dynamics", "Drive",
                   "Amp/Cab", "Modulation", "Tape/Lofi", "Clip", "Console",
                   "Dither", "Utility", "Other"]
+RESTORE_AT_BOOT = False        # see reap_orphans_and_restore: the rack does not come back by itself
 N_SLOTS = 3                      # HARD CAP — do not raise without a DSP re-test.
 _CLIENT = "fx-rack-{idx}"        # JACK client name per slot position.
 _SAVE_DEBOUNCE_S = 1.0           # coalesce param-persist writes to disk.
@@ -639,6 +640,15 @@ class RackManager:
         with self._lock:
             self._runtime = []
             self._reap_stray_clients()
+        if not RESTORE_AT_BOOT:
+            # 2026-10-19 (owner: the rack must NOT come back by itself after a reboot).
+            # Boot reaps stray clients only; the saved slots stay in the rack file and are
+            # applied the first time a slot is touched on /fx. It also dodged a boot race:
+            # the return pair resolved empty before the card's ports existed, leaving the
+            # module's sound cut from the speakers with its rack output wired nowhere.
+            self._write_status()
+            self._fire(done)
+            return
         self.apply(done=done)
 
     # -- Small helpers ---------------------------------------------------------

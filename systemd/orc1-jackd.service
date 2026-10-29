@@ -13,8 +13,10 @@ LimitMEMLOCK=infinity
 # (jackd -n <card>, per-host-jackd model 2026-09-22). The old `pkill -x jackd`
 # killed EVERY jackd, including live per-card servers, without re-instating them.
 # The reap is a script (not inline bash) to avoid systemd ExecStart escaping.
+# It also clears stale shm -- only the default server's while a named server
+# runs (a blanket `rm -f /dev/shm/jack*` here cut the per-card servers off,
+# 2026-10-23).
 ExecStartPre=-/home/pibox/orc/orc1/orc1_jackd_reap_default.sh
-ExecStartPre=-/bin/bash -c 'rm -f /dev/shm/jack* /dev/shm/jack_* 2>/dev/null; true'
 ExecStartPre=-/bin/sleep 1
 ExecStart=/home/pibox/orc/orc1/orc1_jackd_start.sh
 Restart=on-failure

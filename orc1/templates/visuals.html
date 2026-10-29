@@ -3,10 +3,13 @@
 {% block page_label %}VISUALS{% endblock %}
 
 {% block content %}
-  <!-- Layout (2026-10-12, reorganised with owner): SHOW (+ logo), LISTEN,
-       LINES, TRAILS, MOVEMENT, BACKGROUND, PEEPHOLE, MIDI. Every slider is a
-       CC on the visuals module's channel; the knob table lives in
-       static/js/visuals.js (KNOB), checked against the renderer by the suite. -->
+  <!-- Layout (2026-10-24, owner: the page had grown to 69 controls): TABS, one per
+       THING, with everything that adjusts it on the same tab ("i need the options for
+       the thing they control all on the same page"): PLAY (show + layers), LINES,
+       BACKGROUND, PEEPHOLE, LISTEN, SETUP (MIDI + all palettes). Palettes are shared by
+       both layers, so their editor also folds out under each layer's palette picker.
+       Every slider is a CC on the visuals module's channel; the knob table lives
+       in static/js/visuals.js (KNOB), checked against the renderer by the suite. -->
   <style>
     .vrow { display:grid; grid-template-columns:78px 1fr 58px; gap:8px; align-items:center; margin-bottom:2px; }
     .vrow .vl { font-size:9px; color:var(--label); font-family:var(--fh); letter-spacing:.1em; }
@@ -28,9 +31,24 @@
     .pthumb { width:44px; height:44px; border:1px solid var(--dim); border-radius:4px; padding:0;
               background-color:#000; background-repeat:repeat; background-size:22px auto; cursor:pointer; }
     .pthumb.on { outline:2px solid var(--accent,#ff5cc8); }
+    .vtabs { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; position:sticky; top:0; z-index:5;
+             padding:6px 0; background:var(--bg); }
+    .vtabs .flag { flex:1 1 auto; min-width:0; padding:8px 10px; font-size:11px; }
+    .vtab { display:none; }
+    .vtab.on { display:block; }
     details.vmore > summary { cursor:pointer; font-size:10px; color:var(--label); letter-spacing:.1em; font-family:var(--fh); }
   </style>
 
+  <div class="vtabs" id="vtabs">
+    <button class="flag" data-tab="play" onclick="showTab('play')">PLAY</button>
+    <button class="flag" data-tab="lines" onclick="showTab('lines')">LINES</button>
+    <button class="flag" data-tab="background" onclick="showTab('background')">BACKGROUND</button>
+    <button class="flag" data-tab="peephole" onclick="showTab('peephole')">PEEPHOLE</button>
+    <button class="flag" data-tab="listen" onclick="showTab('listen')">LISTEN</button>
+    <button class="flag" data-tab="setup" onclick="showTab('setup')">SETUP</button>
+  </div>
+
+  <div class="vtab" data-tab="play">
   <!-- SHOW -------------------------------------------------------------------->
   <div class="card" id="vis-card">
     <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
@@ -76,7 +94,156 @@
       </div>
     </details>
   </div>
+  <!-- LAYERS ------------------------------------------------------------------>
+  <div class="card" id="layer-card">
+    <div class="card-label">LAYERS</div>
+    <div class="vhint" style="margin-left:0">
+      Each layer on its own: LINES LEVEL 0 = just the background (and the peephole);
+      BACKGROUND LEVEL 0 = just the lines. Both are knobs (CC 88 / 89), so a song can fade them.
+    </div>
+    <div id="layer-knobs"></div>
+  </div>
+  </div>
 
+  <div class="vtab" data-tab="lines">
+  <!-- LINES ------------------------------------------------------------------->
+  <div class="card" id="lines-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>LINES</span>
+      <button class="rescan-btn" onclick="visCentre('lines-knobs')">CENTRE ALL</button>
+    </div>
+    <div id="lines-knobs"></div>
+    <div class="vgroup">COLOUR</div>
+    <div class="flags" id="lines-pals" style="margin-bottom:6px"></div>
+    <details class="vmore pal-fold" style="margin:0 0 6px">
+      <summary>EDIT PALETTES <span style="color:var(--muted)">· shared by the lines and the background</span></summary>
+      <div class="pal-edit" style="margin-top:6px"></div>
+      <div class="pal-msg" style="font-size:10px;color:var(--muted);min-height:12px"></div>
+    </details>
+    <div id="lines-col-knobs"></div>
+  </div>
+  <!-- TRAILS ------------------------------------------------------------------>
+  <div class="card" id="trails-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>TRAILS</span>
+      <button class="rescan-btn" onclick="visCentre('trails-knobs')">CENTRE ALL</button>
+    </div>
+    <div id="trails-knobs"></div>
+    <div class="vhint" style="margin-left:0">
+      Each frame the last picture is faded and kept: those ghosts are the trails.
+      TRAIL ZOOM and TRAIL TWIST move only the ghosts, never the shape itself, so they
+      show only when TRAILS is up. (To resize or turn the shape, use SIZE and ANGLE.)
+    </div>
+  </div>
+  <!-- MOVEMENT ---------------------------------------------------------------->
+  <div class="card" id="move-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>MOVEMENT</span>
+      <span style="display:flex;gap:8px;align-items:center;font-size:9px;color:var(--muted);min-width:150px">
+        BEAT <span class="vmeter"><div id="mv-hit"></div></span>
+        LFO <span class="vmeter"><div id="mv-lfo" style="width:4px"></div></span>
+      </span>
+    </div>
+    <div class="vgroup" style="margin-top:0">LFO</div>
+    <div class="flags" id="lfo-sync" style="margin-bottom:4px"></div>
+    <div id="lfo-knobs"></div>
+    <div class="vnote" id="lfo-note"></div>
+    <div class="mod-grid" id="mod-grid"></div>
+    <div class="vhint" style="margin:6px 0 0">
+      REACT = how much the beat moves it: drum kicks and the audio beat, shaped by LISTEN's
+      ATTACK and RELEASE, plus loudness (separate from LINES' BEAT: they react even with
+      BEAT at 0). LFO = how far the LFO swings it. Both at 0 = off.
+      SYNC locks the LFO to the ORC's bar while the sequencer runs (at its tempo when
+      stopped); FREE uses RATE.
+    </div>
+  </div>
+  </div>
+
+  <div class="vtab" data-tab="background">
+  <!-- BACKGROUND -------------------------------------------------------------->
+  <div class="card" id="bg-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>BACKGROUND</span><span id="bg-pattern-name" style="font-size:10px;font-family:var(--fs)"></span>
+    </div>
+    <div class="vhint" style="margin-left:0">
+      A repeating pattern behind the lines. <b>It rests at black</b> and the music brings it
+      in; its gaps always stay black.
+    </div>
+    <div class="vgroup">PATTERN</div>
+    <div class="flags" id="bg-sets" style="margin-bottom:6px"></div>
+    <div class="flags" id="bg-patterns" style="margin-bottom:6px"></div>
+    <div id="pat-custom" style="display:none;margin-bottom:6px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
+        <input type="file" id="pat-file" accept=".svg,image/svg+xml">
+        <button class="flag" onclick="patUpload()">UPLOAD</button>
+        <button class="flag" id="pat-del" onclick="patDelete()" style="display:none">DELETE THIS ONE</button>
+        <span id="pat-msg"></span>
+      </div>
+      <div class="vhint" style="margin:4px 0 0">
+        Your own tiles (SVG, 512 KB max, up to 128). Draw ONE repeat that wraps
+        seamlessly (what leaves the right edge comes back on the left, same for top and
+        bottom), in white or grey on black or transparent: the ORC adds the colour and
+        reads only brightness (the red part of each colour, so pure blue shows nothing).
+        Black stays black on screen. Same file name = replaces your earlier one.
+      </div>
+    </div>
+    <div id="pat-pictures" style="display:none;margin-bottom:6px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
+        <input type="file" id="pic-file" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,image/*">
+        <button class="flag" onclick="picUpload()">UPLOAD</button>
+        <button class="flag" id="pic-del" onclick="picDelete()" style="display:none">DELETE THIS ONE</button>
+        <span id="pic-msg"></span>
+      </div>
+      <div class="vhint" style="margin:4px 0 0">
+        Your own art or images (PNG, JPG, GIF, WebP, BMP or SVG; up to 16 MB and 40
+        megapixels; up to 128). Stored in grey at up to 2048 px on the longer side: the
+        ORC adds the colour from its brightness. Bright = shows, black = gaps. Bold lines
+        hold up best when the picture is shrunk or far away (or use THICKEN). Same file
+        name = replaces your earlier one. PICTURE below: REPEAT, CRISP, INVERT, THICKEN.
+      </div>
+    </div>
+    <div class="vgroup">WHEN IT SHOWS</div>
+    <div id="bg-show-knobs"></div>
+    <div class="vgroup">BEND <span style="color:var(--muted)">(EarthBound-style)</span></div>
+    <div class="flags" id="bg-modes" style="margin-bottom:6px"></div>
+    <div id="bg-bend-knobs"></div>
+    <div class="vgroup">LOOK</div>
+    <div id="bg-look-knobs"></div>
+    <div class="vgroup">PICTURE <span style="color:var(--muted)">(any pattern too)</span></div>
+    <div class="flags" id="bg-wraps" style="margin-bottom:6px"></div>
+    <div class="flags" id="bg-inverts" style="margin-bottom:6px"></div>
+    <div id="bg-pic-knobs"></div>
+    <div class="vgroup">COLOUR</div>
+    <div class="flags" id="bg-pals" style="margin-bottom:6px"></div>
+    <details class="vmore pal-fold" style="margin:0 0 6px">
+      <summary>EDIT PALETTES <span style="color:var(--muted)">· shared by the lines and the background</span></summary>
+      <div class="pal-edit" style="margin-top:6px"></div>
+      <div class="pal-msg" style="font-size:10px;color:var(--muted);min-height:12px"></div>
+    </details>
+    <div id="bg-col-knobs"></div>
+    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
+      Sets: built-in, HERO = Hero Patterns by Steve Schoger (CC BY 4.0), MONSTER = Pattern
+      Monster (MIT); credits in orc1/daw/patterns/CREDITS.md.
+    </div>
+  </div>
+  </div>
+
+  <div class="vtab" data-tab="peephole">
+  <!-- PEEPHOLE ---------------------------------------------------------------->
+  <div class="card" id="mask-card">
+    <div class="card-label">PEEPHOLE</div>
+    <div class="vhint" style="margin-left:0">
+      Everything outside the shape is pure black, lines included (for a projector). OFF =
+      the whole screen.
+    </div>
+    <div class="flags" id="mask-shapes" style="margin-bottom:8px"></div>
+    <div id="mask-knobs"></div>
+    <div class="vgroup">KEEP THE SCENE INSIDE</div>
+    <div id="mask-fit-knobs"></div>
+  </div>
+  </div>
+
+  <div class="vtab" data-tab="listen">
   <!-- LISTEN ------------------------------------------------------------------>
   <div class="card" id="listen-card">
     <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -114,106 +281,23 @@
     <div id="aud-knobs"></div>
     <div id="aud-latency" style="font-size:10px;color:var(--label);margin-top:6px;line-height:1.5"></div>
   </div>
-
-  <!-- LINES ------------------------------------------------------------------->
-  <div class="card" id="lines-card">
-    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
-      <span>LINES</span>
-      <button class="rescan-btn" onclick="visCentre('lines-knobs')">CENTRE ALL</button>
-    </div>
-    <div id="lines-knobs"></div>
   </div>
 
-  <!-- TRAILS ------------------------------------------------------------------>
-  <div class="card" id="trails-card">
+  <div class="vtab" data-tab="setup">
+  <!-- PALETTES -------------------------------------------------------------->
+  <div class="card" id="pal-card">
     <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
-      <span>TRAILS</span>
-      <button class="rescan-btn" onclick="visCentre('trails-knobs')">CENTRE ALL</button>
-    </div>
-    <div id="trails-knobs"></div>
-    <div class="vhint" style="margin-left:0">
-      Each frame the last picture is faded and kept: those ghosts are the trails.
-      TRAIL ZOOM and TRAIL TWIST move only the ghosts, never the shape itself, so they
-      show only when TRAILS is up. (To resize or turn the shape, use SIZE and ANGLE.)
-    </div>
-  </div>
-
-  <!-- MOVEMENT ---------------------------------------------------------------->
-  <div class="card" id="move-card">
-    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <span>MOVEMENT</span>
-      <span style="display:flex;gap:8px;align-items:center;font-size:9px;color:var(--muted);min-width:150px">
-        BEAT <span class="vmeter"><div id="mv-hit"></div></span>
-        LFO <span class="vmeter"><div id="mv-lfo" style="width:4px"></div></span>
-      </span>
-    </div>
-    <div class="vgroup" style="margin-top:0">LFO</div>
-    <div class="flags" id="lfo-sync" style="margin-bottom:4px"></div>
-    <div id="lfo-knobs"></div>
-    <div class="vnote" id="lfo-note"></div>
-    <div class="mod-grid" id="mod-grid"></div>
-    <div class="vhint" style="margin:6px 0 0">
-      REACT = how much the beat moves it: drum kicks and the audio beat, shaped by LISTEN's
-      ATTACK and RELEASE, plus loudness (separate from LINES' BEAT: they react even with
-      BEAT at 0). LFO = how far the LFO swings it. Both at 0 = off.
-      SYNC locks the LFO to the ORC's bar while the sequencer runs (at its tempo when
-      stopped); FREE uses RATE.
-    </div>
-  </div>
-
-  <!-- BACKGROUND -------------------------------------------------------------->
-  <div class="card" id="bg-card">
-    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
-      <span>BACKGROUND</span><span id="bg-pattern-name" style="font-size:10px;font-family:var(--fs)"></span>
+      <span>PALETTES</span>
+      <button class="rescan-btn" onclick="palReset()">DEFAULTS</button>
     </div>
     <div class="vhint" style="margin-left:0">
-      A repeating pattern behind the lines. <b>It rests at black</b> and the music brings it
-      in; its gaps always stay black.
+      All 8 at once (each also folds out under the LINES and BACKGROUND palette buttons).
+      LINES PALETTE (CC 95) and BACKGROUND PALETTE (CC 96) pick one live; OFF = the scene's own colours / the rainbow.
+      A palette is a loop: the colours blend one into the next. HUE turns the layer round it.
+      <span class="pal-msg" id="pal-msg"></span>
     </div>
-    <div class="vgroup">PATTERN</div>
-    <div class="flags" id="bg-sets" style="margin-bottom:6px"></div>
-    <div class="flags" id="bg-patterns" style="margin-bottom:6px"></div>
-    <div id="pat-custom" style="display:none;margin-bottom:6px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
-        <input type="file" id="pat-file" accept=".svg,image/svg+xml">
-        <button class="flag" onclick="patUpload()">UPLOAD</button>
-        <button class="flag" id="pat-del" onclick="patDelete()" style="display:none">DELETE THIS ONE</button>
-        <span id="pat-msg"></span>
-      </div>
-      <div class="vhint" style="margin:4px 0 0">
-        Your own tiles (SVG, 512 KB max, up to 128). Draw ONE repeat that wraps
-        seamlessly (what leaves the right edge comes back on the left, same for top and
-        bottom), in white or grey on black or transparent: the ORC adds the colour and
-        reads only brightness (the red part of each colour, so pure blue shows nothing).
-        Black stays black on screen. Same file name = replaces your earlier one.
-      </div>
-    </div>
-    <div class="vgroup">WHEN IT SHOWS</div>
-    <div id="bg-show-knobs"></div>
-    <div class="vgroup">BEND <span style="color:var(--muted)">(EarthBound-style)</span></div>
-    <div class="flags" id="bg-modes" style="margin-bottom:6px"></div>
-    <div id="bg-bend-knobs"></div>
-    <div class="vgroup">LOOK</div>
-    <div id="bg-look-knobs"></div>
-    <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:6px">
-      Sets: built-in, HERO = Hero Patterns by Steve Schoger (CC BY 4.0), MONSTER = Pattern
-      Monster (MIT); credits in orc1/daw/patterns/CREDITS.md.
-    </div>
+    <div class="pal-edit" id="pal-edit"></div>
   </div>
-
-  <!-- PEEPHOLE ---------------------------------------------------------------->
-  <div class="card" id="mask-card">
-    <div class="card-label">PEEPHOLE</div>
-    <div class="vhint" style="margin-left:0">
-      Everything outside the shape is pure black, lines included (for a projector). OFF =
-      the whole screen.
-    </div>
-    <div class="flags" id="mask-shapes" style="margin-bottom:8px"></div>
-    <div id="mask-knobs"></div>
-    <div class="vgroup">KEEP THE SCENE INSIDE</div>
-    <div id="mask-fit-knobs"></div>
-  </div>
-
   <!-- MIDI -------------------------------------------------------------------->
   <div class="card" id="midi-card">
     <div class="card-label">MIDI</div>
@@ -227,6 +311,7 @@
       (or a Fire knob set to the visuals module) can move it too. The visuals also follow
       the ORC's MIDI: drum kicks pulse, snares flash, the held chord sets the colour.
     </div>
+  </div>
   </div>
 
 {% endblock %}

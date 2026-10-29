@@ -214,6 +214,26 @@ def preload_midi_backend():
         mido.get_input_names()
     except Exception:
         pass
+    _warm_noise()
+
+
+def _warm_noise():
+    """Seed numpy's global random generator now, off the audio thread.
+
+    MEASURED 2026-10-19 on the Pi: the first np.random call in a fresh process takes
+    ~34 ms (numpy seeds its global generator lazily; every call after is microseconds).
+    A period is a few ms, so the first NOISE note after any host restart -- the 909
+    snare, and any other voice that draws np.random in its render -- missed its
+    deadline: an xrun and an audible pop (found chasing a BeatBuddy report; the drum
+    host xrun'd on the first snare, every time). The filter, sin/exp etc. were
+    measured too and are not the cost. Pay it here, before JACK activates.
+    Idempotent; never raises."""
+    try:
+        np.random.uniform(-1.0, 1.0, 1024)
+        np.random.standard_normal(16)
+        np.random.random(16)
+    except Exception:
+        pass
 
 
 def autoconnect_module_out(client, out_L, out_R, module_key, log=print):
@@ -251,8 +271,11 @@ def autoconnect_module_out(client, out_L, out_R, module_key, log=print):
 # persistence and the web/Fire fader DISPLAY round-trip unchanged -- nothing here
 # touches set_cc, the restore path, or _bus_level_cc), and shape it only at
 # render time. Synth buses get a squared (perceptual) taper times a ceiling that
-# caps what full fader can produce; drums are transient and less crammed, so they
-# get a plain ceiling for headroom (no squaring). Ceilings tunable via config;
+# caps what full fader can produce. (Drums got a plain ceiling with no squaring on
+# 2026-08-05; on 2026-10-19 owner found the Fire's drum fader "doesn't scale
+# correctly", so the drum bus and the BeatBuddy kit bus are squared too, same
+# ceilings: full fader is exactly as loud as before, the middle is ~6 dB quieter.)
+# Ceilings tunable via config;
 # these defaults were dialled by ear on 2026-08-05. Raising a ceiling makes that
 # bus's MAX louder; it does not change where silence or unity sit.
 POLY_FADER_CEIL = float(_SYNTH_CFG.get("POLY_FADER_CEIL", 0.35))
@@ -662,6 +685,7 @@ _RM_RATIOS = (
 )
 
 _RM_DEPTH_RAMP_S = 0.008    # depth smoothing; see RingMod / PolyVoice._rm_gain
+_VEL_GLIDE_S = 0.004        # velocity glide on a voice steal; PolyVoice._vel_gain
 
 
 def _cc_to_rm_ratio(v):
@@ -1901,20 +1925,51 @@ class PolyVoice:
         self.rm        = None
         self.rm_phase  = 0.0
         self._rm_depth_cur = 0.0
+        self._vel_from = None       # set on a steal: velocity glides from here
+        self._vel_i    = 0
 
     def note_on(self, note, vel, wf, a, d, s, r, age, octave=0):
         self.note      = note                       # original note (for note_off match)
         self.freq      = _midi_to_hz(note + 12 * octave)
         self.waveform  = wf
         self.attack, self.decay, self.sustain, self.release = a, d, s, r
+        # A STOLEN voice is still sounding (2026-10-19, owner: pops "most when
+        # I play quickly", ring mod on, long release = every new note steals a
+        # fading one). Resetting the carrier phase and swapping the velocity in
+        # one sample were a gain STEP in the middle of audible sound (measured
+        # 9x the signal's own steps, _test_poly_steal). So a steal keeps the
+        # carrier and depth running and glides the velocity; only a note from
+        # SILENCE gets the fixed start below.
+        sounding = self.env_state != 'idle' and self.level > 0.0
+        old_vel = self.velocity
         self.velocity  = vel / 127.0
         self.env_state = 'attack'
         self.start_age = age
+        if sounding:
+            self._vel_from, self._vel_i = old_vel, 0
+            return
+        self._vel_from = None
         # Start every note at the same carrier phase so repeated notes sound
         # identical, and snap the smoothed depth to its target: the ramp exists
         # to stop a KNOB MOVE clicking, not to fade the effect in at note-on.
         self.rm_phase  = 0.0
         self._rm_depth_cur = self.rm.depth if self.rm is not None else 0.0
+
+    def _vel_gain(self, n):
+        """The velocity for this block: a scalar, or after a steal a short
+        linear glide from the old note's velocity to the new one."""
+        if self._vel_from is None:
+            return self.velocity
+        g = np.full(n, self.velocity, dtype=np.float32)
+        glide = max(1, int(_VEL_GLIDE_S * self.sr))
+        m = min(n, glide - self._vel_i)
+        if m > 0:
+            t = (self._vel_i + np.arange(1, m + 1, dtype=np.float32)) / glide
+            g[:m] = self._vel_from + (self.velocity - self._vel_from) * t
+            self._vel_i += m
+        if self._vel_i >= glide:
+            self._vel_from = None
+        return g
 
     def note_off(self):
         if self.env_state not in ('idle', 'release'):
@@ -2052,7 +2107,7 @@ class PolyVoice:
         # Ring mod sits between the oscillator and the envelope, so the note's
         # own ADSR still shapes the modulated result rather than a raw multiply.
         return (self._ring_mod(self._osc(n), n)
-                * self._env(n) * self.velocity).astype(np.float32)
+                * self._env(n) * self._vel_gain(n)).astype(np.float32)
 
 
 class PolySynth:
@@ -4399,6 +4454,90 @@ _CHIP_PERSIST_SKIP = {_ENGINE_MASTER_CC, 72, 73, 76}
 # rebuilt nothing useful, and replaying the knobs would overwrite a recalled slot).
 _CHIP_PERSIST_SKIP |= {20, 21, 23, 115} | set(range(_GB_HARM_CC0, _GB_HARM_CC0 + _GB_HARM_N))
 GB_WAVE_STATE_FILE = "~/.orc1_gb_wave.json"
+
+# -- ENGINE-WIDE chip CCs (2026-10-26) ----------------------------------------
+# NESEngine.set_cc gives some CCs ONE value for every voice, whichever channel
+# they arrive on. They used to be saved under the arriving voice, so the file
+# could hold four different filter cutoffs and the boot replay let the LAST
+# voice in file order win, not the value last set. They now live under one key,
+# _CHIP_ENGINE_KEY, in the same file. The set mirrors NESEngine.set_cc exactly
+# (guarded empirically by _test_patch_persist_synth):
+#   * ring mod 12/14/15: engine-wide on EVERY voice (handled before the wave
+#     early-return);
+#   * ADSR 8/9/10/11, filter 70/71/74, octave 75, anti-alias 85: engine-wide on
+#     every voice EXCEPT 'wave' -- the GB wave voice takes 8-11 as its OWN
+#     envelope (GameboyWaveVoice.set_cc) and ignores 70/71/74/75/85, so those
+#     stay per-voice under 'wave'.
+_CHIP_ENGINE_KEY      = "_engine"
+_CHIP_ENGINE_RING_CCS = frozenset({12, 14, 15})
+_CHIP_ENGINE_CCS      = frozenset({8, 9, 10, 11, 70, 71, 74, 75, 85})
+# The voice the boot replay hands set_cc for an _engine CC: any non-wave voice
+# reaches the engine-wide branches; pulse1 always exists.
+_CHIP_ENGINE_APPLY_VOICE = "pulse1"
+
+
+def _chip_cc_is_engine(voice, cc):
+    """True when CC `cc` arriving on chip voice `voice` sets ONE engine-wide value
+    (so it persists under _CHIP_ENGINE_KEY, not under the voice)."""
+    if cc in _CHIP_ENGINE_RING_CCS:
+        return True
+    return cc in _CHIP_ENGINE_CCS and voice != "wave"
+
+
+def _chip_params_migrate(data):
+    """Old voice-keyed engine-wide CCs -> _CHIP_ENGINE_KEY. Returns
+    (new_data, dropped) where dropped = [(voice, cc, value)] copies that lost.
+
+    Rule = what the OLD boot replay actually did, so a deploy changes nothing
+    audible: that replay walked the file in json order (json.load keeps the
+    file's key order; dict iteration is insertion order), voice by voice, CC by
+    CC, calling set_cc each time, so the LAST voice in file order holding an
+    engine-wide CC set the value in force. That value is kept. An existing
+    _engine value always wins over any per-voice copy (it is the newer format).
+    Per-voice CCs are never touched. Pure: `data` is not mutated."""
+    out = {}
+    for k, v in (data or {}).items():
+        out[k] = dict(v) if isinstance(v, dict) else v
+    have = out.get(_CHIP_ENGINE_KEY)
+    have = dict(have) if isinstance(have, dict) else {}
+    picked = {}                     # str(cc) -> (voice, value), last in file order
+    dropped = []
+    for voice, slot in out.items():
+        if voice == _CHIP_ENGINE_KEY or not isinstance(slot, dict):
+            continue
+        for sc in list(slot):
+            try:
+                cc = int(sc)
+            except (TypeError, ValueError):
+                continue
+            if not _chip_cc_is_engine(voice, cc):
+                continue
+            val = slot.pop(sc)
+            key = str(cc)
+            if key in have:
+                dropped.append((voice, cc, val))
+                continue
+            if key in picked:
+                dropped.append((picked[key][0], cc, picked[key][1]))
+            picked[key] = (voice, val)
+    eng = dict(have)
+    for key, (_v, val) in picked.items():
+        eng[key] = val
+    if eng:
+        out[_CHIP_ENGINE_KEY] = eng
+    return out, dropped
+
+
+def _write_chip_params(data):
+    """Atomic write of the whole chip params file (tmp + os.replace). The one
+    writer path: _flush_chip_params and the chip host's boot-time migration."""
+    import json as _json
+    tmp = CHIP_PARAMS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        _json.dump(data, f, indent=2)
+    os.replace(tmp, CHIP_PARAMS_FILE)
+
+
 # Mono skips only CC13 master (bus-levels owns every master). Everything else --
 # waveform, ADSR, portamento, ring mod, filter, and the per-layer semitone/detune/
 # wave/gain -- is remembered, like poly.
@@ -4450,9 +4589,10 @@ def _load_poly_params():
 
 
 def _load_chip_params():
-    """Missing/corrupt -> {}. {voice: {str(cc): value}} -- chip CCs are
-    per-voice (duty/vibrato/sweep) as well as engine-wide (ADSR/ring mod), so
-    the store is keyed by the voice the CC arrived on."""
+    """Missing/corrupt -> {}. RAW file: {voice: {str(cc): value}} plus, since
+    2026-10-26, {"_engine": {str(cc): value}} for the engine-wide CCs (see
+    _chip_cc_is_engine). An old file may still carry engine-wide CCs under
+    voices; _chip_params_migrate normalises it (boot replay + every flush)."""
     try:
         import json as _json
         with open(CHIP_PARAMS_FILE) as f:
@@ -4580,7 +4720,11 @@ def _flush_poly_params(engine):
 
 
 def _flush_chip_params(engine):
-    """As _flush_poly_params, but the store is nested by voice."""
+    """As _flush_poly_params, but the store is nested by voice, with the
+    engine-wide CCs under _CHIP_ENGINE_KEY. The file is migrated on the way
+    through (old per-voice engine-wide copies dropped, see _chip_params_migrate),
+    and a pending engine-wide CC that arrives keyed by a voice is filed under
+    _CHIP_ENGINE_KEY too, so no writer can recreate the per-voice copies."""
     pending = engine._chip_param_pending
     engine._chip_param_pending = {}
     engine._chip_params_dirty  = False
@@ -4588,18 +4732,21 @@ def _flush_chip_params(engine):
         return
     try:
         import json as _json
-        data = _load_chip_params()
+        data, _dropped = _chip_params_migrate(_load_chip_params())
+        if _dropped:
+            print("[synth] chip params: engine-wide copies dropped in migration "
+                  f"(voice, cc, value): {_dropped}", flush=True)
         for voice, ccs in pending.items():
-            slot = data.setdefault(voice, {})
-            if not isinstance(slot, dict):
-                slot = {}
-                data[voice] = slot
             for cc, val in ccs.items():
+                key = voice
+                if voice != _CHIP_ENGINE_KEY and _chip_cc_is_engine(voice, int(cc)):
+                    key = _CHIP_ENGINE_KEY
+                slot = data.get(key)
+                if not isinstance(slot, dict):
+                    slot = {}
+                    data[key] = slot
                 slot[str(cc)] = int(val)
-        tmp = CHIP_PARAMS_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            _json.dump(data, f, indent=2)
-        os.replace(tmp, CHIP_PARAMS_FILE)
+        _write_chip_params(data)
     except Exception as e:
         print(f"[synth] chip param save failed: {e}", flush=True)
 

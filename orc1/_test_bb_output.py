@@ -41,7 +41,8 @@ NS = {"mido": Mido, "time": time, "json": json, "os": os,
       "send_to": lambda port, m: SENT.append((port, m.type, m.channel, m.note)),
       "print": lambda *a, **k: None,
       "_BB_OUT": {"dest": "bbkit", "port": None, "channel": 10},
-      "_BB_OUT_DESTS": ("bbkit", "909", "port"), "_bb_pending_offs": []}
+      "_BB_OUT_DESTS": ("bbkit", "909", "port"), "_bb_pending_offs": [],
+      "_bb_offs_lock": __import__("threading").Lock()}
 for f in ("_bb_out_targets", "_bb_flush_offs", "_bb_out_file", "_bb_out_set", "_bb_out_load"):
     exec(fsrc(f), NS)
 NS["_bb_out_file"] = lambda: os.path.join(TMP, "bb_out.json")   # never the real file
@@ -117,7 +118,9 @@ check(NS["_BB_OUT"] == {"dest": "port", "port": "pisound", "channel": 3},
       "the choice survives a restart (load restores it)", str(NS["_BB_OUT"]))
 # 7. wiring nets (source level)
 emit = SRC[SRC.index("def _bb_emit("):SRC.index("beatbuddy = _bbmod.BeatBuddyMind")]
-check("_bb_out_targets(" in emit and "send_to(port" in emit and "_bb_pending_offs.append" in emit,
+_send = SRC[SRC.index("def _bb_send_target("):SRC.index("def _bb_delayed_run(")]
+check("_bb_out_targets(" in emit and "_bb_send_target(" in emit
+      and "send_to(port" in _send and "_bb_pending_offs.append" in _send,
       "_bb_emit routes every hit through _bb_out_targets (+ schedules port note-offs)")
 check("_bb_flush_offs()" in SRC[SRC.index("def _bb_tick("):SRC.index("arp.subscribe_ticks(1, _bb_tick)")],
       "the BeatBuddy clock tick flushes due note-offs")

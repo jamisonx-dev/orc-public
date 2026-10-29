@@ -28,6 +28,8 @@ rebuild against the page on disk to tell you it is stale.
 """
 
 import ast, hashlib, html, io, json, os, re, subprocess, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cc_surfaces as X
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT  = os.path.join(HERE, "static", "cc_map.html")
@@ -554,78 +556,6 @@ def live_tables():
 
 E = lambda s: html.escape(str(s), quote=True)
 
-CSS = """
-:root{--bg:#faf9f7;--fg:#1a1a1a;--mut:#6b6b6b;--line:#e2ded8;--card:#fff;
- --accent:#b4541f;--chip:#f0ece6;--warn:#8a5b00;--warnbg:#fff6e0;--code:#f5f2ed}
-@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#e8e6e3;--mut:#9a9691;
- --line:#2c2c2c;--card:#1c1c1c;--accent:#e8873f;--chip:#252525;--warn:#e0b060;
- --warnbg:#2a2415;--code:#111}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
- font:14px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
-.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 90px}
-h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
-h2{font-size:15px;text-transform:uppercase;letter-spacing:.09em;color:var(--accent);
- margin:38px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-h3{font-size:13px;margin:20px 0 6px;color:var(--fg)}
-.sub{color:var(--mut);font-size:13px;margin:0 0 18px}
-.bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 0 10px;
- border-bottom:1px solid var(--line);margin-bottom:6px}
-input[type=search]{width:100%;padding:11px 13px;font-size:14px;border-radius:9px;
- border:1px solid var(--line);background:var(--card);color:var(--fg)}
-input[type=search]:focus{outline:2px solid var(--accent);outline-offset:-1px}
-nav{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-nav a{font-size:11px;text-decoration:none;color:var(--mut);background:var(--chip);
- padding:4px 9px;border-radius:99px;border:1px solid var(--line)}
-nav a:hover{color:var(--accent);border-color:var(--accent)}
-.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;
- background:var(--card);margin:8px 0 16px}
-table{border-collapse:collapse;width:100%;font-size:13px}
-th{text-align:left;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
- color:var(--mut);font-weight:600;padding:9px 11px;border-bottom:1px solid var(--line);
- white-space:nowrap;background:var(--card);position:sticky;top:0}
-td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
-tr:last-child td{border-bottom:0}
-td.cc{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;
- color:var(--accent);white-space:nowrap}
-td.mono,code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-code{background:var(--code);padding:1px 5px;border-radius:4px}
-.src{color:var(--mut);font-size:11px;white-space:nowrap}
-.note{background:var(--warnbg);border:1px solid var(--warn);color:var(--warn);
- padding:10px 13px;border-radius:9px;font-size:12.5px;margin:10px 0}
-.miss{color:var(--mut);font-style:italic}
-.tag{display:inline-block;font-size:10px;padding:1px 7px;border-radius:99px;
- background:var(--chip);border:1px solid var(--line);color:var(--mut);
- margin-right:4px;white-space:nowrap}
-.foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);
- color:var(--mut);font-size:11.5px}
-.foot code{font-size:11px}
-.hidden{display:none}
-.count{color:var(--mut);font-size:11px;font-weight:400;text-transform:none;
- letter-spacing:0;margin-left:8px}
-"""
-
-JS = """
-const q = document.getElementById('q');
-const rows = Array.from(document.querySelectorAll('tbody tr'));
-const secs = Array.from(document.querySelectorAll('section'));
-function apply(){
-  const t = q.value.trim().toLowerCase();
-  rows.forEach(r => r.classList.toggle('hidden', t && !r.textContent.toLowerCase().includes(t)));
-  secs.forEach(s => {
-    const vis = s.querySelectorAll('tbody tr:not(.hidden)').length;
-    const has = s.querySelectorAll('tbody tr').length;
-    s.classList.toggle('hidden', !!t && has > 0 && vis === 0);
-  });
-}
-q.addEventListener('input', apply);
-q.addEventListener('keydown', e => { if (e.key === 'Escape') { q.value=''; apply(); }});
-document.addEventListener('keydown', e => {
-  if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
-});
-"""
-
-
 def table(headers, rows_html, section_id=None):
     if not rows_html:
         return '<p class="miss">nothing found</p>'
@@ -739,24 +669,24 @@ def _voice_tags(extra):
 
 
 def build(live, handlers, mix_consts, web, fire=None):
-    o = io.StringIO()
-    w = o.write
     gen = time.strftime("%Y-%m-%d %H:%M:%S")
-
-    secs = []   # (id, title)
+    sections = []          # one dict per page section, rendered at the end
+    top = []               # notes shown above the groups
+    cur = [None]
+    group_of = {"channels": X.G_BRAIN, "global": X.G_BRAIN, "ctrl": X.G_BRAIN,
+                "handlers": X.G_VOICES, "drums": X.G_RHYTHM,
+                "sampler": X.G_SAMPLE, "mixtrack": X.G_CTRL,
+                "fire": X.G_CTRL, "web": X.G_REF}
 
     def sec(sid, title, count=None):
-        secs.append((sid, title))
-        c = f'<span class="count">{count}</span>' if count is not None else ""
-        w(f'<section id="{sid}"><h2>{E(title)}{c}</h2>')
+        cur[0] = {"id": sid, "title": title, "count": count,
+                  "group": group_of.get(sid, X.G_REF), "parts": []}
+        sections.append(cur[0])
 
-    w('<div class="wrap">')
-    w('<h1>ORC-1 &mdash; CC map</h1>')
-    w('<p class="sub">Every control-change assignment on the instrument. '
-      'Press <code>/</code> to search.</p>')
-    w('<div class="bar"><input type="search" id="q" '
-      'placeholder="Search CC number, name, voice or page&hellip;">'
-      '<nav id="nav"></nav></div>')
+    def w(x):
+        if x == "</section>":
+            return
+        (cur[0]["parts"] if cur[0] else top).append(x)
 
     if not live.get("ok"):
         w(f'<div class="note"><b>Live tables unavailable</b> &mdash; '
@@ -808,16 +738,6 @@ def build(live, handlers, mix_consts, web, fire=None):
                     for cc, act in sorted(d.items())]
             w(f'<h3>{E(titles.get(name, name))} <span class="count">{len(d)} CCs</span></h3>')
             w(table(["CC", "Action"], rows))
-        w('</section>')
-
-    # -- bus volumes ---------------------------------------------------------
-    if live.get("ok") and live["vol"]["channel"]:
-        v = live["vol"]
-        rows = [f"<tr><td class='cc'>{v[k]}</td><td>{k.capitalize()} bus level</td>"
-                f"<td>0&ndash;127</td></tr>"
-                for k in ("master", "poly", "chip", "drum")]
-        sec("bus", f"Bus levels (channel {v['channel']})", len(rows))
-        w(table(["CC", "Control", "Range"], rows))
         w('</section>')
 
     # -- synth voice handlers ------------------------------------------------
@@ -956,15 +876,49 @@ def build(live, handlers, mix_consts, web, fire=None):
         w(table(["Page script", "CCs sent"], rows))
         w('</section>')
 
-    w(f'<div class="foot">Generated {E(gen)} by <code>gen_cc_map.py</code></div>')
-    w('</div>')
+    for sx in X.all_sections():
+        sections.append({"id": sx["id"], "title": sx["title"], "count": X.count(sx),
+                         "group": sx["group"], "parts": [render_surface(sx)]})
 
-    nav = "".join(f'<a href="#{sid}">{E(t)}</a>' for sid, t in secs)
-    body = o.getvalue().replace('<nav id="nav"></nav>', f'<nav>{nav}</nav>')
-    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>ORC-1 CC map</title><style>{CSS}</style></head><body>'
-            f'{body}<script>{JS}</script></body></html>')
+    out = list(top)
+    for g in X.GROUPS:
+        mine = [x for x in sections if x["group"] == g]
+        if not mine:
+            continue
+        total = sum(x["count"] or 0 for x in mine)
+        out.append(f'<details class="cc-group card" open><summary>'
+                   f'<span class="cc-gt">{E(g)}</span>'
+                   f'<span class="count">{total}</span></summary>')
+        for x in mine:
+            c = f'<span class="count">{x["count"]}</span>' if x["count"] is not None else ""
+            out.append(f'<details class="cc-sec" id="{E(x["id"])}"><summary>'
+                       f'<span class="cc-st">{E(x["title"])}</span>{c}</summary>'
+                       f'<div class="cc-body">{"".join(x["parts"])}</div></details>')
+        out.append("</details>")
+    out.append(f'<div class="cc-foot">Generated {E(gen)} by <code>gen_cc_map.py</code> '
+               f'from the running code; it rebuilds itself when the code changes.</div>')
+    return "".join(out)
+
+
+def render_surface(sx):
+    """One cc_surfaces section -> HTML (cells are escaped here)."""
+    o = []
+    if sx.get("intro"):
+        o.append(f'<p class="sub">{sx["intro"]}</p>')       # authored, may hold <b>/<code>/<a>
+    for b in sx["blocks"]:
+        if b["title"]:
+            o.append(f'<h3>{E(b["title"])}</h3>')
+        if b.get("pre"):
+            o.append(f'<pre class="cc-pre">{E(b["pre"])}</pre>')
+        if b["rows"]:
+            rows = []
+            for r in b["rows"]:
+                cells = "".join(
+                    f"<td class='cc'>{E(c)}</td>" if i in b["numcols"] else f"<td>{E(c)}</td>"
+                    for i, c in enumerate(r))
+                rows.append(f"<tr>{cells}</tr>")
+            o.append(table([E(h) for h in b["headers"]], rows))
+    return "".join(o)
 
 
 # ---------------------------------------------------------------------------

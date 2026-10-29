@@ -422,48 +422,9 @@ ORC.subscribe(function(d) {
   }
 });
 
-// ── SKIPBACK SOURCE CARD ──────────────────────────────────────────────────────
-// "What does the ring buffer (and thus the sampler) hear?"
-// Presets: SYNTH DIRECT = ORC1-Synth:out_L/R (mixer-independent, always audible).
-//          L12 MASTER   = system:capture_13/14 (hears external instruments too,
-//                         but requires L12 master fader up and post-fader).
-// Free pickers: any JACK output port pair.
-async function loadSkipback() {
-  const l = document.getElementById('sb-l'),
-        r = document.getElementById('sb-r'),
-        st = document.getElementById('sb-status');
-  if (!l) return;
-  try {
-    const d = await fetch('/api/skipback/source').then(x => x.json());
-    const opts = sel => d.sources.map(p =>
-      `<option${sel.includes(p) ? ' selected' : ''}>${p}</option>`).join('');
-    l.innerHTML = opts(d.left);
-    r.innerHTML = opts(d.right);
-    if (st) st.textContent = 'now: ' + (d.left[0] || '—') + ' + ' + (d.right[0] || '—');
-  } catch (e) {
-    if (st) st.textContent = 'api unavailable';
-  }
-}
-
-async function applySkipback(left, right) {
-  const l = left  || document.getElementById('sb-l').value;
-  const r = right || document.getElementById('sb-r').value;
-  try {
-    await fetch('/api/skipback/source', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ left: l, right: r })
-    });
-  } catch (e) {}
-  loadSkipback();
-}
-
-function skipbackPreset(which) {
-  if (which === 'synth') applySkipback('ORC1-Synth:out_L', 'ORC1-Synth:out_R');
-  else                   applySkipback('system:capture_13', 'system:capture_14');
-}
-
-loadSkipback();
+// (The old "SKIPBACK · TRACK 0 INPUT" card was removed 2026-10-25: it wrote
+//  the legacy ~/.orc1_skipback_src.json, which overrides /skipback's track-0
+//  source in the recorder. /skipback is the only source editor now.)
 
 
 // ── ONE-SHOT SAMPLE BANK (relocated from the drum channel 2026-07-21) ──────────

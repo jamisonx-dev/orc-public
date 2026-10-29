@@ -1,0 +1,11 @@
+[Unit]
+Description=ORC-1 boot WiFi fallback (start the hotspot if no network connects)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/pibox/orc/orc1/orc1_netmode.sh auto
+
+[Install]
+WantedBy=multi-user.target

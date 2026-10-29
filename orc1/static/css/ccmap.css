@@ -1,0 +1,62 @@
+/* /cc -- the generated CC map. The body is built by gen_cc_map.py; this file only styles it
+   with the shared ORC tokens (shared.css), so it looks like the other pages. */
+.shell { max-width: 980px; }
+#cc-page { display: flex; flex-direction: column; gap: 10px; }
+.cc-help { font-size: 12px; color: var(--sub); line-height: 1.5; margin: 0; }
+.cc-help code, #cc-page code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
+  background: var(--btn-bg); padding: 1px 5px; border-radius: 3px; color: var(--body); }
+.cc-bar { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center;
+  flex-wrap: wrap; padding: 8px 0; background: var(--bg); }
+.cc-bar input[type=search] { flex: 1 1 220px; min-width: 0; padding: 9px 12px; font-size: 14px;
+  background: var(--panel); color: var(--bright); border: 1px solid var(--border2); border-radius: 3px; }
+.cc-bar input[type=search]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+#cc-none { color: var(--sub); font-size: 13px; padding: 12px 2px; }
+
+/* groups and sections: collapsible cards */
+.cc-group { padding: 0; }
+.cc-group > summary, .cc-sec > summary { list-style: none; cursor: pointer; display: flex;
+  align-items: center; justify-content: space-between; gap: 10px; user-select: none; }
+.cc-group > summary::-webkit-details-marker, .cc-sec > summary::-webkit-details-marker { display: none; }
+.cc-group > summary { padding: 14px 18px; font-family: var(--fh); font-size: 13px; font-weight: 700;
+  letter-spacing: .1em; color: var(--label); }
+.cc-group > summary::before, .cc-sec > summary::before { content: "\25B8"; color: var(--dead);
+  margin-right: 8px; transition: transform .15s; display: inline-block; }
+.cc-group[open] > summary::before, .cc-sec[open] > summary::before { transform: rotate(90deg); }
+.cc-gt, .cc-st { flex: 1; }
+.cc-group[open] > summary { border-bottom: 1px solid var(--border2); }
+.cc-sec { border-bottom: 1px solid var(--border); }
+.cc-sec:last-child { border-bottom: 0; }
+.cc-sec > summary { padding: 11px 18px; font-size: 14px; color: var(--bright); }
+.cc-sec > summary:hover { background: var(--accent-bg); }
+.cc-sec[open] > summary { color: var(--accent); }
+.cc-body { padding: 4px 18px 16px; }
+.count { color: var(--dead); font-size: 11px; font-weight: 400; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cc-body h3 { font-family: var(--fh); font-size: 11px; letter-spacing: .1em; font-weight: 700;
+  color: var(--label); margin: 18px 0 6px; text-transform: uppercase; }
+.cc-body h3 .count { margin-left: 6px; letter-spacing: 0; }
+.sub { color: var(--sub); font-size: 12.5px; line-height: 1.5; margin: 8px 0; }
+.sub a { color: var(--accent); }
+.note { background: rgba(255,170,0,.08); border: 1px solid rgba(255,170,0,.35); color: #e0b060;
+  padding: 9px 12px; border-radius: 3px; font-size: 12.5px; }
+
+/* tables */
+.scroll { overflow-x: auto; border: 1px solid var(--border2); border-radius: 3px; margin: 6px 0; }
+.scroll table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.scroll th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--label); font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--border2);
+  white-space: nowrap; background: var(--btn-bg); }
+.scroll td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--body); }
+.scroll tr:last-child td { border-bottom: 0; }
+.scroll td.cc { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700;
+  color: var(--accent); white-space: nowrap; }
+.scroll td.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.tag { display: inline-block; font-size: 10.5px; padding: 1px 7px; margin: 0 4px 3px 0; border-radius: 3px;
+  background: var(--btn-bg); border: 1px solid var(--dim); color: var(--muted); white-space: nowrap; }
+.tag b { color: var(--accent); }
+.miss { color: var(--dead); font-style: italic; }
+.cc-pre { white-space: pre-wrap; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+  background: var(--btn-bg); border: 1px solid var(--border2); border-radius: 3px; padding: 10px 12px;
+  color: var(--body); margin: 6px 0; }
+.cc-foot { color: var(--dead); font-size: 11px; padding: 6px 2px 0; }
+.hidden { display: none !important; }
+@media (max-width: 600px) { .cc-body { padding: 4px 12px 14px; } .cc-sec > summary { padding: 11px 12px; } }

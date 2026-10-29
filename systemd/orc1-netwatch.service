@@ -1,0 +1,13 @@
+[Unit]
+Description=ORC-1 network watchdog (no network for 2 min -> known WiFi -> hotspot)
+After=NetworkManager.service orc1-netfallback.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/home/pibox/orc/orc1/orc1_netwatch.sh
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

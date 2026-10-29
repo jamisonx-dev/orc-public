@@ -1,9 +1,13 @@
 # ORC-1 Installation Guide
 
-This guide covers installing ORC-1 on a fresh Linux machine. It documents **implemented reality** as verified on the reference Pi (2026-09-21). See `ARCHITECTURE.md` for how the pieces fit together once running.
+This guide covers installing ORC-1 on a fresh Linux machine. It documents **implemented reality** as verified on the reference Pi (2026-09-21, services and the user note re-checked 2026-10-28). See `ARCHITECTURE.md` for how the pieces fit together once running.
 
-> **Read this first.** The unit files in `orc/systemd/` are current: the brain, `orc1-jackd`, the six module hosts, `orc1-web`, `orc1-system`, `skipback-record`, the `orc1-bridge@` and `orc1-jackd@` templates, `bt-route`, the monitor kiosks, `orc1-kikpad` and `orc1-zoomfx`. Two things are **not** in the repo:
-> - **The hosts' jackd coupling.** `orc1-drum`, `-poly`, `-chip`, `-mono` and `-sampler` get their `After=`/`BindsTo=orc1-jackd` from a drop-in, `50-jack-server.conf`, that `orc1_assign_module_out.sh` *generates* (it also points a host at another card's server). The repo ships no copy, so on a fresh install run `sudo ~/orc/orc1/orc1_assign_module_out.sh <drum|poly|chip|mono|sampler> main` once per host after copying the units. (Not tested on a fresh machine; `orc1-bbkit` carries its coupling in the unit itself.)
+> **It has only ever been installed on the reference Pi.** Nothing in it needs a Pi (Python, standard Debian packages, one small C file), but a fresh install on another machine has not been done yet, so expect to fix things on the way. Known Pi-isms: the `/system` health page calls `vcgencmd` (Pi only; it just shows nothing elsewhere), the memory-cgroup step below edits the Pi's `/boot/firmware/cmdline.txt`, and the network-mode scripts assume a Pi-style NetworkManager WiFi setup.
+
+> **The user name `pibox` is written into the files.** 34 unit files in `orc/systemd/` (`User=pibox`, `/home/pibox/orc/...`), the udev rule, and some scripts (`orc1_web.py`, `orc1_sampler_host.py`, the `orc1_net*` network scripts, `orc1_samba_trust.py`, `daw/daw_mode.sh`, `daw/visuals.sh`) use `/home/pibox`. The simplest install is as a user named `pibox` with the repo at `~/orc`; otherwise replace `pibox` in those files first.
+
+> **Read this first.** The unit files in `orc/systemd/` are current: the brain, `orc1-jackd`, the six module hosts, `orc1-web`, `orc1-system`, `skipback-record`, the `orc1-bridge@` and `orc1-jackd@` templates, `bt-route`, the monitor kiosks, `orc1-kikpad`, `orc1-zoomfx`, the network units (`orc1-net`, `orc1-netwatch`, `orc1-netfallback`) and `orc1-health` + its timer. Two things are **not** in the repo:
+> - **The hosts' jackd coupling.** `orc1-drum`, `-poly`, `-chip`, `-mono` and `-sampler` (and `-bbkit` once it is moved to another card) get their `After=`/`BindsTo=orc1-jackd` from a drop-in, `50-jack-server.conf`, that `orc1_assign_module_out.sh` *generates* (it also points a host at another card's server). The repo ships no copy, so on a fresh install run `sudo ~/orc/orc1/orc1_assign_module_out.sh <drum|poly|chip|mono|sampler> main` once per host after copying the units. (Not tested on a fresh machine; `orc1-bbkit` carries its coupling in the unit itself.)
 > - **`orc1-firevu`** (the Fire's pad VU, for the custom Fire firmware only) runs a script from `~/fire_fw/`, outside this repo. Ignore it unless you have that firmware.
 >
 > `orc1-synth` is **retired**; the repo no longer ships it.
@@ -90,6 +94,17 @@ sudo sed -i '1 s/$/ cgroup_enable=memory/' /boot/firmware/cmdline.txt
 sudo reboot
 # after: memory must be listed
 cat /sys/fs/cgroup/cgroup.controllers
+```
+(On a non-Pi machine the kernel command line lives in the bootloader config instead, e.g. `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, then `sudo update-grub`. Many distros already enable the memory cgroup; check the file above first.)
+
+### Keep the logs across reboots
+
+Raspberry Pi OS keeps the journal in RAM only (`Storage=volatile`), so a reboot erases every log, including why it rebooted. The repo's journald drop-ins keep it on disk, capped at 200 MB:
+
+```bash
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo cp ~/orc/systemd/journald.conf.d/*.conf /etc/systemd/journald.conf.d/
+sudo systemctl restart systemd-journald
 ```
 
 ---
@@ -184,6 +199,9 @@ The reference machine runs these units, all as user `pibox`:
 | `bt-route` | Bluetooth output router | Pins the renaming `bluealsa-aplay` client |
 | `orc1-zoomfx` | `orc1_zoomfx.py` | **Optional** (only with a Zoom MS-70CDR): the `zoomfx` module. Unit file in `orc/systemd/` |
 | `orc1-kikpad` | `orc1_kikpad_link.py` | **Optional** (only with the Midiplus SmartPad / KIKPAD firmware): sends the ORC's key to the pad. Unit file in `orc/systemd/`; needs `mido` (already required) and the web process running |
+| `orc1-net` | `orc1_net.py 5003` | The network + files page on port 5003 (WiFi scan/join/forget, hotspot password, file downloads), also embedded on `/system` |
+| `orc1-netfallback` / `orc1-netwatch` | `orc1_netmode.sh auto` / `orc1_netwatch.sh` | **Optional** (written for the Pi's WiFi + NetworkManager): no network ~1 min after boot, or for 2 min while running, -> saved WiFi -> the `pb-hotspot` hotspot. See the owner's manual, "Away from home" |
+| `orc1-health` (+ `.timer`) | `orc1_health.py` | Periodic read-only health check |
 
 **`orc1-synth` is RETIRED.** `orc1_synth.py` is now a shared DSP *library* imported by the six hosts, not a service. Do **not** install or enable an `orc1-synth` unit.
 

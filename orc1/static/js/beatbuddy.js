@@ -64,6 +64,9 @@
       if (!p || !p.value) { flash("no port"); return; }
       this.cmd("BB_OUTPUT", { dest: "port", port: p.value, channel: parseInt(c.value, 10) });
     },
+    // MIX (2026-10-19): a level per drum, applied to the hit before any output.
+    mix: function (group, gain) { this.cmd('BB_MIX', { group: group, gain: gain }); },
+    mixReset: function () { this.cmd('BB_MIX', { group: 'reset' }); },
     refresh: function () { poll(); }
   };
 
@@ -111,6 +114,59 @@
       if (ch && document.activeElement !== ch) ch.value = o.channel;
     }
   }
+  var MIX_GROUPS = [['kick','KICK'],['snare','SNARE'],['rim','RIM / CLAP'],['hat','HATS'],
+                    ['tom','TOMS'],['ride','RIDE'],['crash','CRASH'],['perc','PERC']];
+  var mixBuilt = false, mixTouch = 0, muteMem = {};
+  // Dragging fires ~60 input events a second; the brain rewrites a file per change, so send at most one per 120 ms
+  // (the latest value always goes out).
+  var mixTimer = {}, mixPend = {};
+  function sendMix(g, val) {
+    mixPend[g] = val;
+    if (mixTimer[g]) return;
+    mixTimer[g] = setTimeout(function () { mixTimer[g] = null; BB.mix(g, mixPend[g]); }, 120);
+  }
+  function buildMix() {
+    var host = document.getElementById('bb-mix');
+    if (!host || mixBuilt) return;
+    mixBuilt = true;
+    MIX_GROUPS.forEach(function (g) {
+      var row = document.createElement('div');
+      row.className = 'bb-mixrow'; row.id = 'bb-mix-' + g[0];
+      row.innerHTML = "<div class='hd'><span></span><span class='v'></span>" +
+        "<button class='btn mute'>M</button></div><input type='range' min='0' max='200' step='5'>";
+      row.querySelector('.hd span').textContent = g[1];
+      var sl = row.querySelector('input'), mu = row.querySelector('.mute');
+      sl.oninput = function () {
+        mixTouch = Date.now();
+        row.querySelector('.v').textContent = sl.value + '%';
+        row.classList.toggle('muted', +sl.value === 0);
+        mu.classList.toggle('on', +sl.value === 0);
+        sendMix(g[0], sl.value / 100);
+      };
+      mu.onclick = function () {
+        mixTouch = Date.now();
+        if (+sl.value === 0) { sl.value = muteMem[g[0]] || 100; }
+        else { muteMem[g[0]] = sl.value; sl.value = 0; }
+        sl.oninput();
+      };
+      host.appendChild(row);
+    });
+  }
+  function renderMix(mix) {
+    buildMix();
+    if (Date.now() - mixTouch < 1500) return;   // don't fight a drag in progress
+    MIX_GROUPS.forEach(function (g) {
+      var row = document.getElementById('bb-mix-' + g[0]);
+      if (!row) return;
+      var v = Math.round(((mix && mix[g[0]] != null) ? mix[g[0]] : 1) * 100);
+      var sl = row.querySelector('input');
+      if (document.activeElement !== sl) sl.value = v;
+      row.querySelector('.v').textContent = v + '%';
+      row.classList.toggle('muted', v === 0);
+      row.querySelector('.mute').classList.toggle('on', v === 0);
+    });
+  }
+
   window.BB = BB;
 
   function passes(s) {
@@ -219,6 +275,7 @@
     ["bb-match"].forEach(function (id) { var e = document.getElementById(id); if (e) e.disabled = ext; });
     if (st && st.song && st.song !== curSong) { curSong = st.song; renderSongs(); }
     renderOutput(st && st.output);
+    renderMix(st && st.mix);
   }
 
   function bindFilters() {

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}ORC-1 · CC MAP{% endblock %}
+{% block page_label %}CC MAP{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/ccmap.css">{% endblock %}
+
+{% block content %}
+<div class="page" id="cc-page">
+  <p class="cc-help">Every MIDI control the ORC listens to, read out of the running code (it rebuilds
+    itself when the code changes). Press <code>/</code> to search; a search opens every section with a match.</p>
+  <div class="cc-bar">
+    <input type="search" id="q" placeholder="Search a CC number, name, voice or page…" autocomplete="off">
+    <button class="btn" id="cc-open" type="button">OPEN ALL</button>
+    <button class="btn" id="cc-close" type="button">CLOSE ALL</button>
+  </div>
+  <div id="cc-none" class="hidden">Nothing matches.</div>
+  <div id="cc-body">{{ body|safe }}</div>
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script>
+(function () {
+  var q = document.getElementById('q');
+  var groups = Array.prototype.slice.call(document.querySelectorAll('.cc-group'));
+  var secs = Array.prototype.slice.call(document.querySelectorAll('.cc-sec'));
+  var none = document.getElementById('cc-none');
+  // the unit a search hides: a table row, or a whole <pre> block
+  function units(s) { return Array.prototype.slice.call(s.querySelectorAll('tbody tr, .cc-pre')); }
+  var wasOpen = null;
+
+  function apply() {
+    var t = q.value.trim().toLowerCase();
+    if (t && wasOpen === null) wasOpen = secs.map(function (s) { return s.open; });
+    var shown = 0;
+    secs.forEach(function (s) {
+      var title = (s.querySelector('summary').textContent || '').toLowerCase();
+      var titleHit = !!t && title.indexOf(t) >= 0;
+      var us = units(s), vis = 0;
+      us.forEach(function (u) {
+        var hit = !t || titleHit || u.textContent.toLowerCase().indexOf(t) >= 0;
+        u.classList.toggle('hidden', !hit);
+        if (hit) vis++;
+      });
+      var show = !t || titleHit || vis > 0;
+      s.classList.toggle('hidden', !show);
+      if (t && show) s.open = true;
+      if (show) shown++;
+    });
+    groups.forEach(function (g) {
+      var any = g.querySelector('.cc-sec:not(.hidden)');
+      g.classList.toggle('hidden', !any);
+      if (t && any) g.open = true;
+    });
+    none.classList.toggle('hidden', !t || shown > 0);
+    if (!t && wasOpen) { secs.forEach(function (s, i) { s.open = wasOpen[i]; }); wasOpen = null; }
+  }
+  q.addEventListener('input', apply);
+  q.addEventListener('keydown', function (e) { if (e.key === 'Escape') { q.value = ''; apply(); } });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+  });
+  document.getElementById('cc-open').addEventListener('click', function () {
+    groups.forEach(function (g) { g.open = true; }); secs.forEach(function (s) { s.open = true; });
+  });
+  document.getElementById('cc-close').addEventListener('click', function () {
+    secs.forEach(function (s) { s.open = false; });
+  });
+  // a link or URL hash (#bus) opens the section it names
+  function openHash() {
+    var id = location.hash.slice(1), el = id && document.getElementById(id);
+    if (!el) return;
+    var p = el;
+    while (p) { if (p.tagName === 'DETAILS') p.open = true; p = p.parentElement; }
+    el.scrollIntoView();
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash();
+})();
+</script>
+{% endblock %}
