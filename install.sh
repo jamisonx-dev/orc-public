@@ -220,11 +220,6 @@ for u in $CORE; do
     if [ "$(systemctl is-active "$u")" = active ]; then ok "$u is running"; else bad "$u is $(systemctl is-active "$u" || true)  (journalctl -u $u -n 30)"; fi
 done
 PORTS="$(sudo -u "$U" env JACK_NO_START_SERVER=1 jack_lsp 2>/dev/null || true)"
-if sudo journalctl -u orc1 -n 40 --no-pager 2>/dev/null | grep -q "No MIDI inputs found"; then
-    note "  ->    the brain (orc1) stops when the machine has NO MIDI input at all, and it takes the sound"
-    note "        hosts down with it each time it retries. Plug in any MIDI controller or interface; it"
-    note "        starts by itself within a few seconds (it retries every 5 s)."
-fi
 for p in Drum Poly Chip Mono Sampler BBKit; do
     if echo "$PORTS" | grep -q "^ORC1-$p:"; then ok "ORC1-$p has its audio ports"; else bad "ORC1-$p has no audio ports"; fi
 done

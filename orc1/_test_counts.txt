@@ -57,6 +57,7 @@ orc1/_test_module_bind.py 66
 orc1/_test_module_out.py 48
 orc1/_test_mono.py 25
 orc1/_test_netmode.py 10
+orc1/_test_no_inputs.py 4
 orc1/_test_orc_ports.py 16
 orc1/_test_pad_cc.py 34
 orc1/_test_padmap.py 71

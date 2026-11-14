@@ -7384,8 +7384,13 @@ def main():
         print("  Mixtrack not connected -- running without it")
 
     if not din_in and not usb_ins and not mixtrack_port and not fire_port:
-        print("\n  No MIDI inputs found.")
-        sys.exit(1)
+        # NOT an exit (2026-11-13, owner: "it has an internal seq and arp"). On a machine
+        # with no controller this used to exit 1; systemd retried every 5 s and each retry
+        # stopped the six sound hosts (PartOf), so the web page's sequencer and arp had
+        # nothing to play. Found by installing in a clean VM. The hot-plug scan below opens
+        # whatever is plugged in later.
+        print("\n  No MIDI inputs found -- running on the internal sequencer / arp and the web page;"
+              " the hot-plug scan opens a controller when one is plugged in.")
 
 
     def _arp_note_on(note, vel, port_key, ch):
