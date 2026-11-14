@@ -2,7 +2,26 @@
 
 This guide covers installing ORC-1 on a fresh Linux machine. It documents **implemented reality** as verified on the reference Pi (2026-09-21, services and the user note re-checked 2026-10-28). See `ARCHITECTURE.md` for how the pieces fit together once running.
 
-> **It has only ever been installed on the reference Pi.** Nothing in it needs a Pi (Python, standard Debian packages, one small C file), but a fresh install on another machine has not been done yet, so expect to fix things on the way. Known Pi-isms: the `/system` health page calls `vcgencmd` (Pi only; it just shows nothing elsewhere), the memory-cgroup step below edits the Pi's `/boot/firmware/cmdline.txt`, and the network-mode scripts assume a Pi-style NetworkManager WiFi setup.
+## Quick install: `install.sh`
+
+```bash
+git clone https://github.com/jamisonx-dev/orc-public.git ~/orc
+cd ~/orc && bash install.sh
+```
+
+Run it as the user the ORC will run as (not root; it calls `sudo` itself), on Raspberry Pi OS, Debian or Ubuntu. It does the steps of this guide: the packages (Python libraries from apt), the audio group and real-time limits, every unit file with **your** user name and folder in place of `pibox` and `/home/pibox/orc` (it also edits the 13 scripts in the repo that carry them, so git shows those as changed), the hosts' jackd drop-in, then it enables and starts the core services and checks each one. It asks before the optional parts: the packaged LV2 effects, the monitor modes, passwordless sudo (the web page's restart, sound card and power buttons need it), and on a Pi the memory cgroup. `bash install.sh --help` lists the flags (`--yes` = no questions, core only). Safe to run again.
+
+**How it was checked (2026-11-13):** in a brand-new Debian 13 virtual machine (x86, user `orc`, a dummy sound card and a virtual MIDI port), installing the public copy twice in a row: all 11 core services running, each of the six hosts' JACK ports present, `ORC1-Synth-Bus` present, the web page answering, the skipback ring moving at ~192 kB/s. The test is `.github/workflows/install-test.yml` in the private repo. **Not checked:** a real Raspberry Pi from a blank card, real sound, any controller, the `--with-fx` / `--with-monitor` / sudoers paths, Ubuntu.
+
+Two things a new machine meets that the reference Pi does not:
+- **The brain needs at least one MIDI input.** With none at all (no controller, no MIDI interface) `orc1` exits and retries every 5 s, stopping the sound hosts each time. Plug anything in and it starts by itself. (The Pi always has the pisound's port.)
+- **Four drum samples are not in the repo** (`orc1/samples/cymbal.wav`, `ride.wav`, `ride_bell.wav`, `splash.wav`), nor the chip PCM folder or the BeatBuddy kits: those voices are silent until you add your own files there.
+
+What it does not do: the Airwindows effects (built from source, below), the WiFi / hotspot mode, and the optional-gear services (their unit files are copied but left off).
+
+The rest of this guide is the same install by hand, and the reference for what each piece is.
+
+> **By hand it has only ever been installed on the reference Pi.** Nothing in it needs a Pi (Python, standard Debian packages, one small C file), but a fresh install on another machine has not been done yet, so expect to fix things on the way. Known Pi-isms: the `/system` health page calls `vcgencmd` (Pi only; it just shows nothing elsewhere), the memory-cgroup step below edits the Pi's `/boot/firmware/cmdline.txt`, and the network-mode scripts assume a Pi-style NetworkManager WiFi setup.
 
 > **The user name `pibox` is written into the files.** 34 unit files in `orc/systemd/` (`User=pibox`, `/home/pibox/orc/...`), the udev rule, and some scripts (`orc1_web.py`, `orc1_sampler_host.py`, the `orc1_net*` network scripts, `orc1_samba_trust.py`, `daw/daw_mode.sh`, `daw/visuals.sh`) use `/home/pibox`. The simplest install is as a user named `pibox` with the repo at `~/orc`; otherwise replace `pibox` in those files first.
 
@@ -34,7 +53,7 @@ This guide covers installing ORC-1 on a fresh Linux machine. It documents **impl
 sudo apt update
 sudo apt install -y \
     jackd2 \
-    jack-tools \
+    jack-example-tools \
     alsa-utils \
     zita-ajbridge \
     sox \
@@ -46,7 +65,7 @@ sudo apt install -y \
 
 **What each one is for:**
 - `jackd2` — the JACK audio server (`jackd`, started by `orc1-jackd`).
-- `jack-tools` — `jack_connect`, `jack_lsp`, `jack_disconnect` (routing + watchdog checks).
+- `jack-example-tools` — `jack_connect`, `jack_lsp`, `jack_disconnect` (routing + watchdog checks). That is the package on Debian 13 (checked with `dpkg -S` on the reference Pi); on older releases they are part of `jackd2` itself.
 - `alsa-utils` — `aplay`, `aconnect`, `amidi` (card enumeration, MIDI wiring).
 - `zita-ajbridge` — provides `zita-j2a` / `zita-a2j`, the adaptive resamplers that bridge a second soundcard's ports into the main JACK graph (capture from a Perform-VE or the Mixtrack, or wiring another card's audio in). Needed for those bridges; routing a *module* to another card uses a second jackd instead. The older `alsa_in`/`alsa_out` example tools are deliberately NOT used for bridges — their resampler drifts audibly.
 - `sox` + `libsox-fmt-mp3` — decodes audio files (wav/mp3/flac/ogg/aiff) for the file-deck feature and MP3 export.
