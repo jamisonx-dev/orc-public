@@ -118,16 +118,29 @@ MODULE_KEYS = [                       # list order fixes the id used on the wire
                                       # from the noise channel via CC 114 key split.
     "visuals",                        # appended 2026-09-29: the HDMI VISUALS scenes
                                       # (daw/orc_visuals.py). NOT a sound module and
-                                      # no host: it only reads CC 20-27 on its bound
-                                      # channel off the synth bus (a Fire knob naming
+                                      # no host: it reads CC 20-27 on its bound channel
+                                      # from the ORC's port ORC-visuals (a Fire knob naming
                                       # "visuals", any controller, or the /system
                                       # card). Starts unbound; bind it from /matrix or
                                       # the /system VISUALS card.
     "zoomfx",                         # appended 2026-10-13: the Zoom MultiStomp pedal
                                       # (MS-70CDR) driven by plain CCs on its bound
                                       # channel. NOT a sound module, no audio host:
-                                      # orc1_zoomfx.py reads the synth bus and owns
+                                      # orc1_zoomfx.py reads the ORC's port ORC-zoomfx, owns
                                       # the pedal's USB port. Starts unbound.
+    "mxvbox",                         # appended 2026-10-29: the MXV S805 box's beat-
+                                      # locked visuals (mxvbox/pi/conductor.py, service
+                                      # orc1-boxvis, drives the box on eth0). NOT a sound
+                                      # module, no host: the conductor reads its knobs
+                                      # (mxvbox_knobs.py) + clip cues from the ORC's port ORC-mxvbox on
+                                      # the channel this is bound to. Starts unbound.
+    "daw",                            # appended 2026-11-06: the ORC AS a DAW control
+                                      # surface (orc1_dawsurf_bridge.py, service
+                                      # orc1-dawsurf). NOT a sound module, no host:
+                                      # the bridge reads its fader / bank CCs
+                                      # (DAWSURF_FADER_CC) from the ORC's port ORC-daw on the
+                                      # channel this is bound to and speaks Mackie
+                                      # Control to the DAW. Starts unbound.
 ]
 # module key -> the cfg.SYNTH["CH_*"] key holding its channel. NB the sampler's
 # channel lives in cfg.SAMPLER["CH_SAMPLER"] (== CH_MONO 7), NOT cfg.SYNTH, and its
@@ -139,6 +152,27 @@ MODULE_CH_KEY = {
     "chip_pcm": "CH_CHIP_PCM", "gb_wave": "CH_GB_WAVE", "sampler": "CH_SAMPLER",
 }
 # module key -> synth voice name (the chip family shares one render/CC body).
+# BBKit per-drum shaping (2026-11-04). A kit has ~50 instruments (one per note),
+# too many for a CC each, so ONE CC picks the drum (its note number) and the rest
+# shape the picked drum; two more shape the whole kit. On the bbkit module's own
+# channel. Saved per kit by the host (~/.orc1_bbkit_params.json). The host, the
+# brain's follow knobs (orc1_knobfocus) and /cc all read this table.
+BBKIT_SHAPE_CC = {
+    "note": 20,        # which drum (note number) the next per-drum CCs edit
+    "level": 21,       # 100 = the kit's own level, 0 = mute, 127 = about +4 dB
+    "tune": 22,        # 64 = original pitch, 0 / 127 = -12 / +12 semitones
+    "attack": 23,      # 0 = none .. 127 = a 200 ms fade-in
+    "decay": 24,       # 127 = the sample's natural length .. 0 = ~15 ms
+    "pan": 25,         # 64 = centre
+    "cutoff": 26,      # 127 = open (no filter) .. 0 = 80 Hz low-pass
+    "reso": 27,        # low-pass resonance
+    "kit_tune": 28,    # the whole kit, added to each drum's tune
+    "kit_cutoff": 29,  # the whole kit (the lower of kit / drum wins)
+}
+BBKIT_SHAPE_DEFAULT = {"level": 100, "tune": 64, "attack": 0, "decay": 127,
+                       "pan": 64, "cutoff": 127, "reso": 0,
+                       "kit_tune": 64, "kit_cutoff": 127}
+
 MODULE_VOICE = {
     "chip_p1": "pulse1", "chip_p2": "pulse2", "chip_tri": "triangle",
     "chip_noise": "noise", "chip_pcm": "pcm", "gb_wave": "wave",
@@ -927,7 +961,18 @@ SCENE_RECALL_CC = 42
 
 # Our Fire SEQUENCER firmware's MIDI port (scenes: hello / bar messages / queue
 # pattern, orc1_scenes.FireBarLink). Case-insensitive substring.
-FIRE_SEQ_PORT_NAMES = ["ORC FW seq"]
+# The firmware is being renamed FLAME (owner, 2026-11-12: "Akai Fire FLAME custom
+# firmware"): up to v0.35b its port is "ORC FW seq", from the next public release
+# "FLAME seq". Both are accepted everywhere, so old and new firmware both work.
+FIRE_SEQ_PORT_NAMES = ["ORC FW seq", "FLAME seq"]
+# From fw v0.36 the Fire has a SECOND USB MIDI port for DAW control (Mackie Control / HUI,
+# for a computer's DAW). The device is then "ORC FW" with ports "ORC FW seq" + "ORC FW DAW"
+# (measured on the Pi 2026-11-12), so the names above still find only the sequencer.
+# The brain must never open the DAW port as an instrument (its button presses are notes
+# on channel 1): it is in DAWSURF_BRAIN_SKIP below.
+FIRE_DAW_PORT_NAMES = ["ORC FW DAW", "FLAME DAW"]
+# (A saved /pads profile matching one name still finds the Fire under the other:
+# orc1_padmap.port_name_matches.)
 
 # ── Scale select via PROGRAM CHANGE (PC on CH_CTRL) ───────────────────────────
 # PC (SCALE_PC_OFFSET + n) selects the n-th scale in orc1.SCALE_ORDER — one
@@ -1806,19 +1851,145 @@ def is_fire_port(name):
     return any(p.lower() in nl for p in FIRE_PORT_NAMES)
 
 
+# ── Modules the ORC (the brain) feeds itself, NOT over the synth bus (2026-11-09) ──
+# owner: "anything can be a module. i just said don't put it on the synth. we have a brain for information" ...
+# "don't ever move anything that doesn't need an internal synthesis onto the synth again."
+# ORC1-Synth-Bus carries ONLY what the sound hosts synthesise. A module here may still be bound on /matrix and
+# named by Fire knobs / scenes / pages; the ORC sends its messages to the module's OWN port, named "ORC-<module>"
+# (opened by orc1.py), never to the synth bus. A new module that does no internal synthesis goes in this list.
+ORC_MODULES = ("visuals", "zoomfx", "mxvbox", "daw")
+ORC_PORT_PREFIX = "ORC-"
+
+
+def orc_port_name(module):
+    """The ORC's own port for a non-synth module: 'ORC-visuals', 'ORC-daw', ..."""
+    return ORC_PORT_PREFIX + module
+
+
+def port_part(alsa_name):
+    """'RtMidiOut Client:ORC-daw 140:0' -> 'ORC-daw' (the PORT name, without client and numbers)."""
+    import re
+    m = re.match(r"^[^:]*:(.*?)(?: \d+:\d+)?$", alsa_name or "")
+    return m.group(1) if m else ""
+
+
+def is_orc_port(alsa_name, module):
+    """True only for the ORC's port of exactly this module. Whole port name, case-sensitive: 'ORC-daw' never matches
+    the DAW bridge's own clients ('orc1-dawsurf-...'), 'ORC-visuals' never the renderer's ('orc-visuals-in')."""
+    return port_part(alsa_name) == orc_port_name(module)
+
+
 # USB inputs whose MIDI clock/transport (clock, start, stop, continue) is passed
 # to the DIN out, like the DIN in's own. USB transport is dropped by default (the
 # BeatStep Pro re-emits it on USB and looped one START into >1200). Only list a
 # device that never echoes transport it receives. Our Fire sequencer firmware
 # sends START on PLAY (with clock out on, SHIFT + PLAY) and the MPC on the DIN
 # waits for it (2026-10-23).
-CLOCK_THRU_USB_PORTS = ["ORC FW seq"]
+CLOCK_THRU_USB_PORTS = ["ORC FW seq", "FLAME seq"]     # old + new firmware name (FIRE_SEQ_PORT_NAMES)
 
 
 def is_clock_thru_port(name):
     """True if a USB input's clock/transport should be passed to the DIN out."""
     nl = (name or "").lower()
     return any(p.lower() in nl for p in CLOCK_THRU_USB_PORTS)
+
+
+# ── the ORC AS a DAW control surface: the "daw" module (2026-11-06) ──────────────
+# orc1_dawsurf_bridge.py (service orc1-dawsurf) reads CCs on the channel the "daw"
+# module is bound to (/matrix) from the ORC's port ORC-daw (never the synth bus, 2026-11-09), plays them into a DAW as a Mackie
+# Control surface (orc1_dawsurface + orc1_dawsurface_mcu) over a DEDICATED network-
+# MIDI port, and sends the DAW's fader moves back as the same CCs to the Fire (so
+# its FADERS mode follows REAPER). One MCU unit = 8 strips + master this round.
+#
+# The DAW port: a session on the PC's rtpMIDI named "ORC DAW"; rtpmidid on the Pi
+# shows it as an ALSA port of that name (case-insensitive substring match).
+DAWSURF_PORT_NAMES = ["ORC DAW"]
+# The bridge's own ALSA clients all start with this. Its OUTPUT ports are readable,
+# so the brain's hot-plug would open them as controllers (it opened orc1-bsplights'
+# port that way, journal 2026-11-05): the brain skips these names too.
+DAWSURF_CLIENT = "orc1-dawsurf"
+# The Fire the faders live on, and where the DAW's fader moves are sent back:
+# our sequencer firmware's port, plus anything is_fire_port() claims.
+DAWSURF_FIRE_PORT_NAMES = list(FIRE_SEQ_PORT_NAMES)
+# CC on the daw channel -> MCU strip (0-7 = the bank's strips 1-8, "master").
+# Values 0-127 <-> the fader's 0.0-1.0. Change the map here, nowhere else.
+DAWSURF_FADER_CC = {20: 0, 21: 1, 22: 2, 23: 3, 24: 4, 25: 5, 26: 6, 27: 7,
+                    28: "master"}
+# CC -> bank direction; fires once each time the value rises through 64
+# (a button's 127 / 0, or a fader pushed past half way).
+DAWSURF_BANK_CC = {29: -1, 30: +1}
+# The bridge holds the MCU fader TOUCH while a Fire fader moves and lets go this
+# long after the last move (REAPER: touch automation; the model: no chasing).
+DAWSURF_TOUCH_RELEASE_S = 0.4
+# The Fire's DAW page: pad column DAWSURF_UNITY_COLUMN (1-16) lands EXACTLY on the DAW's 0 dB (owner,
+# 2026-11-09: column 12 gave REAPER +0.74 dB). DAWSURF_UNITY_DAW = that DAW's 0 dB as a 14-bit Mackie fader
+# value: REAPER's is 11730 (MEASURED: every 0 dB track reported 0.71598608 x 16383). The bridge bends the
+# Fire<->DAW scale there (two straight lines), so the pads, knobs and screen stay consistent.
+DAWSURF_UNITY_COLUMN = 12
+DAWSURF_UNITY_DAW = 11730
+# The Fire's own DAW PAGE (fw hello version >= 5, v0.31d+): the bridge sends it the
+# bank's 8 strips + master as rows (name, colour, level, SysEx 1A-1C) and reads the
+# Fire's row moves / scroll-past-the-end back (1D / 1E). No fader CCs to configure.
+# While that page is up, the DAW's fader moves are NOT also sent as CCs (one display
+# path, half the traffic to the Fire); True = send both (a Fire FADERS page mapped by
+# hand to the daw channel then follows too). CCs IN (any controller) always work.
+DAWSURF_CC_WITH_PAGE = False
+# Track colours for the page. MCU carries none, so by default the rows get a fixed
+# palette by strip. Set REAPER's web remote here (Preferences > Control/OSC/web >
+# Web browser interface, e.g. "http://192.168.1.50:8080") to use the real track
+# colours; it is polled every DAWSURF_REAPER_WEB_POLL_S while the page is up.
+DAWSURF_REAPER_WEB = None   # e.g. "http://192.168.1.50:8080"   # his PC's REAPER web remote: track count + colours (OSC needs it)
+DAWSURF_REAPER_WEB_POLL_S = 1.5
+# REAPER documents the TRACK colour as 0xaarrggbb and its own pages draw it as
+# #rrggbb; True = read the low 24 bits as Windows BGR instead (if colours come out
+# with red and blue swapped).
+DAWSURF_REAPER_WEB_BGR = False
+# Lower-case substrings the brain must never open as controller inputs (orc1.py).
+# Hardware Mackie surfaces the bridge reads + lights on the SAME window as the Fire (2026-11-09): the
+# BeatStep Pro's 2nd USB port in MCU/HUI mode. The brain must not open them as controllers (their
+# knob / step messages on channel 1 would otherwise reach the DIN out).
+DAWSURF_MCU_SURFACES = ["BeatStep Pro BeatStepPr"]
+# Bank pads: a NOTE on the daw channel -> jump the window to bank N (tracks 8N+1 .. 8N+8). The BSP's
+# control-mode pads: top row 44-51 = banks 1-8, bottom row 36-43 = banks 9-16 (reading order).
+# ...and the pad that is LIT for the bank on screen (BSP fw stepled3 holds it; stock firmware repaints it
+# at once): its main USB port + the stock LED item per bank (top row = items 0x78-0x7F, bottom 0x70-0x77).
+DAWSURF_BANK_LED_PORTS = ["BeatStep Pro Arturia Be"]
+DAWSURF_BANK_LED_ITEMS = [0x78 + i for i in range(8)] + [0x70 + i for i in range(8)]
+DAWSURF_BANK_NOTES = dict([(44 + i, i) for i in range(8)] + [(36 + i, 8 + i) for i in range(8)])
+# How the bridge talks to the DAW: "mcu" = Mackie Control over the network-MIDI port above (one 8-strip
+# window that REAPER banks), "osc" = REAPER's OSC surface with the pattern file orc1/daw/ORC.ReaperOSC
+# (every track by number, so each surface can have its own window). The BSP's Mackie port is an INPUT
+# surface either way (the bridge translates it). OSC: REAPER's PC address (None = not set up: nothing
+# is sent), the port REAPER listens on ("Local listen port" in REAPER), the port the bridge listens on
+# ("Device port" in REAPER), and the bank size = the pattern file's DEVICE_TRACK_COUNT (keep them equal).
+DAWSURF_DIALECT = "osc"                  # 2026-11-09: REAPER over OSC ("mcu" = the Mackie path)                  # 2026-11-09: REAPER over OSC ("mcu" = the Mackie path)
+DAWSURF_OSC_HOST = None   # e.g. "192.168.1.50"        # owner's PC running REAPER (None = OSC link down)
+DAWSURF_OSC_SEND_PORT = 8100
+DAWSURF_OSC_LISTEN_PORT = 9100
+DAWSURF_OSC_TRACKS = 512
+# Views (orc1_dawsurf_bind): each surface's window of tracks is "shared" (one common window, as with
+# Mackie) or "independent" (its own); "fire" = the Fire's DAW page, "bsp" = the BSP's 8 Mackie strips +
+# its bank pads, "cc" = the generic CC strips. Independent needs the OSC dialect.
+DAWSURF_VIEW_MODES = {"fire": "shared", "bsp": "shared", "cc": "shared"}
+# CC on the daw channel -> toggle that view between shared and independent (on the rise through 64).
+DAWSURF_VIEW_CC = {31: "fire", 32: "bsp", 33: "cc"}
+# The user's own bindings (any CC / note -> any DAW action; format in orc1_dawsurf_bind's docstring).
+DAWSURF_BINDINGS_FILE = "~/.orc1_dawsurf_bindings.json"
+# The Fire's DAW mode over the network (2026-11-13): a session on the PC's rtpMIDI named "FLAME rtp";
+# orc1_flame_rtp.py keeps rtpmidid's port of that name wired both ways to the Fire's own DAW port
+# (FIRE_DAW_PORT_NAMES), so REAPER's Mackie / HUI surface reaches the Fire's firmware DAW mode through
+# the Pi. Not "FLAME DAW ..." on purpose: FIRE_DAW_PORT_NAMES matches by substring and would claim it.
+FLAME_RTP_PORT_NAMES = ["FLAME rtp"]
+DAWSURF_BRAIN_SKIP = tuple(n.lower() for n in DAWSURF_PORT_NAMES + [DAWSURF_CLIENT] + DAWSURF_MCU_SURFACES
+                           + FIRE_DAW_PORT_NAMES        # + the Fire's own DAW port (fw v0.36): a computer's, never the brain's
+                           + FLAME_RTP_PORT_NAMES)      # + its network twin: REAPER's Mackie traffic, never a controller
+
+
+def is_dawsurf_port(name):
+    """True for the DAW's network-MIDI port (never one of the bridge's own)."""
+    nl = (name or "").lower()
+    return (DAWSURF_CLIENT.lower() not in nl
+            and any(p.lower() in nl for p in DAWSURF_PORT_NAMES))
 
 
 FIRE = {

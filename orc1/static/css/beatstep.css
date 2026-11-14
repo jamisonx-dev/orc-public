@@ -214,3 +214,37 @@
 /* ── Card sub/note helpers (local copy so control.css isn't required) ── */
 .card-sub  { font-size: .75em; color: var(--muted); margin: -.3em 0 .7em; }
 .card-note { font-size: .72em; color: var(--muted); margin-top: .5em; }
+
+/* ── STEP LIGHTS (BSP4, 2026-11-05) ───────────────────────────── */
+.bsp4-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.bsp4-brush {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--fh); font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  padding: 6px 9px; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+}
+.bsp4-brush.on { color: var(--bright); border-color: var(--accent); }
+.bsp4-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border); }
+.bsp4-dot.bsp, .bsp4-step.bsp {
+  background: repeating-linear-gradient(45deg, var(--panel), var(--panel) 3px, var(--border) 3px, var(--border) 6px);
+}
+.bsp4-steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 10px; }
+.bsp4-step {
+  aspect-ratio: 1; min-height: 34px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border); color: #000; font-family: var(--fh); font-size: 11px; font-weight: 700;
+  text-shadow: 0 0 2px rgba(255,255,255,.6);
+}
+.bsp4-step.bsp { color: var(--muted); text-shadow: none; }
+.bsp4-step:active { transform: scale(.94); }
+.bsp4-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bsp4-showrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.bsp4-lbl { font-family: var(--fh); font-size: 10px; letter-spacing: .1em; color: var(--muted); min-width: 46px; }
+.bsp4-st { font-family: var(--fh); font-size: 11px; letter-spacing: .06em; }
+.bsp4-st.live { color: var(--live); }
+.bsp4-st.dead { color: var(--danger); }
+#bsp4-manual { border-top: 1px solid var(--border); padding-top: 10px; }
+.bsp4-lockmsg { display: none; font-size: .75em; color: var(--muted); margin-bottom: 8px; }
+#bsp4-manual.bsp4-locked .bsp4-lockmsg { display: block; }
+#bsp4-manual.bsp4-locked .bsp4-palette,
+#bsp4-manual.bsp4-locked .bsp4-steps,
+#bsp4-manual.bsp4-locked .bsp4-actions { opacity: .3; pointer-events: none; }

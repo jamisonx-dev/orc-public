@@ -1,0 +1,24 @@
+[Unit]
+Description=ORC-1 eth0 box link: hand 10.55.0.2-6 to the device on the cable (no gateway, no DNS)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+# --port=0: no DNS server. dhcp-option 3 and 6 empty: no router, no DNS handed out.
+# --bind-dynamic: wait for eth0 to get 10.55.0.1 (it has no address until the cable is in).
+# A range only answers on an interface inside 10.55.0.0/29, so on a real LAN this stays silent.
+# LibreELEC on the MXV box (MAC 00:11:22:33:44:55 here: put your box's own) is pinned to .6 (ssh alias mxvbox on the Pi).
+# Five addresses, not one: the box's Android and LibreELEC use DIFFERENT MACs, and a single
+# address stayed leased to the other OS ("no address available", 2026-10-29).
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --port=0 \
+    --interface=eth0 --bind-dynamic --except-interface=lo \
+    --dhcp-range=10.55.0.2,10.55.0.6,255.255.255.248,1h \
+    --dhcp-host=00:11:22:33:44:55,10.55.0.6 \
+    --dhcp-option=3 --dhcp-option=6 \
+    --dhcp-leasefile=/run/orc1-boxlink.leases --log-dhcp
+Restart=on-failure
+RestartSec=5
+CPUSchedulingPolicy=idle
+
+[Install]
+WantedBy=multi-user.target

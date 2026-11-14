@@ -227,6 +227,7 @@ ns = {
     "_synth_mirror_off": _synth_mirror_off,
     "_CH_SAMPLER": int(cfg.SAMPLER.get("CH_SAMPLER", 7)),
     "_SYNTH_CHS": {},
+    "_ORC_MOD_BY_CH": {},   # orc1.py global since 2026-11-09 (the synth-bus split)
     "_MM_KEYS": list(cfg.MODULE_KEYS), "_MM_CH_KEY": dict(cfg.MODULE_CH_KEY),
     "_MM_RESERVED": set(cfg.RESERVED_CHANNELS),
     "_MM_NO_TAKEOUT": set(cfg.MODULE_NO_TAKEOUT),

@@ -29,23 +29,12 @@
   .pm-pair { display:inline-flex; gap:8px; align-items:center; white-space:nowrap; }   /* a label never wraps away from its box */
   .pm-pair[hidden] { display:none; }
   #pm-match { width:220px; max-width:100%; }
-  .pm-col { display:flex; flex-wrap:nowrap; gap:5px; align-items:center; margin-top:4px; font-weight:400; }
-  .pm-sw { display:inline-block; flex:none; width:14px; height:14px; border-radius:3px; border:1px solid rgba(128,128,128,.5);
-    background:#000; vertical-align:middle; }
-  .pm-grid { display:grid; grid-template-columns:repeat(16, 1fr); gap:3px; max-width:560px; margin:0 0 12px; }
-  .pm-grid button { aspect-ratio:1; min-width:0; padding:0; border-radius:4px; cursor:pointer; position:relative;
-    border:1px solid rgba(128,128,128,.45); background:#111; }
-  .pm-grid button:hover { outline:2px solid var(--accent); }
-  .pm-grid button.mapped::after { content:""; position:absolute; left:50%; top:50%; width:6px; height:6px;
-    margin:-3px 0 0 -3px; border-radius:50%; background:rgba(255,255,255,.75); }
-  .pm-grid button.lit.mapped::after { display:none; }
   table.pm tr.new td { background:var(--accent-bg); }
   /* one pad = a header + labelled lines (label first, fixed width so the boxes line up) */
   table.pm td.pm-pad { padding:10px 6px 12px; border-top:1px solid rgba(128,128,128,.35); }
   .pm-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
   .pm-head .pm-key { font-weight:700; font-size:14px; }
   .pm-head .pm-sub { opacity:.6; }
-  .pm-head .pm-col { margin:0; }
   .pm-head .pm-name { flex:1 1 70px; min-width:60px; max-width:160px; width:auto; }
   .pm-head .pm-x { margin-left:auto; }
   .pm-what { display:block; }
@@ -67,7 +56,9 @@
     <b>action</b> (the same list as the FCB pedal). Pads you don't list pass through untouched.
     A device is matched by <b>name</b>. Turn on <b>LEARN</b> and hit a pad to add it.</p>
   <p class="pm-help">Pads are <b>triggers</b>: an action fires on the hit, not on release,
-    and a second hit within 80 ms is ignored as a double-trigger. Hold-style actions aren't offered.</p>
+    and a second hit within 80 ms is ignored as a double-trigger. Hold-style actions aren't offered.
+    A skipback grab <b>while held</b> and a <b>momentary</b> CC need a device that sends a real release
+    (a keyboard, most pad controllers); many drum brains send their note-off on a timer instead.</p>
 
   <section class="card">
     <div class="pm-tabs" id="pm-tabs"></div>
@@ -87,25 +78,6 @@
       <button class="btn" id="pm-learn" type="button">LEARN</button>
       <span id="pm-last"></span>
       <button class="btn" id="pm-del" type="button" style="margin-left:auto">REMOVE DEVICE</button>
-    </div>
-    <div class="pm-row">
-      <label title="Only for owner's Fire firmware ('ORC FW ...'): the ORC draws the pads"><input type="checkbox" id="pm-surface">
-        <b>Surface</b>: the ORC draws on this device's pads</label>
-      <span id="pm-surfch-wrap" class="pm-pair">
-        <button class="btn" id="pm-show" type="button" title="Put the Fire in surface mode now">SHOW ON FIRE</button></span>
-    </div>
-    <p class="pm-help" id="pm-surfhelp">A <b>surface</b> (our Fire firmware, "ORC FW ...") gets this layout whenever it
-      shows up, but stays on its own sequencer until you ask: press <b>SHOW ON FIRE</b> here, or <b>BROWSER &gt; ORC
-      surface</b> on the Fire. Then each pad (pad 0 = top left .. 63) does what you set here and shows the colour you
-      pick; a held pad lights brighter. Pads you haven't listed are silent. The surface talks to the ORC directly and
-      uses <b>no MIDI channel</b>, so the Fire's own sequencer keeps every channel and its notes always pass through
-      untouched. Tick Surface first, then add pads by clicking them in the grid below (or SHOW ON FIRE, LEARN and
-      tap them on the Fire). On the Fire, any mode button (STEP / NOTE /
-      DRUM / PERFORM) goes back to the sequencer.</p>
-    <div id="pm-gridwrap" hidden>
-      <div class="pm-help" style="margin:0 0 4px">The Fire's pads (top left = pad 0). <b>Click a pad</b> to add it, or to
-        jump to it if it's already in the list. A dot = in the list but dark.</div>
-      <div id="pm-grid" class="pm-grid"></div>
     </div>
     <table class="pm">
       <tbody id="pm-rows"></tbody>

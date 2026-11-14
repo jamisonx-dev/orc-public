@@ -1,0 +1,7 @@
+[Unit]
+Description=ORC-1: keep the mDNS name pibox.local (undo avahi's pibox-2 renames)
+After=avahi-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/pibox/orc/orc1/orc1_mdns_guard.sh

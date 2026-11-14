@@ -643,4 +643,137 @@ const BSP3 = (() => {
   return { init, refresh };
 })();
 
-document.addEventListener('DOMContentLoaded', () => { BSP.init(); BSP2.init(); BSP3.init(); });
+/* ── BSP4: STEP LIGHTS (2026-11-05) ─────────────────────────────────────
+ * Needs the ORC "stepled" BSP firmware (bsp tools/patch on the PC). Frame:
+ *     F0 00 20 6B 7F 42 02 00 10 <30+step> <colour> F7
+ * colour = 00BBGGRR (2 bits each, any non-zero = on): 01 red, 04 green,
+ * 10 blue, 05 yellow, 14 cyan, 11 magenta, 15 white, 00 off; 40 = hand the
+ * step back to the BSP. Stock firmware accepts the frame but repaints over it.
+ * The BSP cannot report LED state, so `sent` is what this page sent. */
+const BSP4 = (() => {
+  const COLOURS = [
+    { key: 'off',     label: 'OFF', v: 0x00, css: '#111' },
+    { key: 'red',     label: 'RED', v: 0x01, css: '#e33' },
+    { key: 'yellow',  label: 'YEL', v: 0x05, css: '#ec3' },
+    { key: 'green',   label: 'GRN', v: 0x04, css: '#3d5' },
+    { key: 'cyan',    label: 'CYN', v: 0x14, css: '#3de' },
+    { key: 'blue',    label: 'BLU', v: 0x10, css: '#36f' },
+    { key: 'magenta', label: 'MAG', v: 0x11, css: '#d3e' },
+    { key: 'white',   label: 'WHT', v: 0x15, css: '#eee' },
+    { key: 'bsp',     label: 'BSP', v: 0x40, css: null },
+  ];
+  let brush = 'red';
+  const sent = new Array(16).fill('bsp');
+  // the live show (orc1-bsplights service), from /api/bsplights
+  const SHOW_LABEL = { off: 'OFF', manual: 'MANUAL', track: 'SEQ TRACK', clock: 'CLOCK',
+                       modules: 'MODULES', tracks: 'TRACKS' };
+  let live = { conf: { show: 'manual', track: '' }, shows: Object.keys(SHOW_LABEL),
+               tracks: [], service: false, bsp: false };
+
+  async function _loadShow() {
+    try {
+      const d = await (await fetch('/api/bsplights')).json();
+      if (d.ok && JSON.stringify(d) !== JSON.stringify(live)) {
+        const wasManual = live.conf.show === 'manual';
+        live = d;
+        if (d.conf.show === 'manual' && !wasManual) sent.fill('bsp');
+        _render();
+      }
+    } catch (e) {}
+  }
+
+  async function _setShow(patch) {
+    try {
+      const r = await fetch('/api/bsplights', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      const d = await r.json();
+      if (d.ok) {
+        if (d.conf.show === 'manual' && live.conf.show !== 'manual') sent.fill('bsp');   // service handed all back
+        live = d; _render();
+      }
+    } catch (e) {}
+  }
+
+  function _renderShow() {
+    const el = document.getElementById('bsp4-show');
+    if (!el) return;
+    const show = live.conf.show;
+    const st = !live.service ? '<span class="bsp4-st dead">service not running</span>'
+             : !live.bsp ? '<span class="bsp4-st dead">service running, BSP not found</span>'
+             : '<span class="bsp4-st live">● driving the BSP</span>';
+    el.innerHTML =
+      '<div class="bsp4-showrow"><span class="bsp4-lbl">SHOW</span>' +
+      live.shows.map(s => `<button class="bsp4-brush${s === show ? ' on' : ''}" data-show="${s}">` +
+                          `${SHOW_LABEL[s] || s.toUpperCase()}</button>`).join('') + '</div>' +
+      (show === 'track'
+        ? '<div class="bsp4-showrow"><span class="bsp4-lbl">TRACK</span><select id="bsp4-track">' +
+          live.tracks.map(t => `<option${t === live.conf.track ? ' selected' : ''}>${t}</option>`).join('') +
+          '</select></div>' : '') +
+      '<div class="bsp4-showrow">' + st + '</div>';
+    const sel = document.getElementById('bsp4-track');
+    if (sel) sel.addEventListener('change', () => _setShow({ track: sel.value }));
+    const man = document.getElementById('bsp4-manual');
+    if (man) man.classList.toggle('bsp4-locked', show !== 'manual');
+  }
+
+  const _col = k => COLOURS.find(c => c.key === k);
+  const _hx = n => (n & 0xFF).toString(16).padStart(2, '0').toUpperCase();
+
+  function _render() {
+    const root = document.getElementById('bsp4');
+    if (!root) return;
+    root.innerHTML =
+      '<div id="bsp4-show"></div>' +
+      `<div id="bsp4-manual"${live.conf.show !== 'manual' ? ' class="bsp4-locked"' : ''}>` +
+      '<div class="bsp4-lockmsg">Switch SHOW to MANUAL to paint the steps.</div>' +
+      '<div class="bsp4-palette">' + COLOURS.map(c =>
+        `<button class="bsp4-brush${c.key === brush ? ' on' : ''}" data-brush="${c.key}" title="${c.key}">` +
+        `<span class="bsp4-dot${c.css ? '' : ' bsp'}" style="${c.css ? 'background:' + c.css : ''}"></span>${c.label}</button>`
+      ).join('') + '</div>' +
+      '<div class="bsp4-steps">' + sent.map((k, i) => {
+        const c = _col(k);
+        return `<button class="bsp4-step${c.css ? '' : ' bsp'}" data-step="${i}" ` +
+               `style="${c.css ? 'background:' + c.css : ''}" title="step ${i + 1}: ${k}">${i + 1}</button>`;
+      }).join('') + '</div>' +
+      '<div class="bsp4-actions">' +
+      '<button class="btn" data-all="brush">ALL STEPS → <span id="bsp4-brushname"></span></button>' +
+      '<button class="btn" data-all="bsp">HAND ALL BACK TO BSP</button></div></div>';
+    const bn = document.getElementById('bsp4-brushname');
+    if (bn) bn.textContent = _col(brush).label;
+    _renderShow();
+  }
+
+  async function _paint(step, key) {
+    const ok = await BSP.sendRaw('10', _hx(0x30 + step), _hx(_col(key).v),
+                                 `step ${step + 1} → ${_col(key).label}`);
+    if (ok) { sent[step] = key; _render(); }
+    return ok;
+  }
+
+  async function _paintAll(key) {
+    for (let i = 0; i < 16; i++) { if (!(await _paint(i, key))) return; }
+  }
+
+  function _wire(root) {
+    root.addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.show) { _setShow({ show: b.dataset.show }); return; }
+      if (live.conf.show !== 'manual') return;        // the service owns the lights
+      if (b.dataset.brush) { brush = b.dataset.brush; _render(); }
+      else if (b.dataset.step !== undefined) _paint(+b.dataset.step, brush);
+      else if (b.dataset.all) _paintAll(b.dataset.all === 'bsp' ? 'bsp' : brush);
+    });
+  }
+
+  function init() {
+    const root = document.getElementById('bsp4');
+    if (!root) return;
+    _render(); _wire(root);
+    _loadShow();
+    setInterval(_loadShow, 4000);          // status (service / BSP) + other clients' changes
+  }
+  return { init, COLOURS, sent };
+})();
+
+document.addEventListener('DOMContentLoaded', () => { BSP.init(); BSP2.init(); BSP3.init(); BSP4.init(); });

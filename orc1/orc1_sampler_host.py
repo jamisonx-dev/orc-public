@@ -185,6 +185,7 @@ def midi_input_thread(host, stop_event):
     sampler messages. Mirrors orc1_synth.midi_input_thread's resilience: a
     routing bug never kills the pump, and port I/O errors trigger a reconnect."""
     import mido
+    import orc1_midisafe; orc1_midisafe.install()   # no leaked ALSA clients (2026-11-09)
     prefix = S._SYNTH_CFG.get("MIDI_PORT_PREFIX", "").lower()
     route = _make_router(host)
 

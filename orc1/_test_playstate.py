@@ -195,7 +195,8 @@ def main():
          "state": {"root": 7, "scale": "major", "preset": "MONO_CLEAN", "octave": 3,
                    "oct_offset": 1, "held_notes": [(67, "synth", 6)]},
          "_bindings": {"poly": 6}, "_ps_activity": ps.ActivityTracker(),
-         "_orc1_playstate": ps}
+         "_orc1_playstate": ps,
+         "knobfocus": None}      # the follow-knobs object (2026-11-04); None = off. Missing here broke this suite 11-04..11-09
     g["_ps_activity"].hit(6, 110)
     exec(fn_src, g)
     s = g["_playstate_snapshot"]()

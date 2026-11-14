@@ -31,6 +31,8 @@ const MODULES = [
   { key: 'bbkit',      name: 'BB KIT',   fam: 'BeatBuddy kit', code: 'BBK',  color: '#e0a000' },
   { key: 'visuals',    name: 'VISUALS',  fam: 'HDMI scenes',   code: 'VIS',  color: '#ff5cc8' },
   { key: 'zoomfx',     name: 'ZOOM FX',  fam: 'MS-70CDR pedal', code: 'ZFX', color: '#c0c0c0' },
+  { key: 'mxvbox',     name: 'BOX VIS',  fam: 'MXV box screen', code: 'BOX', color: '#ff2f6d' },
+  { key: 'daw',        name: 'DAW',      fam: 'Mackie surface', code: 'DAW', color: '#8fd14f' },
 ];
 const NO_TAKEOUT = new Set(['sampler']);
 
@@ -46,6 +48,8 @@ function levelDescriptor(m, ch) {
   if (m.key === 'visuals') return { action: 'SYNTH_CC', extra: v => ({ ch, cc: 25, value: v }), read: () => readCC(ch, 25) };
   // the Zoom pedal has no master level: CC7 is sent and orc1_zoomfx.py ignores it
   if (m.key === 'zoomfx')  return { action: 'SYNTH_CC', extra: v => ({ ch, cc: 7, value: v }), read: () => readCC(ch, 7) };
+  // the MXV box has no level either: CC7 is its SHOW knob (0 = blackout), mxvbox_knobs.py
+  if (m.key === 'mxvbox')  return { action: 'SYNTH_CC', extra: v => ({ ch, cc: 7, value: v }), read: () => readCC(ch, 7) };
   if (m.key === 'gb_wave') return { action: 'SYNTH_CC', extra: v => ({ ch, cc: 7,  value: v }), read: () => readCC(ch, 7) };
   return { action: 'SYNTH_CC', extra: v => ({ ch, cc: 13, value: v }), read: () => readCC(ch, 13) };
 }

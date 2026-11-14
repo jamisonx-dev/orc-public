@@ -26,7 +26,7 @@ def out(*a):
 
 
 def main():
-    if len(sys.argv) > 2 and sys.argv[2] not in ("up", "down", "dhcp4-change", "connectivity-change", "refresh"):
+    if len(sys.argv) > 2 and sys.argv[2] not in ("up", "down", "dhcp4-change", "dhcp6-change", "connectivity-change", "refresh"):
         return
     try:
         trusted = json.load(open(CFG)).get("trusted_connections", [])
@@ -38,6 +38,19 @@ def main():
         a = out("ip", "-4", "-o", "addr", "show", IF).split()
         if len(a) > 3:
             hosts.append(str(ipaddress.ip_interface(a[3]).network))
+        # IPv6 too (2026-10-31): Windows resolves `pibox` to the Pi's IPv6 address
+        # first, and with only IPv4 allowed above smbd answered "Denied connection
+        # from 2600:..." so \\pibox\... failed (error 64) while the IP address worked.
+        # Same rule as IPv4: only this LAN (its /64 and link-local), only when trusted.
+        hosts.append("fe80::/10")
+        for ln in out("ip", "-6", "-o", "addr", "show", IF, "scope", "global").splitlines():
+            f = ln.split()
+            try:
+                net = ipaddress.ip_interface(f[3]).network
+            except Exception:
+                continue
+            if net.prefixlen == 64 and str(net) not in hosts:
+                hosts.append(str(net))
     text = "hosts allow = %s\nhosts deny = ALL\n" % " ".join(hosts)
     try:
         old = open(CONF).read()

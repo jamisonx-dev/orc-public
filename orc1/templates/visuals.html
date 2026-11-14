@@ -46,6 +46,7 @@
     <button class="flag" data-tab="peephole" onclick="showTab('peephole')">PEEPHOLE</button>
     <button class="flag" data-tab="listen" onclick="showTab('listen')">LISTEN</button>
     <button class="flag" data-tab="setup" onclick="showTab('setup')">SETUP</button>
+    <button class="flag" data-tab="box" onclick="showTab('box')">BOX</button>
   </div>
 
   <div class="vtab" data-tab="play">
@@ -313,9 +314,107 @@
     </div>
   </div>
   </div>
+  <div class="vtab" data-tab="box">
+  <!-- BOX: the MXV S805 box on the Pi's eth0 (module "mxvbox"), its own screen.
+       Everything that adjusts it is here (static/js/boxvis.js); every control is a CC
+       on mxvbox's /matrix channel, listed in mxvbox/pi/mxvbox_knobs.py. -->
+  <div class="card" id="box-card">
+    <div class="card-label">BOX SCREEN</div>
+    <div id="box-state" style="font-size:10px;font-family:var(--fs);margin-bottom:8px">—</div>
+    <!-- Regrouped 2026-11-03 (owner: the page had become "cluttered/jumbled"): one group per
+         THING, with every control that adjusts it in that group, most-played first. -->
+    <div class="vgroup">SHOW</div>
+    <div class="flags" id="box-show"></div>
+    <div class="flags" id="box-stopped" style="margin-top:4px"></div>
+    <div class="vhint">HOLD keeps the last picture when the ORC stops (LISTEN hits show on it); FREE-RUN
+      keeps changing clips / scenes at the last tempo. Also used if the ORC's beat goes quiet.</div>
 
+    <div class="vgroup">PICTURES (what plays, and how it changes)</div>
+    <div class="flags" id="box-clips"></div>
+    <div class="flags" id="box-every" style="margin-top:4px"></div>
+    <div id="box-pic-sliders"></div>
+    <div class="vhint">The bars that are not clips show a SCENE if one is picked (below), else patterns.</div>
+
+    <div class="vgroup">CLIPS (which ones play)</div>
+    <div class="flags" id="box-pool"></div>
+    <div class="flags" id="box-pool-tools" style="margin-top:4px"></div>
+    <div id="box-playlist" style="margin-top:4px"></div>
+    <div class="vhint">EVERYTHING = the whole library, shuffled. A pool = only the clips you put in it
+      (pick a pool, then ADD clips in the list). POOL is CC 30: 0 = everything, N = pool N.</div>
+    <details class="vmore" style="margin-top:6px">
+      <summary>THE CLIPS ON THE BOX (add to pool, ★, never, play next, delete)</summary>
+      <div id="box-clips-list"></div>
+    </details>
+
+    <div class="vgroup">HITS (what the drums and LISTEN do to the picture)</div>
+    <div class="vl" style="margin-top:4px">KICK</div>
+    <div class="flags" id="box-kick"></div>
+    <div class="vl" style="margin-top:4px">SNARE</div>
+    <div class="flags" id="box-snare"></div>
+    <div class="vl" style="margin-top:4px">LISTEN (the LISTEN tab's band)</div>
+    <div class="flags" id="box-listen"></div>
+    <div class="vl" style="margin-top:4px">LISTEN BACKGROUND (LISTEN's background band, or band 1 when it has none)</div>
+    <div class="flags" id="box-listen2"></div>
+    <div id="box-hit-sliders"></div>
+    <div class="vhint">The box hears what LISTEN hears (its band, SENS and GATE, set on the LISTEN tab), even
+      with the visuals kiosk off. MASK HIT is with the MASK.</div>
+
+    <div class="vgroup">LOOKS (standing; drawn free by the box's GPU)</div>
+    <div class="vl" style="margin-top:4px">KALEIDOSCOPE</div>
+    <div class="flags" id="box-kal"></div>
+    <div id="box-kal-sliders"></div>
+    <div class="vl" style="margin-top:4px">COLOUR</div>
+    <div id="box-colour-sliders"></div>
+    <div class="vl" style="margin-top:4px">LINES</div>
+    <div class="flags" id="box-lines"></div>
+    <div class="flags" id="box-lfill" style="margin-top:4px"></div>
+
+    <div class="vgroup">ROTATE (the box picks which looks play, bar by bar)</div>
+    <div class="flags" id="box-rot"></div>
+    <div class="flags" id="box-rot-n" style="margin-top:4px"></div>
+    <div class="flags" id="box-rot-looks" style="margin-top:4px"></div>
+    <div class="flags" id="box-rot-hits" style="margin-top:4px"></div>
+    <div class="vhint">Lit = the rotation may pick it (this is the allow list, not the look itself). A look you
+      set yourself in LOOKS always wins: the rotation only fills in looks you have left off. Never the same pick
+      twice running.</div>
+
+    <div class="vgroup">SCENES (drawn by the GPU, in the bars that are not clips)</div>
+    <div class="flags" id="box-scene"></div>
+    <div class="flags" id="box-scene-cycle" style="margin-top:4px"></div>
+    <div class="vl" style="margin-top:4px">CLIPS FOR SCENES, OVERLAY AND MASK</div>
+    <div class="flags" id="box-scene-pool"></div>
+    <div id="box-scene-sliders"></div>
+    <div class="vhint">With PICTURES on CLIPS ONLY no scene ever shows: lower it to see them.</div>
+
+    <div class="vgroup">MASK (a second picture through a hole)</div>
+    <div class="flags" id="box-mask"></div>
+    <div class="flags" id="box-mask-fill" style="margin-top:4px"></div>
+    <div id="box-mask-sliders"></div>
+
+    <details class="vmore" style="margin-top:10px">
+      <summary>FRAME: PROJECTOR SHAPE (light only inside a shape, or that shape blocked out)</summary>
+      <div class="flags" id="box-frame" style="margin-top:6px"></div>
+      <div class="flags" id="box-frame-inv" style="margin-top:4px"></div>
+      <div class="vl" style="margin-top:4px">YOUR PICTURE</div>
+      <div class="flags" id="box-frame-pic"></div>
+      <div id="box-frame-pics" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:6px"></div>
+      <div class="vhint">Your picture: white = light, black = dark, grey = dimmer. It is fitted whole into the screen;
+        FRAME SIZE 64 = the screen. PNG / JPG / GIF / WebP / BMP / SVG.</div>
+      <div id="box-frame-sliders"></div>
+    </details>
+    <details class="vmore" style="margin-top:8px">
+      <summary>MIDI</summary>
+      <div id="box-midi" style="font-size:9px;color:var(--muted);line-height:1.6;margin-top:4px"></div>
+      <div style="font-size:9px;color:var(--muted);line-height:1.5;margin-top:4px">
+        CCs on the channel the <b>mxvbox</b> module is bound to on /matrix. Hits come from
+        the drums / bbkit channels by name. After a power cut the box waits for its power button.
+      </div>
+    </details>
+  </div>
+  </div>
 {% endblock %}
 
 {% block page_js %}
 <script src="/static/js/visuals.js"></script>
+<script src="/static/js/boxvis.js"></script>
 {% endblock %}

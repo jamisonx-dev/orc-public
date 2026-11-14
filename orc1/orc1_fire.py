@@ -78,6 +78,11 @@ except Exception:
 # HARDWARE CONSTANTS -- verified on-device, do not change
 # ==============================================================================
 
+# ORC mode on our Fire firmware (orc1_orcmode, 2026-11-11): when this is set the pad
+# colours go to it (an object with .send(msg) / .close()) instead of a port found by
+# name: the brain's one shared link to the Fire. None = a stock Fire, found by name.
+HOST_OUT = None
+
 PAD_NOTE_BASE = 54
 PAD_NOTE_MAX  = 117
 N_ROWS, N_COLS = 4, 16
@@ -232,12 +237,12 @@ _ROW_PORT_SHORT = {
 # White-key pad colour per row type/port (R,G,B in Fire 0-127 range).
 # Chord rows keep the existing warm-white; direct rows get a cool per-port tint.
 # Ports without an explicit entry fall back to the default tint in _render.
-_ROW_COL_CHORD  = (8, 6, 4)     # warm white
-_ROW_COL_OFF    = (1, 1, 1)     # near-dark
+_ROW_COL_CHORD  = (19, 14, 10)     # warm white
+_ROW_COL_OFF    = (9, 9, 9)     # near-dark
 _ROW_COL_DIRECT = {              # keyed by port name
-    "synth":   (8,  3, 12),      # purple
-    "pisound": (3,  9,  5),      # cool green
-    "rtp":     (2,  4, 14),      # blue
+    "synth":   (17, 6, 25),      # purple
+    "pisound": (7, 21, 11),      # cool green
+    "rtp":     (4, 8, 28),      # blue
 }
 # -- KEY overlay (2026-07-28) --------------------------------------------------
 # Hold ALT in chord/poly/chip to momentarily turn the grid into a key/scale
@@ -253,16 +258,16 @@ _ROW_COL_DIRECT = {              # keyed by port name
 _KEY_ROOT_ROW    = 3               # grid row holding the 12 root pads
 _KEY_ROOT_COL0   = 4               # col of root C
 _KEY_WHITE_PCS   = {0, 2, 4, 5, 7, 9, 11}
-_KEY_ROOT_WHITE  = (10,  8,  6)    # unselected white key
-_KEY_ROOT_BLACK  = (2,  1,  1)     # unselected black key
+_KEY_ROOT_WHITE  = (22, 18, 13)    # unselected white key
+_KEY_ROOT_BLACK  = (11, 5, 5)     # unselected black key
 _KEY_ROOT_SEL    = (0x50, 0x30, 0x00)   # the active root -- warm gold
 # One hue per scale group so the three rows read as distinct families.
 _KEY_GROUP_COLORS = [
-    ((3, 6, 10), (0x10, 0x40, 0x7F)),   # MODES  -- blue
-    ((3, 10, 6), (0x10, 0x7F, 0x40)),   # PENTA  -- green
-    ((9, 4, 10), (0x60, 0x18, 0x7F)),   # COLOUR -- violet
+    ((7, 13, 22), (0x10, 0x40, 0x7F)),   # MODES  -- blue
+    ((7, 22, 13), (0x10, 0x7F, 0x40)),   # PENTA  -- green
+    ((20, 9, 22), (0x60, 0x18, 0x7F)),   # COLOUR -- violet
 ]
-_KEY_TOGGLE_OFF  = (6, 4, 1)
+_KEY_TOGGLE_OFF  = (16, 11, 3)
 _KEY_LOCK_ON     = (0x7F, 0x50, 0x00)   # amber
 _KEY_SNAP_ON     = (0x00, 0x7F, 0x30)   # green
 # O4 (2026-07-30). The control zone was cols 0-1; cols 2-3 were dark and are
@@ -275,10 +280,10 @@ _KEY_MODE_COLORS = {
     "down":    (0x00, 0x28, 0x7F),      # blue
     "nearest": _KEY_SNAP_ON,            # green, the pre-O4 look
 }
-_KEY_QUAL_DIAT   = (6, 4, 1)            # DIAT is the default -- reads as "off"
+_KEY_QUAL_DIAT   = (16, 11, 3)            # DIAT is the default -- reads as "off"
 _KEY_QUAL_FIXED  = (0x7F, 0x30, 0x50)   # magenta, matches the chromatic-ext hue
 _KEY_PIN_ON      = (0x7F, 0x7F, 0x7F)   # white = overlay is pinned open
-_KEY_PIN_OFF     = (10, 10, 10)
+_KEY_PIN_OFF     = (22, 22, 22)
 _KEY_COL_MODE    = 1                    # scale-mode cycle
 _KEY_COL_QUAL    = 2                    # DIAT / FIXED
 _KEY_COL_PIN     = 3                    # latch the overlay open
@@ -1621,6 +1626,9 @@ class FireHandler:
     def _open_output(self):
         """The Fire's output, claimed by NAME (cfg.is_fire_port: Akai's own
         firmware or our firmware's host mode)."""
+        if HOST_OUT is not None:
+            self._out = HOST_OUT
+            return
         if not mido:
             return
         try:
@@ -1898,7 +1906,7 @@ class FireHandler:
             if col >= cap or s is None:
                 c = OFF                          # beyond the rack — dark
             elif not s.get("plugin"):
-                c = (0x02, 0x02, 0x02)           # empty slot — very dim grey
+                c = (11, 11, 11)           # empty slot — very dim grey
             elif s.get("running"):
                 c = (0x00, 0x4A, 0x14)           # green — enabled + running
             else:
@@ -2030,12 +2038,12 @@ class FireHandler:
                 # Pick per-type colour scheme
                 if rtype == "chord":
                     wk = _ROW_COL_CHORD          # white key
-                    bk = (2, 1, 1)               # black key
+                    bk = (11, 5, 5)               # black key
                     hl = chord_bright            # held
                     rt = tuple(max(2, c // 7) for c in chord_bright)   # root tint
                 else:  # direct
-                    wk = _ROW_COL_DIRECT.get(pk, (4, 6, 4))
-                    bk = (1, 1, 2)
+                    wk = _ROW_COL_DIRECT.get(pk, (11, 16, 11))
+                    bk = (5, 5, 11)
                     hl = tuple(min(63, c * 6) for c in wk)
                     rt = wk   # no root-column tint on direct rows
 
@@ -2344,7 +2352,7 @@ class FireHandler:
         couple_mode = self._chip_couple_mode
         coupled     = couple_mode != 'none'
 
-        _row_dim    = [(1, 8, 1), (1, 4, 8), (8, 4, 1), (8, 1, 1)]
+        _row_dim    = [(2, 19, 2), (2, 10, 19), (19, 10, 2), (19, 2, 2)]
         _row_sel    = [(2, 30, 2), (2, 15, 28), (28, 15, 2), (28, 2, 2)]
         _row_couple = (20, 12, 0)   # amber -- P2 linked to P1
         _wave_sel   = (10, 30, 6)   # GB green -- distinguishes wave from noise
@@ -2381,7 +2389,7 @@ class FireHandler:
                     # FILTER silences these rather than correcting them, so they
                     # get their own colour instead of just a dimmer version of
                     # the row -- otherwise a dead pad looks merely quiet.
-                    rgb = ((0x0E, 0x00, 0x00) if self._scale_mode_now() == "filter"
+                    rgb = ((28, 0, 0) if self._scale_mode_now() == "filter"
                            else tuple(max(0, c // 4) for c in rgb))
                 cells.append((pidx, *rgb))
         self._send_pads(cells)
@@ -2488,7 +2496,7 @@ class FireHandler:
     def _render_faders(self):
         """Assignable fader bank. 4 faders visible at once (one per row).
         Each row is a horizontal CC fader: tap a column to set value 0-127.
-          Unassigned fader  very dim amber  (4, 2, 0)
+          Unassigned fader  very dim amber  (14, 7, 0)
           Assigned, active  warm bar: lit portion bright, dark portion dim
           Assign target row  white highlight
         Each fader has its own CC, channel, and port (pisound/synth).
@@ -2499,10 +2507,10 @@ class FireHandler:
                        (0x38, 0x28, 0x00),   # row 1: amber
                        (0x28, 0x38, 0x00),   # row 2: yellow-green
                        (0x18, 0x30, 0x10)]   # row 3: muted green
-        _row_dim    = [(0x06, 0x03, 0x00),
-                       (0x05, 0x04, 0x00),
-                       (0x04, 0x06, 0x00),
-                       (0x03, 0x05, 0x02)]
+        _row_dim    = [(16, 8, 0),
+                       (15, 12, 0),
+                       (11, 16, 0),
+                       (9, 15, 6)]
         cells = []
         tgt   = self._mpc_assign_target if self._mpc_assign_mode else None
         for r in range(N_ROWS):
@@ -2514,7 +2522,7 @@ class FireHandler:
                 if fidx == tgt:
                     rgb = (0x20, 0x20, 0x20)  # assign target: white
                 elif assign is None:
-                    rgb = (0x04, 0x02, 0x00)  # unassigned: very dim amber
+                    rgb = (14, 7, 0)  # unassigned: very dim amber
                 else:
                     val = assign.get("value", 64)
                     lit = round(val * N_COLS / 127)
@@ -2669,7 +2677,7 @@ class FireHandler:
 
     def _render_universal(self):
         """Universal Control Surface pad grid.
-          Unassigned         dim purple  (2, 1, 2)
+          Unassigned         dim purple  (11, 5, 11)
           Note pad           dim blue    (0, 0, 20)
           CC pad             dim green   (0, 20, 0)
           Latched ON         bright blue/green
@@ -2687,7 +2695,7 @@ class FireHandler:
                 val = int(frow.get("value", 0))
                 lit = round(val * N_COLS / 127)
                 for c in range(N_COLS):
-                    rgb = (0, 0x30, 0x30) if c < lit else (0, 0x06, 0x06)  # cyan bar
+                    rgb = (0, 0x30, 0x30) if c < lit else (0, 16, 16)  # cyan bar
                     cells.append((pad_index(r, c), *rgb))
                 continue
             for c in range(N_COLS):
@@ -2698,7 +2706,7 @@ class FireHandler:
                 elif key in self._universal_held:
                     rgb = (0, 40, 0)            # held: bright green
                 elif assign is None:
-                    rgb = (2, 1, 2)             # unassigned: dim purple
+                    rgb = (11, 5, 11)             # unassigned: dim purple
                 elif assign.get("_latched_on"):
                     rgb = (0, 0, 50) if assign["type"] == "note" else (0, 50, 0)
                 else:
@@ -8216,7 +8224,7 @@ def _perf_ctrl_color(kind, param, chord_base, exts, hold, arp_on):
     """Return (R,G,B) for a single perform-view control pad."""
     if kind == "base":
         return _PERF_BASE_BRIGHT[param] if chord_base == param \
-               else _PERF_BASE_DIM.get(param, (6,3,0))
+               else _PERF_BASE_DIM.get(param, (16, 8, 0))
     if kind == "ext":
         # A column lights for EITHER of its two vocabularies, in different
         # colours, so you can see at a glance that an extension is deliberately
@@ -8224,12 +8232,12 @@ def _perf_ctrl_color(kind, param, chord_base, exts, hold, arp_on):
         try:
             col = _PERF_EXT_DEGREE.index(param)
         except ValueError:
-            return (50, 25, 0) if param in exts else (6, 3, 0)
+            return (50, 25, 0) if param in exts else (16, 8, 0)
         if _PERF_EXT_CHROM[col] in exts:
             return (55, 0, 30)        # magenta = chromatic (off-scale) ext
         if _PERF_EXT_DEGREE[col] in exts:
             return (50, 25, 0)        # amber = scale-degree ext
-        return (6, 3, 0)
+        return (16, 8, 0)
     if kind == "mod":
         return (0, 18, 25)    # dim teal for inversion controls
     if kind == "none":
@@ -8239,10 +8247,10 @@ def _perf_ctrl_color(kind, param, chord_base, exts, hold, arp_on):
     if kind == "prev":
         return (0, 12, 20)    # dim blue-teal
     if kind == "hold":
-        return (55, 18, 0) if hold else (10, 4, 0)
+        return (55, 18, 0) if hold else (22, 9, 0)
     if kind == "arp":
-        return (0, 55, 20) if arp_on else (0, 10, 4)
-    return (5, 5, 5)
+        return (0, 55, 20) if arp_on else (0, 22, 9)
+    return (15, 15, 15)
 
 
 # Knobs sculpt the ALT+rotary-selected drum voice.

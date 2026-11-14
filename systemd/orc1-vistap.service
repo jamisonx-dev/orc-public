@@ -1,12 +1,13 @@
 [Unit]
 Description=ORC-1 VISUALS audio tap: a listen-only JACK client the visuals read (C, not Python)
-# Pulled in by orc1-visuals.service (Wants=) and stopped with it (PartOf=).
+# Pulled in by orc1-visuals.service AND orc1-boxvis.service (Wants=). Not PartOf the
+# visuals any more (2026-11-03): the MXV box's LISTEN needs it while the visuals kiosk is off
+# (owner: "so that i don't have to run the orc vis at the same time").
 # Input ports only: it cannot change the sound. The realtime callback just
 # copies each period into /dev/shm/orc1_vistap (see daw/orc_jacktap.c for
 # why this is C: a Python callback would wait on the renderer's GIL and
 # could make the whole graph -- skipback included -- miss a deadline).
 # If it is missing or fails, the visuals fall back to skipback's RAM ring.
-PartOf=orc1-visuals.service
 After=orc1-jackd.service
 # jackd restarting = the tap exits 1 and Restart= brings it back; keep trying.
 StartLimitIntervalSec=0

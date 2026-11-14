@@ -1,0 +1,19 @@
+[Unit]
+Description=ORC-1 box visuals conductor (drives the MXV box's orcflash player from the beat)
+# Reads /dev/shm/orc1_playstate.json + the brain's MIDI bus (it follows bus restarts
+# itself), sends small UDP commands to the box on eth0. Not PartOf orc1: a brain
+# restart must not take it down. The one thing it pulls in is orc1-vistap (the audio
+# tap LISTEN hears through), so LISTEN works with the visuals kiosk off (2026-11-03).
+After=orc1.service orc1-vistap.service
+Wants=orc1-vistap.service
+
+[Service]
+User=pibox
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/mxvbox/pi/conductor.py -15
+Restart=always
+RestartSec=3
+Nice=10
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

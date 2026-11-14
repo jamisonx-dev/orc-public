@@ -60,7 +60,7 @@ sys.path.insert(0, HERE)
 
 import orc1_scenes as S                       # noqa: E402
 
-EXPECTED = 125
+EXPECTED = 139
 passed = failed = skipped = 0
 
 
@@ -488,10 +488,16 @@ m.log.clear()
 for _ in range(5):
     LT[0] += 3.1
     link.poll()
-check("version 1 (v0.29d): NO 0E bar-messages command, no more hellos", m.log == [], m.log)
+check("version 1 (v0.29d): NO 0E bar-messages command, no more hellos; only the crash-record ask (06), once",
+      m.log == [(PORT, H + [0x06])], m.log)
+m.log.clear()
 check("version 1: send_pattern refused, nothing sent",
       link.send_pattern(3)[0] is False and "version 1" in link.send_pattern(3)[1] and m.log == [])
 check("version 1: bars_enabled False", link.bars_enabled() is False)
+fm_flame = FMido(); fm_flame.outs = ["FLAME seq:FLAME seq MIDI 1 28:0"]
+S.FireBarLink(fm_flame, idents=lambda: {}, log=lambda s: None, clock=lambda: 0.0).poll()
+check("the renamed firmware ('FLAME seq', 2026-11-12) is linked with the default port names: hello sent",
+      fm_flame.log == [("FLAME seq:FLAME seq MIDI 1 28:0", H + [0x00])], fm_flame.log)
 ids["ORC FW seq"] = "1/6"                       # flashed to v0.30: new USB address
 link.poll()
 check("reboot (new USB address): reopened, hello again",
@@ -511,6 +517,62 @@ m.outs = []
 link.poll()
 check("port gone: closed, version forgotten, bars off",
       m.opened[-1].closed and link.version is None and not link.bars_enabled())
+
+# --- 5b. crash records over the same link (folded in from orc1-firevu, 2026-11-12) --------
+def crash_reply(valid=1, total=3, pc=0x11, up=0x22, t4count=0, rv=3):
+    d = H + [0x06, rv, valid, 8, 2, 1, total]                  # version, valid, cause, stage, count, total
+    words = [0] * {1: 7, 2: 10, 3: 16}[rv]
+    words[0], words[6] = pc, up
+    if rv == 3:
+        words[10] = t4count
+    for w in words:
+        d += [(w >> (7 * i)) & 0x7F for i in range(5)]
+    return d
+
+
+check("crash reply lengths match host_vu.py's table (46 / 61 / 91)",
+      [len(crash_reply(rv=v)) for v in (1, 2, 3)] == [46, 61, 91])
+cm, cids, crashes = FMido(), {"ORC FW seq": "1/5"}, []
+CT = [0.0]
+cl = S.FireBarLink(cm, idents=lambda: cids, log=lambda s: None, clock=lambda: CT[0],
+                   on_crash=lambda d: crashes.append(list(d)))
+cm.outs = [PORT]
+cl.poll()
+check("crash record: not asked before the hello reply", [x[1][4] for x in cm.log] == [0x00], cm.log)
+cl.handle_sysex(H + [0x00, 9], PORT)
+cl.poll()
+cl.poll()
+check("crash record: 06 asked once after the hello reply, before 0E",
+      [x[1][4] for x in cm.log] == [0x00, 0x06, 0x0E], cm.log)
+check("valid record: consumed, on_crash called once with it",
+      cl.handle_sysex(crash_reply(), PORT) is True and crashes == [crash_reply()])
+cl.handle_sysex(crash_reply(), PORT)
+cl.handle_sysex(crash_reply(t4count=5), PORT)
+check("the same crash again (or only the misread counter moved): not handed on again", len(crashes) == 1)
+cl.handle_sysex(crash_reply(valid=0, total=4), PORT)
+check("an empty record (valid 0): consumed, not handed on", len(crashes) == 1)
+cl.handle_sysex(crash_reply()[:-1], PORT)
+check("a reply of the wrong length is ignored", len(crashes) == 1)
+cl.handle_sysex(crash_reply(total=4, pc=0x33), PORT)
+check("a new crash (other total / PC): handed on", len(crashes) == 2 and crashes[-1] == crash_reply(total=4, pc=0x33))
+cl.handle_sysex(crash_reply(total=5), "Other:port")
+check("a crash reply from a foreign port is not ours", len(crashes) == 2)
+cids["ORC FW seq"] = "1/6"                       # the Fire rebooted (a crash restart): new USB address
+cm.log.clear()
+cl.poll()
+cl.handle_sysex(H + [0x00, 9], PORT)
+cl.poll()
+check("after a reboot: 06 asked again on the new connection", (PORT, H + [0x06]) in cm.log, cm.log)
+cl.handle_sysex(crash_reply(total=4, pc=0x33), PORT)
+check("the record seen before the reboot is not handed on twice", len(crashes) == 2)
+bad = S.FireBarLink(cm, idents=lambda: cids, log=lambda s: None, on_crash=lambda d: 1 / 0)
+check("an on_crash that raises does not break the link",
+      bad.handle_sysex(crash_reply(total=9), PORT) is True)
+_b = src("orc1.py")
+_save = _b[_b.find("def _fire_crash_save("):_b.find("fire_bar_link = _orc1_scenes.FireBarLink(")]
+check("orc1.py: the link's on_crash = _fire_crash_save, which runs host_crash.py --save (never --clear)",
+      "on_crash=_fire_crash_save)" in _b and '"--save"' in _save and "--clear" not in _save
+      and "host_crash.py" in _save and "start_new_session=True" in _save)
 
 # --- 6. real registry through a real engine -----------------------------------------
 import orc1_settings_registry as R            # noqa: E402

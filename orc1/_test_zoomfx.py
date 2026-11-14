@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import orc1_zoomfx as Z
 
-EXPECTED = 70
+EXPECTED = 75
 passed = failed = 0
 
 
@@ -248,9 +248,60 @@ os.unlink(tmp.name)
 # ---- the brain must leave the pedal alone -------------------------------------------------
 import orc1_config
 check("brain patchbay list names the pedal", "zoom ms" in [x.lower() for x in orc1_config.PATCHBAY_PORT_PREFIXES])
-check("zoomfx is a MODULE_KEYS entry, appended last", orc1_config.MODULE_KEYS[-1] == "zoomfx")
+# it WAS the last key when added (2026-10-13); mxvbox (10-29) and daw (11-06) came after it, so
+# pin its wire id instead: it must never move
+check("zoomfx is a MODULE_KEYS entry, wire id 13 (unchanged since it was appended)",
+      orc1_config.MODULE_KEYS.index("zoomfx") == 13)
 mjs = open(os.path.join(HERE, "static", "js", "matrix.js"), encoding="utf-8").read()
 check("/matrix lists zoomfx", "key: 'zoomfx'" in mjs)
+
+# --- the bus listener follows the brain's bus across a restart (2026-11-09: it sat on the dead bus for hours) ---
+class _BusPort:
+    def __init__(self, name, cb):
+        self.name, self.cb, self.closed = name, cb, False
+
+    def close(self):
+        self.closed = True
+
+
+class _BusMido:
+    def __init__(self):
+        self.names = ["RtMidiOut Client:ORC-zoomfx 131:0", "pisound:pisound MIDI 20:0"]
+        self.opened, self.sleeps = [], 0
+
+    def get_input_names(self):
+        return list(self.names)
+
+    def open_input(self, name, callback=None):
+        p = _BusPort(name, callback)
+        self.opened.append(p)
+        return p
+
+
+_bm, _got = _BusMido(), []
+
+
+def _bus_sleep(s):
+    _bm.sleeps += 1
+    if _bm.sleeps == 3:                                  # the brain restarts: a new bus with a new client number
+        _bm.names[0] = "RtMidiOut Client:ORC-zoomfx 139:0"
+
+
+Z.bus_loop(_bm, _got.append, sleep=_bus_sleep, rounds=8)
+check("bus listener reopens the NEW bus after a brain restart",
+      [p.name.split()[-1] for p in _bm.opened] == ["131:0", "139:0"], str([p.name for p in _bm.opened]))
+check("bus listener closes the dead bus port", _bm.opened and _bm.opened[0].closed)
+_bm.opened[-1].cb("a CC")
+check("bus messages go to the handler (callback)", _got == ["a CC"])
+_bm2 = _BusMido(); _bm2.names = []
+Z.bus_loop(_bm2, _got.append, sleep=lambda s: None, rounds=3)
+check("no bus: nothing opened, keeps looking", _bm2.opened == [])
+_bm3 = _BusMido()
+_bm3.names = ["RtMidiOut Client:ORC1-Synth-Bus 130:0", "RtMidiOut Client:ORC-zoomfx2 150:0",
+              "orc-zoomfx-in:RtMidi input 151:0", "RtMidiOut Client:ORC-zoomfx 131:0"]
+Z.bus_loop(_bm3, _got.append, sleep=lambda s: None, rounds=1)
+check("2026-11-09: listens ONLY on the ORC's exact 'ORC-zoomfx' port (never the synth bus or a look-alike name)",
+      [p.name for p in _bm3.opened] == ["RtMidiOut Client:ORC-zoomfx 131:0"], [p.name for p in _bm3.opened])
 
 print(f"{passed} passed, {failed} failed")
 if passed + failed != EXPECTED:

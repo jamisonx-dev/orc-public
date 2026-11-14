@@ -98,9 +98,14 @@ PACE_S = 0.002                            # gap between chunks
 # Fire host protocol (fire_firmware fw/fireseq USER_GUIDE, v0.30)
 ORC_HDR = [0x7D, 0x4F, 0x52, 0x43]        # F0 7D 'O' 'R' 'C' <cmd> ... F7
 CMD_HELLO, CMD_QUEUE_PAT, CMD_BARS, MSG_BAR = 0x00, 0x0D, 0x0E, 0x0F
+# 06 = the Fire's last crash record (fw host protocol). Reply length by record version, the table in
+# ~/fire_fw/host_vu.py (decode_crash); bytes: 5 version, 6 valid, 7 cause, 8 stage, 9 count, 10 total,
+# then 5-byte words from 11 (word 0 = PC at 11-15, word 6 = uptime ms at 41-45).
+CMD_CRASH = 0x06
+CRASH_REPLY_LENS = {1: 46, 2: 61, 3: 91}
 NO_SONG = 127                             # 0F song slot byte when not in song mode
 BARS_VERSION = 2                          # hello version that has 0D / 0E / 0F
-FIRE_SEQ_PORTS = ("orc fw seq",)          # our sequencer firmware's port name
+FIRE_SEQ_PORTS = ("orc fw seq", "flame seq")   # our sequencer firmware's port: old name, and FLAME (2026-11-12)
 
 # The Fire is the bar source while its 0F messages keep coming: the last one
 # within FIRE_BAR_GRACE bar lengths (FIRE_BAR_FIRST_S before a 2nd bar has
@@ -622,7 +627,7 @@ class SceneEngine:
     def _send_fire(self, p, pattern):
         try:
             if self.fire is None:
-                ok, why = False, "no ORC FW Fire linked"
+                ok, why = False, "no Fire with our firmware linked (FLAME seq / ORC FW seq)"
             else:
                 ok, why = self.fire.send_pattern(int(pattern))
         except Exception as e:
@@ -739,6 +744,10 @@ class FireBarLink:
       send_pattern refuses, so scenes use the ORC clock and skip fire.pattern.
     - Pattern / song mode: from 0F (song slot 127 = no song) and the 0D reply's
       song flag; forgotten (None = unknown) when the Fire stops or goes away.
+    - Crash records (2026-11-12, folded in from orc1-firevu so it no longer
+      needs its own connection): once per connection, after the hello reply,
+      it asks 06; a VALID record not seen before reaches on_crash(data) once
+      (the brain saves the full report with host_crash.py --save).
     Pure apart from the injected mido module (a fake in the tests). The brain
     calls poll() about once a second and handle_sysex() for every SysEx in."""
     HELLO_RETRY_S = 3.0
@@ -746,8 +755,11 @@ class FireBarLink:
     HELLO_FAST_TRIES = 5
 
     def __init__(self, mido_mod, idents=lambda: {}, on_bar=None, log=print,
-                 clock=time.monotonic, ports=FIRE_SEQ_PORTS):
+                 clock=time.monotonic, ports=FIRE_SEQ_PORTS, on_crash=None):
         self.mido, self.idents, self.on_bar, self.log, self.clock = mido_mod, idents, on_bar, log, clock
+        self.on_crash = on_crash
+        self._crash_asked = False         # 06 sent on this connection
+        self._crash_seen = None           # the last record handed to on_crash (kept across reconnects)
         self.ports = tuple(p.lower() for p in ports)
         self.port = self.ident = self.out = None
         self.version = None
@@ -776,6 +788,7 @@ class FireBarLink:
         self.version, self.bars_on = None, False
         self.pattern = self.song = None
         self._hello_t, self._tries = None, 0
+        self._crash_asked = False
 
     def stopped(self):
         """The Fire stopped: its pattern / song mode may change by hand now."""
@@ -818,6 +831,14 @@ class FireBarLink:
                         self.log(f"[scenes] hello to {port} failed ({e})")
                         self._close()
                 return
+            if not self._crash_asked:
+                try:
+                    self._send(ORC_HDR + [CMD_CRASH])
+                    self._crash_asked = True
+                except Exception as e:
+                    self.log(f"[scenes] crash-record request to {port} failed ({e})")
+                    self._close()
+                    return
             if self.version >= BARS_VERSION and not self.bars_on:
                 try:
                     self._send(ORC_HDR + [CMD_BARS, 1])
@@ -834,7 +855,7 @@ class FireBarLink:
         if data[:4] != ORC_HDR or len(data) < 5 or not self.is_ours(source_name):
             return False
         cmd = data[4]
-        bar = None
+        bar = crash = None
         with self._lock:
             if cmd == CMD_HELLO and len(data) >= 6:
                 v = data[5]
@@ -853,8 +874,20 @@ class FireBarLink:
                 # reply: <ok> <current pattern> <queued> <song 0/1>
                 self.pattern = data[6]
                 self.song = bool(data[8])
+            elif cmd == CMD_CRASH and len(data) >= 7 and CRASH_REPLY_LENS.get(data[5]) == len(data):
+                # one crash = (valid .. total, PC, uptime); NOT the whole reply: v3 also carries the TIM4
+                # misread counter, which changes without a new crash
+                key = tuple(data[6:16] + data[41:46])
+                if data[6] and key != self._crash_seen:
+                    self._crash_seen = key
+                    crash = data
         if bar is not None and self.on_bar:
             self.on_bar(*bar)
+        if crash is not None and self.on_crash:
+            try:
+                self.on_crash(crash)
+            except Exception as e:
+                self.log(f"[scenes] could not hand on the Fire's crash record ({e})")
         return True
 
     def bars_enabled(self):
@@ -870,7 +903,7 @@ class FireBarLink:
         """-> (ok, why). 0D n: the Fire queues pattern n (song mode: slot n)."""
         with self._lock:
             if self.out is None:
-                return False, "no ORC FW seq Fire connected"
+                return False, "no Fire with our firmware connected (FLAME seq / ORC FW seq)"
             if self.version is None:
                 return False, "the Fire has not answered hello yet"
             if self.version < BARS_VERSION:
@@ -891,7 +924,7 @@ class FireBarLink:
         UNIVERSAL pages). Raises when no Fire is connected or the send fails."""
         with self._lock:
             if self.out is None:
-                raise RuntimeError("no ORC FW seq Fire connected")
+                raise RuntimeError("no Fire with our firmware connected (FLAME seq / ORC FW seq)")
             self._send(data)
 
     def link_version(self):

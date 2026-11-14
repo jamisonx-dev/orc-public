@@ -94,7 +94,9 @@ UNITS = ["orc1", "orc1-jackd"] + HOST_UNITS + [
          "performve-in", "performve-out", "performve-watchdog",
          "orc-bt-jack", "rtpmidid",
          # enabled controller services that shipped without a line here (2026-10-14): a dead one was invisible
-         "orc1-firevu", "orc1-kikpad", "orc1-zoomfx"]
+         "orc1-kikpad", "orc1-zoomfx",
+         # the MXV box visuals (2026-10-29): its conductor + the eth0 guard + its DHCP
+         "orc1-boxvis", "orc1-boxguard", "orc1-boxlink-dhcp", "orc1-boxinbox"]
 
 # Units whose journals are worth scanning for unrecovered errors.
 LOG_UNITS = ["orc1", "orc1-jackd"] + HOST_UNITS + ["orc1-web", "skipback-record"]

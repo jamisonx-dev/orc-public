@@ -2,9 +2,9 @@
 """orc1_zoomfx -- a Zoom MultiStomp (MS-70CDR; MS-50G / MS-60B untested) as an ORC module: "zoomfx".
 
 Throw plain CCs at the module's channel and the pedal follows. Bind "zoomfx" to a channel on
-/matrix like any module; this process reads that channel off the ORC1-Synth-Bus (ALSA fans the
-bus out to every reader, like the module hosts and the VISUALS renderer) and speaks the pedal's
-SysEx for you. It OWNS the pedal's USB port: the brain lists "zoom ms" in PATCHBAY_PORT_PREFIXES,
+/matrix like any module; the ORC (the brain) sends that channel's messages to its own port
+"ORC-zoomfx" (2026-11-09: never the synth bus, which is for synthesis only), this process reads
+them there and speaks the pedal's SysEx for you. Runs only when asked (the unit is disabled at boot). It OWNS the pedal's USB port: the brain lists "zoom ms" in PATCHBAY_PORT_PREFIXES,
 so it never opens the pedal (it used to forward the pedal's SysEx out the pisound DIN).
 
 CC map on the bound channel (effect slots are the pedal's 1-6, left to right):
@@ -38,7 +38,8 @@ import threading
 import time
 
 PORT_MATCH = "zoom ms"                 # ALSA name "ZOOM MS Series:ZOOM MS Series MIDI 1 40:0"
-BUS_MATCH = "orc1-synth-bus"
+# 2026-11-09: zoomfx is not a synth, so its CCs come from the ORC on its OWN port "ORC-zoomfx", never the synth bus
+import orc1_config as _cfg                # noqa: E402  (orc_port_name / is_orc_port: the exact-name rule)
 MODULE = "zoomfx"
 BINDINGS = os.path.expanduser("~/.orc1_bindings.json")
 STATE_PATH = "/dev/shm/orc1_zoomfx.json"
@@ -342,6 +343,47 @@ def on_bus(msg, binding, link):
         link.handle_program(msg.program)
 
 
+BUS_CHECK_S = 2.0
+
+
+def bus_loop(mido, on_msg, sleep=time.sleep, rounds=None):
+    """Listen to the ORC's port for this module ('ORC-zoomfx') and FOLLOW it across brain restarts (2026-11-09).
+
+    The old loop did `for msg in port` (then on the synth bus): when the brain restarted, the port vanished, the
+    read just waited forever with no error, and zoomfx never heard a CC again (one 'bus:' line in 17 hours, through
+    two brain restarts). The port's full ALSA name carries its client number ('RtMidiOut Client:ORC-zoomfx 131:0'
+    -> '139:0' after a restart), so: receive by callback, and every BUS_CHECK_S check that this exact name still
+    exists; when it doesn't, close and find the new one. rounds = how many checks to run (tests); None = forever."""
+    n = 0
+    while rounds is None or n < rounds:
+        n += 1
+        name = next((x for x in mido.get_input_names() if _cfg.is_orc_port(x, MODULE)), None)
+        if not name:
+            sleep(3)
+            continue
+        log(f"ORC port: {name}")
+        try:
+            port = mido.open_input(name, callback=on_msg)
+        except Exception as e:
+            log(f"bus error: {e}, retrying")
+            sleep(2)
+            continue
+        try:
+            while rounds is None or n < rounds:
+                sleep(BUS_CHECK_S)
+                n += 1
+                if name not in mido.get_input_names():
+                    log("ORC port gone (brain restarted?): finding the new one")
+                    break
+        except Exception as e:
+            log(f"bus check error: {e}, reopening")
+        finally:
+            try:
+                port.close()
+            except Exception:
+                pass
+
+
 def write_state(st, path=STATE_PATH):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -351,26 +393,13 @@ def write_state(st, path=STATE_PATH):
 
 def main():
     import mido
+    import orc1_midisafe; orc1_midisafe.install()   # no leaked ALSA clients (2026-11-09)
     params = load_params()
     log(f"{len(params)} effect tables loaded")
     link, binding = ZoomLink(mido, params), Binding()
 
-    def bus_thread():
-        while True:
-            name = next((n for n in mido.get_input_names() if BUS_MATCH in n.lower()), None)
-            if not name:
-                time.sleep(3)
-                continue
-            log(f"bus: {name}")
-            try:
-                with mido.open_input(name) as port:
-                    for msg in port:
-                        on_bus(msg, binding, link)
-            except Exception as e:
-                log(f"bus error: {e}, retrying")
-                time.sleep(2)
-
-    threading.Thread(target=bus_thread, daemon=True).start()
+    threading.Thread(target=bus_loop, args=(mido, lambda m: on_bus(m, binding, link)),
+                     daemon=True).start()
     last_scan = last_state = 0.0
     last_ch = None
     while True:

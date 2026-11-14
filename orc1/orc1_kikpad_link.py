@@ -103,6 +103,7 @@ def heartbeat_due(now, last_sent_at):
 
 def run(once=False, max_loops=None, clock=time.monotonic, sleep=time.sleep):
     import mido                      # imported late: the pure helpers above need no MIDI library
+    import orc1_midisafe; orc1_midisafe.install()   # no leaked ALSA clients (2026-11-09)
     if hasattr(os, "nice"):            # not on Windows
         try:
             os.nice(10)

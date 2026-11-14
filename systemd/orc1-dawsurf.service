@@ -1,0 +1,29 @@
+[Unit]
+Description=ORC-1 DAW control surface (the "daw" module: Fire faders <-> a DAW as a Mackie Control surface over network MIDI)
+# Reads CCs on the daw module's channel off ORC1-Synth-Bus (it follows bus restarts itself),
+# speaks Mackie Control to the DAW on the rtpmidid port named "ORC DAW" (orc1_config
+# DAWSURF_PORT_NAMES) and sends the DAW's fader moves back to the Fire as the same CCs.
+# Not PartOf orc1: a brain restart must not take it down. No audio, not a JACK client.
+After=orc1.service rtpmidid.service
+
+[Service]
+Type=simple
+User=pibox
+WorkingDirectory=/home/pibox/orc/orc1
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/orc1/orc1_dawsurf_bridge.py
+Restart=always
+RestartSec=3
+# Skipback comes first: ordinary priority, niced (not SCHED_IDLE: idle-class work gets starved
+# into visible hitches, 2026-10-24), small memory cap.
+Nice=10
+MemoryMax=48M
+OOMScoreAdjust=900
+# It writes only its status file in /dev/shm; the rest of the filesystem is read-only to it.
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

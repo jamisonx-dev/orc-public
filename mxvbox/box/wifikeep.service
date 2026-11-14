@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep the MXV box on the home Wi-Fi (retries; its chip misses scans)
+After=connman.service
+Wants=connman.service
+
+[Service]
+ExecStart=/bin/sh /storage/orc/wifikeep.sh
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

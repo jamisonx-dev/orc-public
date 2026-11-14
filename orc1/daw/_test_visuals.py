@@ -27,7 +27,7 @@ import tempfile
 import time
 import types
 
-EXPECTED = 188
+EXPECTED = 193
 HERE = os.path.dirname(os.path.abspath(__file__))
 for m in ("pygame", "moderngl"):
     sys.modules.setdefault(m, types.ModuleType(m))
@@ -45,6 +45,8 @@ V.BINDINGS = os.path.join(TMP, "bindings.json")
 V.STATE = os.path.join(TMP, "state.json")
 V.TAP_SHM = os.path.join(TMP, "no_tap_shm")          # never the live tap
 V.TAP_SRC = os.path.join(TMP, "vistap_src")
+import vis_listen as LI                              # noqa: E402  the detector's own module (2026-11-02)
+LI.TAP_SHM, LI.TAP_SRC = V.TAP_SHM, V.TAP_SRC        # (it reads ITS copies: sandbox both)
 with open(V.BINDINGS, "w") as f:                    # drums ch10, poly ch6, visuals ch15
     json.dump({"bindings": {"10": "drums", "6": "poly", "2": "bbkit",
                             "15": "visuals"}}, f)
@@ -2439,6 +2441,35 @@ ok(_rt.log == [("open", _A), ("close",), ("open", _A), ("close",), ("open", _B),
    f"recreated under the SAME name is reopened (WITH its callback: python-rtmidi drops it on close), "
    f"a vanished bus is closed, the new one opened; another "
    f"client's subscription doesn't count; one rtmidi client throughout {_rt.log} deaf={_rt.deaf}")
+# ---- 2026-11-09: the knobs come from the ORC's own port "ORC-visuals", never the synth bus ----
+_CTL = ["RtMidiOut Client:ORC1-Synth-Bus 132:0", "RtMidiOut Client:ORC-visuals2 150:0",
+        "orc-visuals-in:RtMidi input 151:0", "RtMidiOut Client:ORC-visuals 140:0"]
+_rt2 = _FakeRt([(_CTL, "")])
+_k2 = [0]
+
+
+def _stop2():
+    _k2[0] += 1
+    return _k2[0] > 1
+
+
+V.midi_thread(types.SimpleNamespace(on_msg=lambda m: None), rt=_rt2, read_seq=lambda: None,
+              sleep=lambda s_: None, stop=_stop2, client=V.CTL_CLIENT, find=V.find_orc_port,
+              is_src=lambda p: p == V.ORC_PORT)
+ok(_rt2.log[:1] == [("open", "RtMidiOut Client:ORC-visuals 140:0")] and V.ORC_PORT == "ORC-visuals"
+   and V.find_orc_port(["RtMidiOut Client:ORC1-Synth-Bus 132:0"]) is None,
+   f"MIDI: the knob listener opens ONLY the ORC's exact 'ORC-visuals' port (not the synth bus, not a look-alike, "
+   f"not our own 'orc-visuals-in' client) {_rt2.log}")
+_feed = (_seq(132, False) + '\nClient 140 : "RtMidiOut Client" [User Legacy]\n  Port   0 : "ORC-visuals" (R-e-) [In]\n'
+         'Client 152 : "%s" [User Legacy]\n  Port   0 : "RtMidi input" (-We-) [Out]\n    Connected From: 140:0' % V.CTL_CLIENT)
+ok(V.seq_listening(_feed, V.CTL_CLIENT, lambda p: p == V.ORC_PORT)
+   and not V.seq_listening(_feed, V.CTL_CLIENT, V.is_bus_port),
+   "MIDI: the knob client counts as fed only by 'ORC-visuals' (a synth-bus feed would not count)")
+_vsrc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "orc_visuals.py"), encoding="utf-8").read()
+ok('"client": CTL_CLIENT, "find": find_orc_port' in _vsrc
+   and "threading.Thread(target=midi_thread, args=(music,), daemon=True).start()" in _vsrc,
+   "MIDI: the renderer starts BOTH listeners: the synth bus (hits, notes) and the ORC's port (knobs)")
+
 _got, _boom = [], []
 
 
@@ -2539,7 +2570,8 @@ def _tab_of(needle):
 
 _want = {"vis-card": "play", "layer-card": "play", "lines-card": "lines", "trails-card": "lines",
          "move-card": "lines", "bg-card": "background", "mask-card": "peephole", "listen-card": "listen",
-         "pal-card": "setup", "midi-card": "setup"}
+         "pal-card": "setup", "midi-card": "setup",
+         "box-card": "box"}          # 2026-10-29: the MXV box's own screen (static/js/boxvis.js)
 _got_tabs = {c: _tab_of('id="%s"' % c) for c in _want}
 # each picker sits with the sliders it goes with
 _with = {"bg-modes": ("bg-bend-knobs", "background"), "mask-shapes": ("mask-knobs", "peephole"),
@@ -2547,13 +2579,13 @@ _with = {"bg-modes": ("bg-bend-knobs", "background"), "mask-shapes": ("mask-knob
 _pairs = {k: (_tab_of('id="%s"' % k), _tab_of('id="%s"' % v[0]), v[1]) for k, v in _with.items()}
 _folds = [max((t for t, pos in _tabs.items() if pos < m.start()), key=_tabs.get)
           for m in _re.finditer(r'<div class="pal-edit"[^>]*>', _tpl2)]
-ok(_order == ["play", "lines", "background", "peephole", "listen", "setup"] and _got_tabs == _want
+ok(_order == ["play", "lines", "background", "peephole", "listen", "setup", "box"] and _got_tabs == _want
    and _tpl2.count('class="card"') == len(_want) and 'id="live-card"' not in _tpl2 and "-live" not in js
    and all(a == b == t for a, b, t in _pairs.values())
    and sorted(_folds) == ["background", "lines", "setup"] and _tpl2.count('class="pal-msg"') == 3
    and "document.querySelectorAll('.pal-edit').forEach" in js and "function showTab(name)" in js
-   and "const TABS = ['play', 'lines', 'background', 'peephole', 'listen', 'setup'];" in js,
-   f"/visuals: a tab per thing (PLAY, LINES, BACKGROUND, PEEPHOLE, LISTEN, SETUP), each picker on the "
+   and "const TABS = ['play', 'lines', 'background', 'peephole', 'listen', 'setup', 'box'];" in js,
+   f"/visuals: a tab per thing (PLAY, LINES, BACKGROUND, PEEPHOLE, LISTEN, SETUP, BOX), each picker on the "
    f"same tab as the sliders it goes with, no duplicate pickers; the palette editor folds out under the "
    f"lines' and the background's palette buttons (+ all of them on SETUP) {_got_tabs} {_pairs}")
 
@@ -2662,6 +2694,22 @@ ok("comp.show_frame(tex[dst], flash * max(lines_g, bg_g)," in _vs2
    and "'white'" in js.split("satL:")[1].split("\n")[0],
    "review fixes: the snare flash follows the brighter layer (both off = black); LINES LEVEL 0 draws "
    "nothing; the page saves one palette at a time; each saturation knob reads in its own words")
+
+# ---- vis_listen: the LISTEN detector, shared with the MXV box conductor (2026-11-02) ----
+_st = os.path.join(TMP, "listen_state.json")
+with open(_st, "w") as f:
+    json.dump({"knobs": {"sens": 100, "band_lo": 20, "gate": 0, "band2_on": 127, "speed": 5}}, f)
+lk = LI.listen_knobs(_st)
+ok(lk == {31: 100, 32: 20, 33: 38, 54: 0, 59: 8, 60: 38, 61: 64, 62: 127}
+   and LI.listen_knobs(os.path.join(TMP, "none.json"))[32] == V.KNOB_DEFAULT[32]
+   and all(LI.LISTEN_KNOBS[cc][0] == V.KNOBS[cc] for cc in LI.LISTEN_KNOBS),
+   "listen_knobs reads LISTEN's knobs from the renderer's state file by NAME (resting values where unset), "
+   "names matching the renderer's own")
+_t = LI.AudioTap(shm=V.TAP_SHM)
+LI.apply_knobs(_t, lk)
+ok(abs(_t.ONSET - V.audio_onset(100)) < 1e-9 and _t.gate == 0.0 and _t.band2_on
+   and abs(_t.band[0] - V.cc_to_hz(20)) < 1.0,
+   "apply_knobs sets SENS / GATE / band 1 / band 2 exactly as the renderer does")
 
 total = passed + failed
 print(f"{passed} passed, {failed} failed  (expected {EXPECTED})")

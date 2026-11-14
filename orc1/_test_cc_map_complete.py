@@ -30,7 +30,10 @@ sys.path.insert(0, HERE)
 import cc_surfaces as X
 import gen_cc_map as G
 
-EXPECTED = 135
+EXPECTED = 146                 # +1 2026-11-09: orc1_dawsurf_bind's COVERAGE entry (its ids exist)
+_PREV_PREV_PREV_EXPECTED = 145  # +3 2026-11-06: orc1_dawsurf_bridge registered + its COVERAGE ids + the daw section
+_PREV_EXPECTED = 142                 # +5 2026-11-04: orc1_knobfocus + orc1_mcu registered (2 files x 2) + the knobs section
+_PREV_PREV_EXPECTED = 137                 # +2 2026-10-29: the mxvbox module's COVERAGE entry + its section
 passed = failed = 0
 
 

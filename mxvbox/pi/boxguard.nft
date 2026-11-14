@@ -1,0 +1,35 @@
+#!/usr/sbin/nft -f
+# boxguard.nft -- loaded at boot by orc1-boxguard.service.
+# The MXV box (eth0, 10.55.0.0/29) may get its address and answer pings, and that is
+# all: it can open NO service on the Pi (the :5000 pages have no login). The Pi can
+# still open connections to the box (SSH, the conductor's UDP), and their replies come
+# back through the "established" rule. IP forwarding is off, so the box reaches
+# nothing past the Pi either.
+# Since 2026-10-29 the box can ALSO be on the home Wi-Fi: the same deal there, matched by
+# its Wi-Fi card's MAC (its address comes from the router and can change), plus its mDNS
+# answers, so the Pi can find it as mxvbox.local.
+# The two "table" lines just below make this safe to load again (create, then replace).
+define box_wifi = 00:11:22:33:44:66
+table inet orc_boxguard
+delete table inet orc_boxguard
+
+table inet orc_boxguard {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        iifname "eth0" ct state established,related accept
+        iifname "eth0" udp dport 67 accept
+        iifname "eth0" meta l4proto { icmp, ipv6-icmp } accept
+        # log only what the BOX tried (not the Pi's own broadcasts looping back)
+        iifname "eth0" ip saddr != 10.55.0.1 log prefix "boxguard: " limit rate 10/minute burst 5 packets drop
+        iifname "eth0" drop
+        iifname "wlan0" ether saddr $box_wifi ct state established,related accept
+        iifname "wlan0" ether saddr $box_wifi udp dport 5353 accept
+        # DHCP, for when the Pi is the hotspot (the box follows it, 2026-10-31): without this
+        # the box joined "pibox" but got no address. Nothing listens on port 67 on wlan0
+        # unless the Pi is the hotspot, so on the home Wi-Fi this opens nothing.
+        iifname "wlan0" ether saddr $box_wifi udp dport 67 accept
+        iifname "wlan0" ether saddr $box_wifi meta l4proto { icmp, ipv6-icmp } accept
+        iifname "wlan0" ether saddr $box_wifi log prefix "boxguard-wifi: " limit rate 10/minute burst 5 packets drop
+        iifname "wlan0" ether saddr $box_wifi drop
+    }
+}

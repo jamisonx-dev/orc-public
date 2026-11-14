@@ -21,7 +21,7 @@ Edit those files to customize the UI; this file is only plumbing
 (state read, command socket, JSON APIs).
 """
 
-import glob, json, os, socket, threading, time
+import glob, json, os, re, socket, threading, time
 from flask import Flask, Response, request, render_template, jsonify
 
 app      = Flask(__name__)
@@ -291,6 +291,7 @@ def api_rc505():
     target_to_cc = {t: cc for cc, t in cc_to_target.items()}
     try:
         import mido
+        import orc1_midisafe; orc1_midisafe.install()   # no leaked ALSA clients (2026-11-09)
         present = any("RC-505 MIDI 1" in n for n in mido.get_output_names())
     except Exception:
         present = None
@@ -444,7 +445,6 @@ def api_padmap_get():
     return jsonify({
         "config": conf, "saved": saved, "errors": errs,
         "actions": _pm.ACTION_CHOICES,
-        "colors": [{"name": n, "rgb": list(rgb)} for n, rgb in _pm.COLORS],   # surface pad colours (LED levels 0-7)
         "modules": [{"key": m, "label": _VOICE_LABELS.get(m, m), "ch": bound.get(m)}
                     for m in _padmap_modules()],
         "devices": st.get("midi_devices", []) if isinstance(st, dict) else [],
@@ -474,14 +474,6 @@ def api_padmap_set():
                                      ports=set(_pedal_ports()))
     ok = write_cmd("PADMAP_SET", {"config": conf})
     return jsonify({"ok": bool(ok), "config": conf, "errors": errs})
-
-
-@app.route('/api/padmap/show', methods=['POST'])
-def api_padmap_show():
-    """SHOW ON FIRE: put a surface device back in surface mode (the player left it with a mode button)."""
-    data = request.get_json(force=True, silent=True) or {}
-    dev = str(data.get("device") or "")[:40]
-    return jsonify({"ok": bool(write_cmd("SURFACE_SHOW", {"device": dev}))})
 
 
 # ── /cme: the CME U6MIDI Pro MIDI router. The BRAIN owns the box (orc1_cme.CmeLink,
@@ -800,6 +792,38 @@ def api_beatstep_send():
 # are broadcast on a shared port, so two concurrent readers (laptop + phone)
 # corrupt each other. Flask is threaded, so a process-wide lock queues reads.
 _BSP_READ_LOCK = threading.Lock()
+
+
+# GET/POST /api/bsplights -- what the BSP's step lights show (service orc1-bsplights,
+# orc1_bsplights.py). The service owns the lights and re-reads ~/.orc1_bsplights.json when it
+# changes; this endpoint only reads/writes that file and reports the service's status file.
+@app.route('/api/bsplights', methods=['GET', 'POST'])
+def api_bsplights():
+    import orc1_bsplights as _bsl
+    if request.method == 'POST':
+        data = request.get_json(force=True) or {}
+        cur = _bsl.load_conf()
+        try:
+            conf = _bsl.save_conf({**cur, **{k: data[k] for k in ("show", "track") if k in data}})
+        except (ValueError, OSError) as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+    else:
+        conf = _bsl.load_conf()
+    status = {}
+    try:
+        with open(_bsl.STATUS) as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        pass
+    alive = bool(status) and not status.get("stopped") and time.time() - float(status.get("t", 0)) < 5
+    tracks = []
+    try:
+        with open(_bsl.FEED) as f:
+            tracks = [t.get("name", "") for t in json.load(f).get("tracks", [])]
+    except (OSError, ValueError):
+        pass
+    return jsonify({"ok": True, "conf": conf, "shows": list(_bsl.SHOWS), "tracks": tracks,
+                    "service": alive, "bsp": bool(status.get("bsp")) if alive else False})
 
 @app.route('/api/beatstep/read', methods=['POST'])
 def api_beatstep_read():
@@ -1572,7 +1596,7 @@ _VOICE_LABELS = {"drums": "drums", "poly": "poly", "chip_p1": "chip P1",
                  "chip_noise": "chip ns", "chip_noise2": "chip ns2",
                  "gb_wave": "gb wave", "chip_pcm": "pcm", "sampler": "sampler",
                  "mono": "mono", "bbkit": "bbkit", "visuals": "visuals",
-                 "zoomfx": "zoom fx"}
+                 "zoomfx": "zoom fx", "mxvbox": "box vis", "daw": "daw"}
 
 
 def _live_bindings(st=None):
@@ -2991,30 +3015,118 @@ def _resolve_auto(srcs=None):
     # 2026-09-28).
     return ("system:capture_1", "system:capture_2", "CARD INPUT 1-2")
 
-def _labeled_sources(srcs=None):
-    """Friendly named source pairs that currently exist in the JACK graph."""
-    s = set(srcs if srcs is not None else _jack_sources())
-    out = []
-    def add(label, l, r):
-        if l in s and r in s:
-            out.append({"label": label, "left": l, "right": r})
-    add("Zoom Master", "system:capture_13", "system:capture_14")
-    for i in range(1, 13, 2):
-        add("Zoom Track %d-%d" % (i, i + 1),
-            "system:capture_%d" % i, "system:capture_%d" % (i + 1))
-    add("Pisound In", "pisound-in:capture_1", "pisound-in:capture_2")
-    # Each ORC module's own output (2026-09-28; replaces the retired single
-    # "Synth Direct" ORC1-Synth pair). Only listed when the module is up.
+# ── Plain names for what a skipback track records (2026-11-12) ──────────────
+# owner: "it's all really confusing". ONE naming for every page that picks a
+# track's source (/skipback, /sampler): the card's inputs by position on the
+# card jackd is on ("pisound In 1-2", "L-12 Master", "L-12 In 3"), modules by
+# name ("Drums"). Never named after gear plugged into an input.
+_SB_CAP_RE = re.compile(r"^system:capture_(\d+)$")
+_SB_AUTO_LABEL = "AUTO (follows the rig)"
+
+
+def _sb_card_name(s):
+    """Display name of the card the main jackd is on. The L-12's master pair
+    (13/14) existing = the L-12, whatever the card id says."""
+    if "system:capture_13" in s and "system:capture_14" in s:
+        return "L-12"
+    try:
+        c = str(_patch_card())
+    except Exception:
+        c = "card"
+    return "L-12" if c.upper().replace("-", "") in ("L12", "ZOOML12") else c
+
+
+def _sb_modules():
+    """[(label, jack client)] for every ORC module, in config order."""
     try:
         import orc1_config as _c
-        mods = list(_c.MODULE_JACK_NAMES.items())
         labels = getattr(_c, "MODULE_LABELS", {})
+        return [(labels.get(k, k), cl) for k, cl in _c.MODULE_JACK_NAMES.items()]
     except Exception:
-        mods, labels = [], {}
-    for key, client in mods:
-        add("Module: %s" % labels.get(key, key), "%s:out_L" % client,
-            "%s:out_R" % client)
+        return []
+
+
+def _sb_choices(srcs=None):
+    """Every source a track can be set to right now, plain-named and grouped:
+    [{key, group, label, mode, left, right}]. A pair = a STEREO track, a single
+    port = a MONO track (owner 2026-11-12: "what i pick, always")."""
+    s = set(srcs if srcs is not None else _jack_sources())
+    card = _sb_card_name(s)
+    out = [{"key": "auto", "group": "AUTO", "label": _SB_AUTO_LABEL,
+            "mode": "auto", "left": "", "right": ""}]
+
+    def pair(group, label, l, r):
+        if l in s and r in s:
+            out.append({"key": l + "|" + r, "group": group, "label": label,
+                        "mode": "manual", "left": l, "right": r})
+
+    def one(group, label, l):
+        if l in s:
+            out.append({"key": l, "group": group, "label": label,
+                        "mode": "manual", "left": l, "right": ""})
+
+    caps = sorted(int(m.group(1)) for m in (_SB_CAP_RE.match(p) for p in s) if m)
+    g = "STEREO · %s INPUTS" % card.upper()
+    if card == "L-12":
+        pair(g, "L-12 Master", "system:capture_13", "system:capture_14")
+    for i in caps:
+        if i % 2 == 1 and not (card == "L-12" and i == 13):
+            pair(g, "%s In %d-%d" % (card, i, i + 1),
+                 "system:capture_%d" % i, "system:capture_%d" % (i + 1))
+    pair(g, "pisound In 1-2", "pisound-in:capture_1", "pisound-in:capture_2")
+    for label, cl in _sb_modules():
+        pair("STEREO · MODULES", label, cl + ":out_L", cl + ":out_R")
+    gm = "MONO · %s INPUTS" % card.upper()
+    for i in caps:
+        one(gm, "%s In %d" % (card, i), "system:capture_%d" % i)
+    for i in (1, 2):
+        one(gm, "pisound In %d" % i, "pisound-in:capture_%d" % i)
     return out
+
+
+def _sb_port_label(p, card=None):
+    """Plain name for ONE port, present or not."""
+    m = _SB_CAP_RE.match(p or "")
+    if m:
+        n = int(m.group(1))
+        if card is None:                         # port not in the graph now
+            return ("L-12 In %d" % n) if n > 12 else ("In %d" % n)
+        return "%s In %d" % (card, n)
+    if (p or "").startswith("pisound-in:capture_"):
+        return "pisound In " + p.rsplit("_", 1)[1]
+    for label, cl in _sb_modules():
+        if p == cl + ":out_L":
+            return label + " L"
+        if p == cl + ":out_R":
+            return label + " R"
+    return p or "—"
+
+
+def _sb_source_label(left, right, srcs=None, choices=None):
+    """Plain name for a left/right source (right '' = mono)."""
+    s = set(srcs if srcs is not None else _jack_sources())
+    choices = choices if choices is not None else _sb_choices(s)
+    key = left + ("|" + right if right else "")
+    for c in choices:
+        if c["key"] == key:
+            return c["label"]
+    if (left, right) == ("system:capture_13", "system:capture_14"):
+        return "L-12 Master"
+    card = _sb_card_name(s)
+    ll = _sb_port_label(left, card if left in s else None)
+    if not right:
+        return ll
+    rl = _sb_port_label(right, card if right in s else None)
+    if ll.endswith(" L") and rl.endswith(" R") and ll[:-2] == rl[:-2]:
+        return ll[:-2]
+    return "%s + %s" % (ll, rl)
+
+
+def _labeled_sources(srcs=None):
+    """Named STEREO source pairs that exist in the JACK graph now (the legacy
+    PLAY / track-0 API still lists these). Same names as _sb_choices."""
+    return [{"label": c["label"], "left": c["left"], "right": c["right"]}
+            for c in _sb_choices(srcs) if c["right"]]
 
 def _skipback_mode():
     try:
@@ -3415,6 +3527,132 @@ def _sb_default_tracks():
          "store": "ram", "persist": True},
     ]
 
+_SB_DEFAULT_NAME_RE = re.compile(r"^T\d+$")
+_SB_EDIT_LOCK = threading.Lock()      # read-modify-write of the tracks file
+
+
+def _sb_track_words(t, st, srcs, choices):
+    """What a track is SET to and what it is GETTING, in plain words, for the
+    track cards on /skipback and /sampler (2026-11-12). display_name hides the
+    t<id> default names ("stuff like t1, t2, not so much")."""
+    if srcs is None:
+        srcs = _jack_sources()
+    if choices is None:
+        choices = _sb_choices(srcs)
+    src = t.get("source") if isinstance(t.get("source"), dict) else {}
+    left, right = src.get("left") or "", src.get("right") or ""
+    mode = src.get("mode") or ("manual" if left else "auto")
+    if mode == "auto":
+        key, label = "auto", _SB_AUTO_LABEL
+    else:
+        if not t.get("stereo", True):
+            right = ""
+        elif not right:
+            right = left                       # the recorder's own rule
+        key = left + ("|" + right if right else "")
+        label = _sb_source_label(left, right, srcs, choices)
+    res = [p for p in (st.get("resolved") or []) if p]
+    now = (_sb_source_label(res[0], res[1] if len(res) > 1 else "", srcs, choices)
+           if res else "")
+    name = t.get("name") or ""
+    return {
+        "display_name": label if (not name or _SB_DEFAULT_NAME_RE.match(name))
+                        else name,
+        "source_key": key,
+        "source_label": label,
+        # false = the picked port isn't in the graph right now
+        "source_present": key == "auto" or any(c["key"] == key for c in choices),
+        "now_label": now,
+        "now_differs": (mode == "manual" and bool(res)
+                        and res != ([left, right] if right else [left])),
+    }
+
+
+def _sb_find(tracks, tid):
+    for t in tracks:
+        if isinstance(t, dict) and t.get("id") == tid:
+            return t
+    return None
+
+
+@app.route('/api/skipback/tracks/<int:tid>/source', methods=['POST'])
+def api_skipback_track_source(tid):
+    """Set what ONE track records, at once (no page-wide SAVE). Body: {"key":
+    a choice key from GET .../tracks "choices"} -- "auto", "<left>|<right>"
+    (stereo) or "<port>" (mono) -- or {"left", "right"} for custom ports.
+    Stereo/mono FOLLOWS THE PICK, always (owner 2026-11-12: "what i pick,
+    always ... skipback is meant to be ephemeral until grabbed"): a change of
+    width rebuilds that track's ring, which is accepted, not asked about.
+    A default name (T<n>, or the old source's name) follows the new source."""
+    try:
+        d = request.get_json(force=True) or {}
+        key = d.get("key")
+        if key == "auto":
+            src, stereo = {"mode": "auto"}, True
+        else:
+            if isinstance(key, str) and key:
+                left, _sep, right = key.partition("|")
+            else:
+                left, right = d.get("left") or "", d.get("right") or ""
+            if (not isinstance(left, str) or not isinstance(right, str)
+                    or ":" not in left or (right and ":" not in right)):
+                return _sb_err("pick a source (a port name like client:port)", 400)
+            src = {"mode": "manual", "left": left}
+            if right:
+                src["right"] = right
+            stereo = bool(right)
+        srcs = _jack_sources()
+        choices = _sb_choices(srcs)
+        with _SB_EDIT_LOCK:
+            tracks = _sb_load_tracks_file()
+            t = _sb_find(tracks, tid)
+            if t is None:
+                return _sb_err("no track %d" % tid, 404)
+            old = _sb_track_words(t, {}, srcs, choices)["source_label"]
+            t["source"], t["stereo"] = src, stereo
+            new = _sb_track_words(t, {}, srcs, choices)["source_label"]
+            name = t.get("name") or ""
+            if not name or _SB_DEFAULT_NAME_RE.match(name) or name == old:
+                t["name"] = "MAIN" if (tid == 0 and key == "auto") else new
+            ok, msg, used_mb = _sb_ram_guard(tracks)
+            if not ok:
+                return _sb_err(msg, 400, ram_used_mb=round(used_mb, 1))
+            _sb_write_tracks(tracks)
+        try:
+            os.remove(SKIPBACK_SRC)             # the legacy track-0 shim
+        except OSError:
+            pass
+        return Response(json.dumps({"ok": True, "track": t, "label": new}),
+                        mimetype='application/json')
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
+@app.route('/api/skipback/tracks/<int:tid>/arm', methods=['POST'])
+def api_skipback_track_arm(tid):
+    """Arm / disarm ONE track at once. {"armed": true|false}. Arming still
+    goes through the RAM guard; disarming frees the ring."""
+    try:
+        d = request.get_json(force=True) or {}
+        armed = d.get("armed")
+        if not isinstance(armed, bool):
+            return _sb_err("'armed' must be true or false", 400)
+        with _SB_EDIT_LOCK:
+            tracks = _sb_load_tracks_file()
+            t = _sb_find(tracks, tid)
+            if t is None:
+                return _sb_err("no track %d" % tid, 404)
+            t["armed"] = armed
+            ok, msg, used_mb = _sb_ram_guard(tracks)
+            if not ok:
+                return _sb_err(msg, 400, ram_used_mb=round(used_mb, 1))
+            _sb_write_tracks(tracks)
+        return Response(json.dumps({"ok": True, "track": t}),
+                        mimetype='application/json')
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
 @app.route('/api/skipback/tracks')
 def api_skipback_tracks_get():
     """C6: per-track config merged with live recorder status + RAM globals +
@@ -3422,6 +3660,7 @@ def api_skipback_tracks_get():
     cfg = _sb_load_tracks_file()
     by_id, glob = _sb_read_status()
     srcs = _jack_sources()
+    choices = _sb_choices(srcs)
     out, armed_sum = [], 0
     for t in cfg:
         stereo = bool(t.get("stereo", True))
@@ -3430,6 +3669,7 @@ def api_skipback_tracks_get():
             armed_sum += _sb_ring_bytes(stereo, length)
         st = by_id.get(t.get("id"), {})
         out.append({
+            **_sb_track_words(t, st, srcs, choices),
             "id":          t.get("id"),
             "name":        t.get("name", ""),
             "source":      t.get("source", {"mode": "auto"}),
@@ -3473,6 +3713,7 @@ def api_skipback_tracks_get():
                                    and t.get("store") == "card") / 1048576.0),
         "sources":       _labeled_sources(srcs),
         "raw_sources":   srcs,
+        "choices":       choices,
         "zoom_present":  _zoom_present(),
         "status_ts":     glob.get("ts"),
         # seconds since the recorder last wrote its status (every ~5 s while
@@ -3531,7 +3772,10 @@ def api_skipback_tracks_post():
                 if c["id"] is None:
                     c["id"] = _next_id()
                 if not c["name"]:
-                    c["name"] = "MAIN" if c["id"] == 0 else "T%d" % c["id"]
+                    # named after what it records, not "T3" (2026-11-12)
+                    s0 = c.get("source") or {}
+                    c["name"] = ("MAIN" if c["id"] == 0 and s0.get("mode") != "manual"
+                                 else _sb_track_words(c, {}, None, None)["source_label"])
             # Carry a hand-set 'dir' forward when the UI omits it (it is not an
             # editable field, so a plain save would otherwise reset it to the
             # t<id> default -- a structural change that makes the recorder
@@ -3594,7 +3838,8 @@ def api_skipback_tracks_post():
         if not ok:
             return _sb_err(msg, 400, ram_used_mb=round(used_mb, 1),
                            ram_budget_mb=SB_RAM_BUDGET_MB)
-        _sb_write_tracks(tracks)
+        with _SB_EDIT_LOCK:
+            _sb_write_tracks(tracks)
         try:
             os.remove(SKIPBACK_SRC)             # retire the C5 track-0 shim
         except OSError:
@@ -3874,6 +4119,258 @@ def api_visuals():
         st["free"] = [c for c in range(1, 17)
                       if c not in reserved and c not in bound]
         return Response(json.dumps(st), mimetype='application/json')
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
+# ==============================================================================
+# BOX VISUALS - the MXV S805 box on eth0 (module "mxvbox", mxvbox/pi/conductor.py)
+# ==============================================================================
+# Like the visuals: the page sends the knobs as SYNTH_CC on the channel the
+# "mxvbox" module is bound to; the conductor (orc1-boxvis) saves them to
+# ~/.orc1_mxvbox.json, read back here. The knob table itself is
+# mxvbox/pi/mxvbox_knobs.py (shared with the conductor and /cc).
+
+_MXV_KNOBS = os.path.expanduser("~/orc/mxvbox/pi/mxvbox_knobs.py")
+_MXV_STATE = os.path.expanduser("~/.orc1_mxvbox.json")
+_MXV_BOX = "10.55.0.6"
+_mxv_ping = {"t": 0.0, "up": None}
+
+
+def _mxv_ssh():
+    """ssh to the MXV box at the address its conductor is using (cable or Wi-Fi), not by the name:
+    mxvbox.local (mDNS) failed on and off on 2026-11-02 while the box itself was fine."""
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+    try:
+        with open("/dev/shm/orc1_mxvbox_status.json") as f:
+            addr = json.load(f).get("addr")
+        if addr and re.fullmatch(r"[0-9.]+", addr):
+            cmd += ["-o", "HostName=%s" % addr]
+    except (OSError, ValueError):
+        pass
+    return cmd + ["mxvbox"]
+
+
+def _mxv_untrusted():
+    """None when the caller may change the box (the Pi, its hotspot, the home network: orc1_nettrust,
+    like the power buttons), else the 403 to return. Fails closed. One place since 2026-11-03: the
+    frame upload and PLAY NEXT skipped the check."""
+    try:
+        import orc1_nettrust
+        if orc1_nettrust.trusted(request.remote_addr or ""):
+            return None
+    except Exception:
+        pass
+    return jsonify({"ok": False, "error": "only allowed from the Pi, its hotspot or the home network"}), 403
+
+
+def _mxv_run(remote, **kw):
+    """Run one shell command on the box; its returncode, or None when the box did not answer in 30 s
+    (a hang used to escape as an HTML 500 the page could not read)."""
+    import subprocess
+    try:
+        return subprocess.run(_mxv_ssh() + [remote], capture_output=True, timeout=30, **kw).returncode
+    except subprocess.TimeoutExpired:
+        return None
+
+
+@app.route('/api/mxvbox/frame/<int:n>', methods=['GET', 'POST'])
+def api_mxvbox_frame(n):
+    """Your FRAME picture n (1-4) for the MXV box (mxvbox/pi/frames.py, 2026-11-02): white = the
+    projector's light, black = dark. GET -> its preview PNG (404 when none). POST multipart "file"
+    (PNG / JPG / GIF / WebP / BMP / SVG, 16 MB max) -> fitted to the box's screen, sent to the box."""
+    import subprocess
+    import sys as _sys
+    import tempfile as _tf
+    d = os.path.expanduser("~/orc/mxvbox/pi")
+    if d not in _sys.path:
+        _sys.path.insert(0, d)
+    import frames
+    if not 1 <= n <= frames.SLOTS:
+        return _sb_err("frame picture slots are 1-%d" % frames.SLOTS, 400)
+    if request.method == 'GET':
+        p = frames.preview_path(n)
+        if not os.path.exists(p):
+            return _sb_err("no picture in slot %d yet" % n, 404)
+        with open(p, "rb") as f:
+            return Response(f.read(), mimetype='image/png', headers={"Cache-Control": "no-store"})
+    bad = _mxv_untrusted()
+    if bad:
+        return bad
+    try:
+        vp = _vis_patterns()
+        if request.content_length is None:
+            return _sb_err("upload needs a Content-Length", 411)
+        if request.content_length > vp.PIC_UPLOAD_MAX + 64 * 1024:
+            return _sb_err("too big (16 MB max)", 413)
+        up = request.files.get("file")
+        if up is None:
+            return _sb_err("no file", 400)
+        data = up.read(vp.PIC_UPLOAD_MAX + 1)
+        head = data[:512].lstrip().lower()
+        if (up.filename or "").lower().endswith(".svg") or head.startswith(b"<?xml") or head.startswith(b"<svg"):
+            tmpd = _tf.mkdtemp(prefix="frame_svg_")
+            try:
+                with open(vp._svg_to_png(data.decode("utf-8"), tmpd), "rb") as f:
+                    data = f.read()
+            except UnicodeDecodeError:
+                return _sb_err("not a text SVG file", 400)
+            finally:
+                import shutil as _sh
+                _sh.rmtree(tmpd, ignore_errors=True)
+        try:
+            raw = frames.store(n, frames.fit(vp.picture_grey(data)))
+        except ValueError as e:
+            return _sb_err(str(e), 400)
+        if _mxv_run(frames.box_cmd(n), input=raw) != 0:
+            return _sb_err("NOT on the box yet (it is not answering): the preview is kept here, upload it "
+                           "again when the box is on", 503)
+        return jsonify({"ok": True, "slot": n})
+    except Exception as e:
+        return _sb_err(str(e), 500)
+
+
+@app.route('/api/mxvbox/delete', methods=['POST'])
+def api_mxvbox_delete():
+    """POST {"id": <clip id>} -> delete that clip from the box's library (its card). The
+    box lets go of it in RAM within ~5 s. Trusted addresses only (like the power buttons);
+    ids are plain slugs (make_clips.slug), never a path."""
+    import re
+    import subprocess
+    bad = _mxv_untrusted()
+    if bad:
+        return bad
+    cid = str((request.get_json(force=True, silent=True) or {}).get("id", ""))
+    if not re.fullmatch(r"[a-z0-9_]{1,60}", cid):
+        return jsonify({"ok": False, "error": "bad clip id"}), 400
+    if _mxv_run("test -d /storage/orc/lib/%s && rm -rf /storage/orc/lib/%s" % (cid, cid), text=True) != 0:
+        return jsonify({"ok": False, "error": "not on the box, or the box is not answering"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route('/api/mxvbox/pools', methods=['POST'])
+def api_mxvbox_pools():
+    """POST {"pools": [{"name", "ids": [clip id, ...]}, ...]} -> written to the box's
+    lib/pools.json (the box re-reads it within ~5 s). Pool N = the Nth entry; the POOL
+    knob (CC 30) picks one, 0 = everything. Trusted addresses only, like delete."""
+    import re
+    import subprocess
+    bad = _mxv_untrusted()
+    if bad:
+        return bad
+    pools = (request.get_json(force=True, silent=True) or {}).get("pools")
+    if not isinstance(pools, list) or len(pools) > 100:
+        return jsonify({"ok": False, "error": "pools must be a list (max 100)"}), 400
+    clean = []
+    for p in pools:
+        ids = p.get("ids") if isinstance(p, dict) else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) and re.fullmatch(r"[a-z0-9_]{1,60}", i) for i in ids):
+            return jsonify({"ok": False, "error": "bad clip id in a pool"}), 400
+        name = re.sub(r"[^\w .,'&+-]", "", str(p.get("name", "")))[:40].strip() or "pool %d" % (len(clean) + 1)
+        seen = set()                          # (keep YOUR order: a playlist plays in it; was sorted A-Z)
+        ids = [i for i in ids if not (i in seen or seen.add(i))]
+        clean.append({"name": name, "ids": ids, "order": bool(p.get("order"))})
+    if _mxv_run("cat > /storage/orc/lib/pools.json.tmp && mv /storage/orc/lib/pools.json.tmp /storage/orc/lib/pools.json",
+                input=json.dumps(clean), text=True) != 0:
+        return jsonify({"ok": False, "error": "the box is not answering"}), 502
+    return jsonify({"ok": True, "pools": clean})
+
+
+@app.route('/api/mxvbox/flags', methods=['POST'])
+def api_mxvbox_flags():
+    """POST {"fav": [clip id, ...], "never": [clip id, ...]} -> the box's lib/flags.json (2026-11-02): a
+    FAVOURITE is loaded first and shown about twice as often, a NEVER clip is not loaded or shown. The box
+    re-reads it within ~5 s. Trusted addresses only, like the pools."""
+    import subprocess
+    bad = _mxv_untrusted()
+    if bad:
+        return bad
+    body = request.get_json(force=True, silent=True) or {}
+    out = {}
+    for k in ("fav", "never"):
+        ids = body.get(k, [])
+        if not isinstance(ids, list) or len(ids) > 2000 or not all(isinstance(i, str) and re.fullmatch(r"[a-z0-9_]{1,60}", i) for i in ids):
+            return jsonify({"ok": False, "error": "bad clip id in %s" % k}), 400
+        out[k] = sorted(set(ids))
+    out["fav"] = [i for i in out["fav"] if i not in out["never"]]   # (one or the other)
+    if _mxv_run("cat > /storage/orc/lib/flags.json.tmp && mv /storage/orc/lib/flags.json.tmp /storage/orc/lib/flags.json",
+                input=json.dumps(out), text=True) != 0:
+        return jsonify({"ok": False, "error": "the box is not answering"}), 502
+    return jsonify({"ok": True, "flags": out})
+
+
+@app.route('/api/mxvbox/next', methods=['POST'])
+def api_mxvbox_next():
+    """POST {"id": clip id} -> PLAY NEXT: the box's next clip bar plays that clip (it is fetched into RAM
+    first if it is not there). {"id": "-"} = forget it. Sent straight to the box (Q ID, UDP 9000)."""
+    bad = _mxv_untrusted()
+    if bad:
+        return bad
+    cid = str((request.get_json(force=True, silent=True) or {}).get("id", ""))
+    if cid != "-" and not re.fullmatch(r"[a-z0-9_]{1,60}", cid):
+        return jsonify({"ok": False, "error": "bad clip id"}), 400
+    try:
+        with open("/dev/shm/orc1_mxvbox_status.json") as f:
+            addr = json.load(f).get("addr")
+    except (OSError, ValueError):
+        addr = None
+    if not addr or not re.fullmatch(r"[0-9.]+", addr):
+        return jsonify({"ok": False, "error": "the box's address is not known yet"}), 503
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        for _ in range(2):                    # (UDP: twice, the box takes the same id the same way)
+            s.sendto(("Q %s" % cid).encode(), (addr, 9000))
+    finally:
+        s.close()
+    return jsonify({"ok": True, "id": cid})
+
+
+@app.route('/api/mxvbox')
+def api_mxvbox():
+    """GET -> {"ok", "knobs": [{cc, name, default, help}], "values" {cc: 0-127},
+    "channel" (mxvbox's bound channel, 0 = unbound), "conductor" (orc1-boxvis
+    active?), "box" (the box answers a ping on eth0; cached 5 s)}."""
+    import importlib.util
+    import subprocess
+    import time as _t
+    try:
+        spec = importlib.util.spec_from_file_location("mxvbox_knobs", _MXV_KNOBS)
+        M = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(M)
+        knobs = [{"cc": cc, "name": n, "default": d, "help": h}
+                 for cc, (n, d, h) in sorted(M.KNOBS.items())]
+        values = M.defaults()
+        try:
+            with open(_MXV_STATE) as f:
+                values.update({int(k): int(v) for k, v in json.load(f).items()})
+        except (OSError, ValueError):
+            pass
+        b = _live_bindings(read_state() or {})
+        ch = b.get("mxvbox") if isinstance(b.get("mxvbox"), int) else 0
+        cond = subprocess.run(["systemctl", "is-active", "orc1-boxvis"], capture_output=True,
+                              text=True, timeout=3).stdout.strip() == "active"
+        try:                                     # the box's own status, via the conductor
+            with open("/dev/shm/orc1_mxvbox_status.json") as f:
+                lib = json.load(f)
+        except (OSError, ValueError):
+            lib = None
+        addr = (lib or {}).get("addr") or _MXV_BOX   # cable or Wi-Fi: the conductor's pick
+        if _t.time() - _mxv_ping["t"] > 5 and addr and all(c in "0123456789." for c in addr):
+            _mxv_ping["t"] = _t.time()
+            _mxv_ping["up"] = subprocess.run(["ping", "-c1", "-W1", addr], capture_output=True,
+                                             timeout=3).returncode == 0
+        return Response(json.dumps({"ok": True, "knobs": knobs, "values": values, "channel": ch,
+                                    "library": lib,
+                                    "styles": list(M.STYLES),
+                                    "lines": [list(x) if x else None for x in M.LINE_LOOKS],
+                                    "lines_blur": [list(x) if x else None for x in M.LINE_LOOKS_BLUR],
+                                    "kaleido": list(M.KALEIDO_MIRRORS),
+                                    "scenes": list(M.SCENE_NAMES),
+                                    "mask_shapes": list(getattr(M, "MASK_SHAPES", (None,))),
+                                    "mask_fills": list(getattr(M, "MASK_FILLS", ())),
+                                    "frame_shapes": list(getattr(M, "FRAME_SHAPES", (None,))),
+                                    "conductor": cond, "box": _mxv_ping["up"]}),
+                        mimetype='application/json')
     except Exception as e:
         return _sb_err(str(e), 500)
 
@@ -4609,6 +5106,81 @@ def _patch_protected(conns=None, phys=None):
     return out
 
 
+_SB_PORT_RE = re.compile(r"^skipback-rec:t(\d+)_(L|R|M)$")
+
+
+def _sb_patch_dst(name):
+    """(track id, side) when `name` is a skipback track's input port on the
+    main server, else None."""
+    srv, bare = _port_server(name)
+    if srv is not None:
+        return None
+    m = _SB_PORT_RE.match(bare)
+    return (int(m.group(1)), m.group(2)) if m else None
+
+
+def _sb_source_from_patch(pairs):
+    """Wiring a source into a skipback track on /patch REPLACES that track's
+    source (2026-11-12, owner: "Replace its source").
+
+    The recorder owns every wire into its ports: it keeps exactly the source
+    in ~/.orc1_skipback_tracks.json and removes anything else within ~5 s. A
+    plain jack_connect from /patch was therefore undone every time (measured
+    2026-11-12: BBKit and Drum wired into t2, both cut 5 s later). So the
+    choice is written where the recorder reads it, as a manual source.
+
+    Returns (changed, error): changed = {tid: new source dict}."""
+    want = {}
+    for a, b in pairs:
+        hit = _sb_patch_dst(b)
+        if hit is None:
+            continue
+        tid, side = hit
+        sides = want.setdefault(tid, {})
+        if side in sides and sides[side] != a:
+            return None, ("a skipback track records ONE source per channel -- "
+                          "wire one source into %s" % b)
+        sides[side] = a
+    if not want:
+        return {}, None
+    tracks = _sb_load_tracks_file()
+    by_id = {t.get("id"): t for t in tracks if isinstance(t, dict)}
+    st_by_id, _g = _sb_read_status()
+    changed = {}
+    for tid, sides in sorted(want.items()):
+        t = by_id.get(tid)
+        if t is None:
+            return None, "skipback track %d is not in the tracks file" % tid
+        old = t.get("source") if isinstance(t.get("source"), dict) else {}
+        if t.get("stereo", True):
+            if "M" in sides:
+                return None, "track %d is stereo (it has L and R inputs)" % tid
+            # the side not being re-wired keeps what it records now: its
+            # manual port, else what the recorder resolved it to
+            res = st_by_id.get(tid, {}).get("resolved") or []
+            if old.get("mode") == "manual":
+                cur_l, cur_r = old.get("left") or "", old.get("right") or ""
+            else:
+                cur_l = res[0] if len(res) > 0 else ""
+                cur_r = res[1] if len(res) > 1 else ""
+            left = sides.get("L") or cur_l or sides.get("R")
+            right = sides.get("R") or cur_r or left
+            src = {"mode": "manual", "left": left, "right": right}
+        else:
+            left = sides.get("M")
+            if not left:
+                return None, "track %d is mono (its one input is _M)" % tid
+            src = {"mode": "manual", "left": left}
+        t["source"] = src
+        changed[tid] = src
+    _sb_write_tracks(tracks)
+    try:
+        os.remove(SKIPBACK_SRC)             # the legacy track-0 shim must not
+    except OSError:                         # override the choice just made
+        pass
+    return changed, None
+
+
 @app.route('/api/patch/protected')
 def api_patch_protected():
     return Response(json.dumps({
@@ -4740,6 +5312,25 @@ def api_patch_set():
                          "use 1, or matching counts" % (len(src), len(dst))}),
                 status=400, mimetype='application/json')
 
+        # A skipback track's input wire belongs to the recorder: it records
+        # exactly its configured source and re-makes that wire within ~5 s,
+        # so a cut here (even forced) never sticks -- say so instead of
+        # "removed" (2026-11-12). Changing it = wiring another source in.
+        sb_pairs = [(a, b) for a, b in pairs if _sb_patch_dst(b)]
+        if op == "disconnect" and sb_pairs:
+            return Response(json.dumps({
+                "ok": False,
+                "error": "a skipback track always records its source -- to "
+                         "change it, wire another source into it; to stop "
+                         "it, disarm it on /skipback"}),
+                status=409, mimetype='application/json')
+        sb_changed = {}
+        if op == "connect" and sb_pairs:
+            sb_changed, err = _sb_source_from_patch(sb_pairs)
+            if err:
+                return Response(json.dumps({"ok": False, "error": err}),
+                                status=400, mimetype='application/json')
+
         # Guard the two wires that cannot be restored from the instrument.
         # Refusing is recoverable; a silent teardown of the main output is not.
         if op == "disconnect" and not d.get("force"):
@@ -4785,12 +5376,16 @@ def api_patch_set():
             # the exact class of lie the rest of this endpoint is written to
             # avoid.
             warn = None
-            if done:
+            # Skipback wires are kept by the recorder from the tracks file
+            # (set above), never by the saved patch: a saved one would be
+            # re-made at boot and cut again by the recorder.
+            to_save = [p for p in done if not _sb_patch_dst(p[1])]
+            if to_save:
                 try:
                     if op == "connect":
-                        _patch_saved_add(done)
+                        _patch_saved_add(to_save)
                     else:
-                        _patch_saved_remove(done)
+                        _patch_saved_remove(to_save)
                 except Exception as e:
                     # The audio is ALREADY rewired at this point. Letting this
                     # reach the outer handler would return a 500 saying the
@@ -4809,6 +5404,8 @@ def api_patch_set():
                 "saved": saved_now, "connections": _patch_conns()}
         if moved:
             body["moved"] = moved
+        if sb_changed:
+            body["skipback_source"] = {str(k): v for k, v in sb_changed.items()}
         if warn:
             body["warning"] = warn
         return Response(json.dumps(body), mimetype='application/json')
@@ -5405,6 +6002,8 @@ def _patch_saved_load():
             continue
         if (src, dst) in seen:
             continue
+        if _sb_patch_dst(dst):
+            continue        # the recorder owns skipback wires (tracks file)
         seen.add((src, dst))
         rows.append(_patch_entry(src, dst, cut, ms))
     return rows

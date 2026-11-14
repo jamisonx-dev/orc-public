@@ -761,7 +761,7 @@ try:
 except RuntimeError as ex:
     e = str(ex)
 check("FireBarLink.host_send with no Fire -> raises; link_version = (False, None)",
-      e and "no ORC FW seq" in e and link.link_version() == (False, None))
+      e and "FLAME seq / ORC FW seq" in e and link.link_version() == (False, None))
 fm.names = ["ORC FW seq:ORC FW seq MIDI 1 24:0"]
 link.poll()
 link.handle_sysex(S.ORC_HDR + [0x00, 3], "ORC FW seq:ORC FW seq MIDI 1 24:0")

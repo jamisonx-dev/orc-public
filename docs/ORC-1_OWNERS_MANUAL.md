@@ -732,13 +732,11 @@ Any class-compliant USB-MIDI drum brain or pad controller just works when plugge
 | pass through | the pad plays what it always played (the same as not listing it) |
 | ignore | the hit is dropped |
 | play note | a note on a **named module** (drums, poly, chip voices, sampler ...), looked up from `/matrix` at the moment you hit, so moving modules around never sends it to the wrong place; an unbound module stays silent. Velocity = as hit, or fixed |
-| send CC | a CC of your choice. From a CC input (e.g. a hi-hat pedal) its value passes through. From a **pad** (2026-10-19) the value is the hit's velocity or a fixed number, sent as **press** (on the hit), **momentary** (the value on the hit, 0 on release; Fire only, the one device that sends a real release) or **toggle** (the value, then 0, on alternate hits) |
-| skipback grab | (2026-10-19) save skipback from this pad: **all tracks** (the armed ones, or a chosen few) or **one track**, for the last N **bars**, the last **m:ss**, **everything** the ring holds, or **while held** (Fire only: press to release, optionally snapped to whole bars). Bars / time / everything end at the press |
+| send CC | a CC of your choice. From a CC input (e.g. a hi-hat pedal) its value passes through. From a **pad** (2026-10-19) the value is the hit's velocity or a fixed number, sent as **press** (on the hit), **momentary** (the value on the hit, 0 on release; needs a device that sends a real release, which many drum brains do not) or **toggle** (the value, then 0, on alternate hits) |
+| skipback grab | (2026-10-19) save skipback from this pad: **all tracks** (the armed ones, or a chosen few) or **one track**, for the last N **bars**, the last **m:ss**, **everything** the ring holds, or **while held** (press to release, optionally snapped to whole bars; needs a device that sends a real release). Bars / time / everything end at the press |
 | action | anything the FCB pedal can do: chords I-VII (latch / stab per the `/pedal` setting), RC-505 buttons, BeatBuddy, sequencer play/stop/record, tap tempo, panic, plus skipback **GRAB ALL**, arp, FX, CME preset and **Recall scene N** |
 
 **Where a note or CC goes:** a **named module** (above), or an **output port + channel** (a port from `PORTS` in the config, e.g. the pisound DIN, and channel 1-16 except 13, the ORC's control channel) for real gear.
-
-**The Fire as a pad surface** (custom firmware): a profile marked as a surface paints the Fire's pads in the colour each entry names (unlisted pads stay dark and silent); SHOW ON FIRE on `/pads` puts it up, and clicking a Fire pad on the page adds it. A grab pad lights while held. A **Tap tempo** pad blinks the ORC clock's beat (beat 1 white; grey = following an outside clock).
 
 **Pads are triggers.** Drum brains send their note-off on a timer, not when you lift the stick (the SD350: right before the next hit, or ~2.4 s after the last one), so an action fires on the **hit** and the note-off is ignored. A second hit on the same pad within 80 ms is treated as a double-trigger (measured: two note-ons 10 ms apart from one hit) and doesn't fire again, so a toggle like RC-505 rec/play can't cancel itself. Hold-style actions (the BeatBuddy footswitch, page flips) aren't offered. **Min velocity** (per device, and per action pad) stops a ghost tap firing something; a CC action fires when the value rises past its threshold.
 
@@ -847,8 +845,15 @@ their own, so anyone who can join the hotspot can control the instrument.
     orc1_bbkit_host.py      -> per-module JACK host: BeatBuddy kit     (service orc1-bbkit,   client ORC1-BBKit)
     orc1_fire.py            -> Akai Fire controller handler (this is the big one)
     orc1_mixtrack.py        -> Numark Mixtrack Pro 3 handler (decks, pads, LEDs, sampler)
-    orc1_surface_link.py    -> paints the ORC surface on a Fire running the custom firmware
     orc1_padmap.py          -> per-device pad maps (/pads)
+    orc1_orcmode.py         -> ORC mode: the Fire handler on a Fire running the FLAME firmware
+    orc1_flame_rtp.py       -> wires the FLAME Fire's DAW port to network MIDI (service orc1-flame-rtp)
+    orc1_dawsurf_bridge.py  -> the "daw" module: controllers as a DAW control surface (service orc1-dawsurf)
+    orc1_dawsurf_bind.py / orc1_dawsurface*.py / orc1_mcu.py -> its binding table, surface model, Mackie + OSC dialects
+    orc1_knobfocus.py       -> follow knobs: a knob bank that follows the voice being played
+    orc1_bsplights.py       -> the ORC's state on a BeatStep Pro's step lights (service orc1-bsplights)
+    orc1_midisafe.py        -> stops mido leaking ALSA MIDI clients (every mido process calls it)
+    run_all_tests.sh        -> runs every regression suite and checks the counts (_test_counts.txt)
     orc1_scenes.py          -> SCENES: store, capture, recall timing (owned by the brain)
     orc1_settings_registry.py -> every setting a scene can hold, generated from the code
     orc1_fire_pages.py      -> reads / writes the universal pages stored on the custom-firmware Fire (/control)

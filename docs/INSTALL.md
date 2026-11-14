@@ -6,9 +6,8 @@ This guide covers installing ORC-1 on a fresh Linux machine. It documents **impl
 
 > **The user name `pibox` is written into the files.** 34 unit files in `orc/systemd/` (`User=pibox`, `/home/pibox/orc/...`), the udev rule, and some scripts (`orc1_web.py`, `orc1_sampler_host.py`, the `orc1_net*` network scripts, `orc1_samba_trust.py`, `daw/daw_mode.sh`, `daw/visuals.sh`) use `/home/pibox`. The simplest install is as a user named `pibox` with the repo at `~/orc`; otherwise replace `pibox` in those files first.
 
-> **Read this first.** The unit files in `orc/systemd/` are current: the brain, `orc1-jackd`, the six module hosts, `orc1-web`, `orc1-system`, `skipback-record`, the `orc1-bridge@` and `orc1-jackd@` templates, `bt-route`, the monitor kiosks, `orc1-kikpad`, `orc1-zoomfx`, the network units (`orc1-net`, `orc1-netwatch`, `orc1-netfallback`) and `orc1-health` + its timer. Two things are **not** in the repo:
+> **Read this first.** The unit files in `orc/systemd/` are current: the brain, `orc1-jackd`, the six module hosts, `orc1-web`, `orc1-system`, `skipback-record`, the `orc1-bridge@` and `orc1-jackd@` templates, `bt-route`, the monitor kiosks, `orc1-kikpad`, `orc1-zoomfx`, the network units (`orc1-net`, `orc1-netwatch`, `orc1-netfallback`) `orc1-mdnsname` + its timer and `orc1-health` + its timer. There are also units for optional gear, to enable only if you own it: `orc1-dawsurf` (a DAW control surface; set `DAWSURF_OSC_HOST` / `DAWSURF_REAPER_WEB` in `orc1_config.py` to your computer first, they ship as `None`), `orc1-flame-rtp` (an Akai Fire on the FLAME firmware), `orc1-bsplights` (a BeatStep Pro on modified firmware) and the four `orc1-box*` units (the MXV box, see `mxvbox/README.md`). One thing is **not** in the repo:
 > - **The hosts' jackd coupling.** `orc1-drum`, `-poly`, `-chip`, `-mono` and `-sampler` (and `-bbkit` once it is moved to another card) get their `After=`/`BindsTo=orc1-jackd` from a drop-in, `50-jack-server.conf`, that `orc1_assign_module_out.sh` *generates* (it also points a host at another card's server). The repo ships no copy, so on a fresh install run `sudo ~/orc/orc1/orc1_assign_module_out.sh <drum|poly|chip|mono|sampler> main` once per host after copying the units. (Not tested on a fresh machine; `orc1-bbkit` carries its coupling in the unit itself.)
-> - **`orc1-firevu`** (the Fire's pad VU, for the custom Fire firmware only) runs a script from `~/fire_fw/`, outside this repo. Ignore it unless you have that firmware.
 >
 > `orc1-synth` is **retired**; the repo no longer ships it.
 
@@ -17,7 +16,7 @@ This guide covers installing ORC-1 on a fresh Linux machine. It documents **impl
 ## Hardware
 
 **Required**
-- A Raspberry Pi (tested on Pi 4/5) or any Linux box that can run JACK with a real audio interface.
+- A Raspberry Pi (tested on one rig: a Raspberry Pi 4 Model B) or any Linux box that can run JACK with a real audio interface.
 - An audio interface supported by ALSA/JACK — see "Supported audio interfaces" below.
 
 **Optional controllers** (ORC-1 detects them by USB/MIDI name; anything absent is silently skipped)

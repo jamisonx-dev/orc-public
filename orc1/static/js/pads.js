@@ -5,7 +5,7 @@
 // orc1_padmap.validate_config and the brain applies it live + saves it.
 (function () {
   "use strict";
-  var conf = null, actions = [], modules = [], devices = [], colors = [], sbTracks = [], ports = [];
+  var conf = null, actions = [], modules = [], devices = [], sbTracks = [], ports = [];
   var cur = null, learn = false, lastSeq = null, saveTimer = null;
 
   // GM drum names, so "note 38" reads as "snare"
@@ -39,28 +39,8 @@
   }
   function keyName(k) {
     var p = k.split(":"), n = +p[1];
-    if (p[0] === "note" && cur && conf.devices[cur] && conf.devices[cur].surface && n < 64)
-      return { main: "pad " + n, sub: "row " + (Math.floor(n / 16) + 1) + " · col " + (n % 16 + 1) };   // a surface: note = pad
     return p[0] === "note" ? { main: "note " + n, sub: GM[n] || "" }
                            : { main: "CC " + n, sub: "" };
-  }
-  // a colour swatch the page draws from the LED levels (0-7) the firmware will use
-  function swatch(rgb) {
-    var s = el("span", { class: "pm-sw" });
-    if (rgb) s.style.background = "rgb(" + rgb.map(function (v) { return Math.round(v * 255 / 7); }).join(",") + ")";
-    return s;
-  }
-  function colorCell(e) {
-    var box = el("div", { class: "pm-col" }), rgbOf = {};
-    colors.forEach(function (c) { rgbOf[c.name] = c.rgb; });
-    var sw = swatch(rgbOf[e.color]);
-    var s = el("select", { title: "the pad's colour on the surface", on: { change: function () {
-      if (s.value === "off") delete e.color; else e.color = s.value;
-      sw.replaceWith(sw = swatch(rgbOf[e.color])); save(); renderGrid(); } } });
-    s.appendChild(opt("off", "dark", !e.color));
-    colors.forEach(function (c) { s.appendChild(opt(c.name, c.name, c.name === e.color)); });
-    box.appendChild(sw); box.appendChild(s);
-    return box;
   }
   function keySort(a, b) {
     var pa = a.split(":"), pb = b.split(":");
@@ -165,7 +145,6 @@
 
   function whatCell(key, e) {
     var isNote = key.indexOf("note:") === 0, box = el("div", { class: "pm-what" });
-    var surface = !!devConf().surface;
     var dos = isNote ? [["pass", "pass through"], ["ignore", "ignore"], ["note", "play a note"],
                         ["cc", "send a CC"], ["action", "action"], ["grab", "skipback grab"]]
                      : [["pass", "pass through"], ["ignore", "ignore"], ["cc", "send a CC"],
@@ -175,13 +154,12 @@
       var keep = e.label ? { label: e.label } : {};
       if (d === "note") Object.assign(keep, { do: "note", module: firstMod("drums"), note: n, vel: "same" });
       else if (d === "cc") Object.assign(keep, isNote
-        ? { do: "cc", module: firstMod("poly"), cc: 20, value: 127, mode: surface ? "momentary" : "press" }
+        ? { do: "cc", module: firstMod("poly"), cc: 20, value: 127, mode: "press" }
         : { do: "cc", module: firstMod("poly"), cc: n });
       else if (d === "action") Object.assign(keep, { do: "action", action: actions[0][0] });
       else if (d === "grab") Object.assign(keep, { do: "grab", scope: "all", tracks: "armed",
                                                    len: "bars", bars: 4 });
       else keep.do = d;
-      if (e.color) keep.color = e.color;          // a surface pad keeps its colour
       pads()[key] = keep; save(); render();
     }, "what this pad does");
     var lines = [line("Does", [doSel])];
@@ -203,8 +181,9 @@
                        function (v) { e.value = v === "vel" ? "vel" : 127; save(); render(); })];
         if (e.value !== "vel") vv.push(numInput(e.value, 0, 127, function (v) { e.value = v; save(); }));
         lines.push(line("Value", vv));
-        var modes = [["press", "press: send once"], ["toggle", "toggle: value / 0 each press"]];
-        if (surface) modes.splice(1, 0, ["momentary", "momentary: value, 0 on release"]);
+        // momentary needs a device that sends a real release (a drum brain's note-off is often a timer)
+        var modes = [["press", "press: send once"], ["momentary", "momentary: value, 0 on release"],
+                     ["toggle", "toggle: value / 0 each press"]];
         lines.push(line("Behaviour", [pick(modes, e.mode || "press", function (v) { e.mode = v; save(); })]));
       }
     } else if (e.do === "action") {
@@ -214,10 +193,8 @@
       lines.push(line(isNote ? "Min velocity" : "Fires at", [numInput(
         e.min_vel || (isNote ? devConf().min_vel : 64), 1, 127, function (v) { e.min_vel = v; save(); },
         isNote ? "softer hits than this don't fire" : "fires when the value rises past this")]));
-      if (e.action === "cmd:TAP_TEMPO" && surface)
-        lines.push(line("", [], "blinks the ORC clock's beat (beat 1 white; grey = following an outside clock)"));
     } else if (e.do === "grab") {
-      lines = lines.concat(grabLines(e, surface));
+      lines = lines.concat(grabLines(e));
     }
     lines.forEach(function (l) { box.appendChild(l); });
     return box;
@@ -225,7 +202,7 @@
 
   // ── a skipback GRAB pad: what, how long, which tracks ──────────────────────
   function mmss(s) { return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2); }
-  function grabLines(e, surface) {
+  function grabLines(e) {
     var out = [];
     var what = [["all", "all tracks (aligned)"]].concat(sbTracks.map(function (t) {
       return ["t:" + t.id, "one track: " + t.name + (t.armed ? "" : " (off)")]; }));
@@ -234,8 +211,8 @@
       else { e.scope = "track"; e.track = +v.slice(2); delete e.tracks; }
       save(); render(); }, "what to grab")]));
 
-    var lens = [["bars", "bars"], ["time", "time (m:ss)"], ["all", "everything"]];
-    if (surface) lens.splice(1, 0, ["hold", "while held"]);   // only the Fire sends a real release
+    // "while held" needs a device that sends a real release (a drum brain's note-off is often a timer)
+    var lens = [["bars", "bars"], ["hold", "while held"], ["time", "time (m:ss)"], ["all", "everything"]];
     var lk = [pick(lens, e.len, function (v) {
       e.len = v; delete e.bars; delete e.secs; delete e.snap;
       if (e.len === "bars") e.bars = 4;
@@ -302,14 +279,13 @@
       var e = pads()[k], kn = keyName(k);
       var lab = el("input", { type: "text", value: e.label || "", placeholder: "name",
         class: "pm-name", maxlength: "24", title: "a name for this pad", on: { change: function () {
-          if (lab.value.trim()) e.label = lab.value.trim(); else delete e.label; save(); renderGrid(); } } });
+          if (lab.value.trim()) e.label = lab.value.trim(); else delete e.label; save(); } } });
       var head = el("div", { class: "pm-head" }, [
         el("span", { class: "pm-key", text: kn.main }),
         kn.sub ? el("small", { class: "pm-sub", text: kn.sub }) : null,
-        devConf().surface ? colorCell(e) : null,
         lab,
         el("button", { class: "btn pm-x", type: "button", text: "✕",
-          title: devConf().surface ? "remove (the pad goes silent)" : "remove (the pad plays as normal again)",
+          title: "remove (the pad plays as normal again)",
           on: { click: function () {
             delete pads()[k]; save(); render(); } } })]);
       tb.appendChild(el("tr", { "data-key": k }, [
@@ -317,7 +293,7 @@
     });
   }
 
-  // ── adding pads: the Fire grid (click) and LEARN (hit) both land here ───────
+  // ── adding pads: LEARN (hit a pad) lands here ───────────────────────────────
   function addPad(key, how) {
     var isNew = !pads()[key];
     if (isNew) pads()[key] = { do: "pass", label: keyName(key).sub || key };
@@ -335,36 +311,13 @@
     row.classList.add("new");
     setTimeout(function () { row.classList.remove("new"); }, 2500);
   }
-  function renderGrid() {
-    var wrap = $("pm-gridwrap"), g = $("pm-grid");
-    var on = !!(cur && conf.devices[cur] && conf.devices[cur].surface);
-    wrap.hidden = !on;
-    if (!on) return;
-    var rgbOf = {}; colors.forEach(function (c) { rgbOf[c.name] = c.rgb; });
-    g.innerHTML = "";
-    for (var n = 0; n < 64; n++) (function (n) {
-      var key = "note:" + n, e = pads()[key], rgb = e && rgbOf[e.color];
-      var b = el("button", { type: "button", "aria-label": "pad " + n,
-        title: "pad " + n + " (row " + (Math.floor(n / 16) + 1) + " · col " + (n % 16 + 1) + ")" +
-               (e ? ": " + (e.label || e.do) : ": not in the list, click to add"),
-        on: { click: function () { addPad(key, "grid"); } } });
-      if (rgb) { b.style.background = "rgb(" + rgb.map(function (v) { return Math.round(v * 255 / 7); }).join(",") + ")";
-                 b.classList.add("lit"); }
-      if (e) b.classList.add("mapped");
-      g.appendChild(b);
-    })(n);
-  }
-
   function render() {
     renderTabs();
     var has = cur && conf.devices[cur];
     $("pm-dev").hidden = !has;
-    renderGrid();
     if (!has) return;
     $("pm-match").value = devConf().port_match;
     $("pm-minvel").value = devConf().min_vel;
-    $("pm-surface").checked = !!devConf().surface;
-    $("pm-surfch-wrap").hidden = !devConf().surface;      // just SHOW ON FIRE: a surface takes no channel (fw v0.21)
     $("pm-learn").className = "btn" + (learn ? " on" : "");
     renderRows();
   }
@@ -402,7 +355,7 @@
 
   function load(first) {
     return fetch("/api/padmap").then(function (r) { return r.json(); }).then(function (j) {
-      actions = j.actions || []; modules = j.modules || []; devices = j.devices || []; colors = j.colors || [];
+      actions = j.actions || []; modules = j.modules || []; devices = j.devices || [];
       sbTracks = j.sb_tracks || [];
       ports = j.ports || [];
       if (first) {
@@ -433,18 +386,6 @@
   $("pm-match").addEventListener("change", function () {
     var v = $("pm-match").value.trim(); if (!v) return render();
     devConf().port_match = v; save();
-  });
-  $("pm-surface").addEventListener("change", function () {
-    if ($("pm-surface").checked) { devConf().surface = true; }
-    else { delete devConf().surface; delete devConf().surface_ch; }
-    save(); render();
-  });
-  $("pm-show").addEventListener("click", function () {
-    fetch("/api/padmap/show", { method: "POST", headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ device: cur }) })
-      .then(function (r) { return r.json(); })
-      .then(function (r) { flash(r.ok ? "sent to the Fire" : "ORC not reachable", !r.ok); })
-      .catch(function () { flash("error", true); });
   });
   $("pm-minvel").addEventListener("change", function () {
     var v = Math.max(1, Math.min(127, parseInt($("pm-minvel").value, 10) || 1));

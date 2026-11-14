@@ -348,7 +348,7 @@ class FirePages:
         except Exception as e:
             return f"cannot ask the Fire link ({e})"
         if not connected:
-            return "no Fire with the ORC firmware connected (looking for the 'ORC FW seq' port)"
+            return "no Fire with our firmware connected (FLAME seq / ORC FW seq)"
         if v is None:
             return "the Fire has not answered hello yet: try again in a few seconds"
         if v < PAGES_VERSION:

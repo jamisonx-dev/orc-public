@@ -25,9 +25,9 @@ async function _skipbackCompactPoll() {
         const ok = t.recording && t.connected;
         const state = ok ? 'RECORDING' : '<span style="color:var(--danger)">NOT RECORDING</span>';
         const notes = [];
-        if (t.fallback) notes.push('pisound inputs (source missing)');
+        if (t.now_label) notes.push(t.now_differs ? `getting ${t.now_label} (${t.source_label} not connected)` : t.now_label);
         if (t.gaps) notes.push(`${t.gaps} gap${t.gaps === 1 ? '' : 's'}`);
-        const extra = `&nbsp;&nbsp;<span style="color:var(--bright)">${t.name}</span>`
+        const extra = `&nbsp;&nbsp;<span style="color:var(--bright)">${t.display_name || t.name}</span>`
           + `&nbsp;<span style="color:var(--label);font-size:9px">${t.length_secs} s</span>`
           + (notes.length ? `&nbsp;<span style="color:var(--warn);font-size:9px">${notes.join(' · ')}</span>` : '');
         return row(ok ? 'var(--live)' : 'var(--danger)', state, extra);

@@ -17,7 +17,7 @@ import sys
 
 import orc1_config as cfg
 
-EXPECTED = 12
+EXPECTED = 15
 _p = _f = 0
 
 
@@ -48,7 +48,11 @@ class Msg:                      # a non-channel message, as mido gives it (no .c
         self.type = t
 
 
-ns = {"state": {}, "padmap": Pad(), "send_to": lambda port, m: sent.append((port, m.type)),
+ns = {"state": {}, "padmap": Pad(), "knobfocus": None, "_scene_transport": [None],
+      # stubs for globals _route_message gained after this test was written (2026-10-26 scenes,
+      # 2026-11-04 follow knobs); a missing one = NameError = the whole suite silently dead.
+      "fire_bar_link": type("B", (), {"is_ours": lambda s, n: False})(),
+      "send_to": lambda port, m: sent.append((port, m.type)),
       "cfg": cfg, "arp": None, "fire": None, "seq": None, "router": None,
       "_sysex_is_device_chatter": lambda d: False, "_performve_src_hit": lambda *a: False}
 exec(compile(ast.Module([fn], []), SRC, "exec"), ns)
@@ -80,6 +84,11 @@ check(cfg.is_clock_thru_port(FIRE), "is_clock_thru_port: the Fire sequencer firm
 check(not cfg.is_clock_thru_port("ORC FW host:ORC FW host MIDI 1 32:0"), "... not the Fire's host mode")
 check(not cfg.is_clock_thru_port("FL STUDIO FIRE:FL STUDIO FIRE MIDI 1 32:0"), "... not Akai's firmware")
 check(not cfg.is_clock_thru_port(BSP), "... not the BeatStep Pro")
+check(cfg.is_clock_thru_port("FLAME seq:FLAME seq MIDI 1 32:0"), "... the same firmware after its rename to FLAME (2026-11-12)")
+check(not cfg.is_clock_thru_port("Flame TAKT:Flame TAKT MIDI 1 36:0"), "... not another maker's 'Flame' device")
+check(any(p.lower() in "flame seq:flame seq midi 1 32:0" for p in cfg.FIRE_SEQ_PORT_NAMES)
+      and any(p.lower() in FIRE.lower() for p in cfg.FIRE_SEQ_PORT_NAMES),
+      "the brain's Fire link names (cfg.FIRE_SEQ_PORT_NAMES) take both the old and the FLAME firmware")
 
 print(f"{_p} passed, {_f} failed  (expected {EXPECTED})")
 if _f or (_p + _f) != EXPECTED:

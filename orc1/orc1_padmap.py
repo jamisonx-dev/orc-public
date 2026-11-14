@@ -31,7 +31,7 @@ channel?" External gear has real channels; ORC modules are still NAMED and resol
 live from /matrix at hit time (unbound = silent), never a literal channel on the
 internal bus -- owner's rule since session 39.
 A note pad's CC: "press" sends `value` on the hit; "momentary" sends it on the hit and
-0 on the release (SURFACES only: only our Fire sends a real release); "toggle"
+0 on the release (the device must send a REAL release: see PADS ARE TRIGGERS); "toggle"
 alternates `value` / 0 on each hit. "vel" = the hit's velocity.
 
 PADS ARE TRIGGERS. Measured on the SD350 (2026-10-07): its note-off is not a
@@ -43,14 +43,12 @@ The same capture caught a pad DOUBLE-TRIGGER (two note-ons 10 ms apart from one
 hit), so an action re-arms only REARM_S after it fired: a toggle (RC rec/play,
 arp on/off) fired twice in 10 ms would cancel itself out.
 
-SURFACES (2026-10-14): a device profile with "surface": true is a CONTROL SURFACE the
-ORC draws on: owner's own Akai Fire firmware ("ORC FW ...") in its surface mode sends
-each pad hit as SysEx F0 7D 'ORC' 0C <pad 0-63> <vel, 0 = release> F7 (firmware v0.21:
-NO MIDI channel, so the Fire's own sequencer keeps every channel and all its real notes
-pass straight through), and shows the colour each pad entry names ("color": one of
-COLORS). A "note:<n>" entry = pad n. orc1_surface_link.py arms / shows the surface and
-paints it; surface_frames() builds those messages. A surface pad with NO entry is silent.
-"surface_ch" is legacy (v0.19/v0.20 firmware sent notes on it): accepted, unused.
+NO FIRE SURFACE ANY MORE (2026-11-13). Until Fire firmware v0.35 a profile marked
+"surface": true was a pad page the ORC painted on our Fire firmware (hits as SysEx 0C,
+colours as 0A / 0B). Firmware v0.36 removed that page (ORC mode replaced it), so the
+whole surface feature left the ORC too. A saved profile still marked "surface" is
+DROPPED on load and reported: its "note:<n>" entries meant pad numbers, never MIDI
+notes, and must not start remapping the Fire sequencer's real notes.
 
 This module is pure: no mido, no ports. The brain hands it `emit(kind, ch, a, b)`
 (kind = "note_on" | "note_off" | "cc", ch 1-16), `module_ch(name) -> 1-16 | None`
@@ -68,6 +66,31 @@ import orc1_pedal
 
 CTRL_CH = 13                      # the ORC's control channel: never an output
 
+# Our Fire firmware's port is "ORC FW seq" up to v0.35b and "FLAME seq" after the rename
+# (2026-11-12). Names in one group mean the same port, so a profile saved with either
+# still finds the Fire (cfg.FIRE_SEQ_PORT_NAMES lists both too).
+FIRE_FW_NAME_ALIASES = (("orc fw seq", "flame seq"),)
+
+
+def port_name_matches(match, port_name):
+    """Case-insensitive substring match of `match` in `port_name`, where our
+    firmware's old and new names (FIRE_FW_NAME_ALIASES) count as the same."""
+    m, n = (match or "").lower().strip(), (port_name or "").lower()
+    if not m or not n:
+        return False
+    if m in n:
+        return True
+    for group in FIRE_FW_NAME_ALIASES:
+        for a in group:
+            others = [b for b in group if b != a]
+            if a in m:                                   # the profile holds one whole name: try it with the other
+                if any(m.replace(a, b) in n for b in others):
+                    return True
+            elif len(m) >= 3 and m in a:                 # the profile is part of one name ("ORC FW")
+                if any(b in n for b in others):
+                    return True
+    return False
+
 # Actions a pad may run: every pedal switch action that makes sense for a
 # press-only trigger. "primary" needs a hold, "transition" toggles across presses
 # of ONE switch, page flips belong to the FCB.
@@ -83,16 +106,6 @@ ACTION_CHOICES = ([c for c in orc1_pedal.SWITCH_CHOICES
                   + [c for c in EXTRA_CHOICES
                      if c[0] not in {v for v, _ in orc1_pedal.SWITCH_CHOICES}])
 
-# Pad colours for a surface, as the Fire's LED levels (R, G, B each 0-7). Ordered for the /pads picker.
-COLORS = [("red", (7, 0, 0)), ("orange", (7, 2, 0)), ("yellow", (6, 5, 0)), ("green", (0, 7, 0)),
-          ("cyan", (0, 6, 6)), ("blue", (0, 0, 7)), ("purple", (4, 0, 7)), ("pink", (7, 0, 3)),
-          ("white", (5, 5, 5)), ("dim", (1, 1, 1))]
-COLOR_RGB = dict(COLORS)
-SURFACE_CH_DEFAULT = 16
-ORC_HDR = [0x7D, 0x4F, 0x52, 0x43]  # the Fire firmware's host protocol: F0 7D 'O' 'R' 'C' <cmd> ... F7
-SURF_PADS, SURF_PER_MSG = 64, 10    # its 4 x 16 pads; 0A carries at most 10 pads (a 40-byte SysEx buffer)
-SURF_PAD_HDR = ORC_HDR + [0x0C]     # Fire -> ORC (v0.21): a surface pad hit, 0C <pad 0-63> <vel, 0 = release>
-
 NOTE_DOS = ("pass", "ignore", "note", "cc", "action", "grab")
 CC_MODES = ("press", "momentary", "toggle")      # a NOTE pad sending a CC
 _PORT_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
@@ -107,10 +120,10 @@ _PORT_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 # bars / time / all END AT THE PRESS (the press is the downbeat: the sampler's PRESS
 # anchor). hold = press to release; snapped, it keeps the PRESS as the start and
 # rounds the length to whole bars (never under one), the sampler's forward capture.
-# hold needs a real release, so only a SURFACE (our Fire firmware) may use it: the
-# SD350's note-off is a timer, not a release (measured 2026-10-07).
+# hold needs a device that sends a REAL release (a keyboard, most pad controllers).
+# The SD350's note-off is a timer, not a release (measured 2026-10-07): on a device
+# like that a hold grabs the timer's length, so pick bars / time there.
 GRAB_LENS = ("bars", "hold", "time", "all")
-TAP_ACTION = "cmd:TAP_TEMPO"         # a surface pad with this action BLINKS the clock's beat
 CC_DOS = ("pass", "ignore", "cc", "action")
 _KEY_RE = re.compile(r"^(note|cc):(\d{1,3})$")
 
@@ -180,12 +193,7 @@ def _clean_pad(key, e, modules, ports=None):
             out["min_vel"] = _int(e.get("min_vel"), 1, 127)
     if isinstance(e.get("label"), str) and e["label"].strip():
         out["label"] = e["label"].strip()[:24]
-    c = e.get("color")
-    if c not in (None, "", "off"):
-        if c not in COLOR_RGB:
-            raise ValueError(f"unknown colour {c!r}")
-        out["color"] = c
-    return out
+    return out                      # an old entry's "color" (the Fire surface's pad colour) is dropped
 
 
 def _clean_grab(e):
@@ -252,17 +260,6 @@ def grab_plan(e, press_ts, release_ts, now, bpm, beats_per_bar=4):
     return (secs, press_ts, 0.0, tracks)
 
 
-def tap_pads(dev):
-    """Surface pads whose action is tap tempo: they blink the clock's beat."""
-    out = []
-    for key, e in (dev.get("pads") or {}).items():
-        m = _KEY_RE.match(key)
-        if (m and m.group(1) == "note" and int(m.group(2)) < SURF_PADS
-                and e.get("do") == "action" and e.get("action") == TAP_ACTION):
-            out.append(int(m.group(2)))
-    return sorted(out)
-
-
 def default_config():
     return {"version": 1, "devices": {}}
 
@@ -286,16 +283,10 @@ def validate_config(conf, modules, ports=None):
             dev["min_vel"] = _int(d.get("min_vel", 1), 1, 127)
         except (TypeError, ValueError):
             errs.append(f"{name}: bad min_vel")
-        if d.get("surface") is True:
-            dev["surface"] = True
-            try:
-                ch = _int(d.get("surface_ch", SURFACE_CH_DEFAULT), 1, 16)
-                if ch == CTRL_CH:
-                    raise ValueError("ch 13 is the ORC's control channel")
-                dev["surface_ch"] = ch
-            except (TypeError, ValueError) as ex:
-                errs.append(f"{name}: surface channel: {ex}")
-                dev["surface_ch"] = SURFACE_CH_DEFAULT
+        if d.get("surface"):
+            # a Fire pad-page profile (gone with Fire firmware v0.36): its entries were pad numbers, not notes
+            errs.append(f"{name}: dropped (it was a Fire surface page; the Fire firmware no longer has one)")
+            continue
         pads = d.get("pads") if isinstance(d.get("pads"), dict) else {}
         for key, e in pads.items():
             m = _KEY_RE.match(str(key))
@@ -303,15 +294,9 @@ def validate_config(conf, modules, ports=None):
                 errs.append(f"{name}: bad pad {key!r}"); continue
             try:
                 p = _clean_pad(str(key), e, modules, ports)
-                if p.get("do") == "grab" and p.get("len") == "hold" and not dev.get("surface"):
-                    raise ValueError("a grab WHILE HELD needs a surface (only our Fire firmware "
-                                     "sends a real release)")
-                if p.get("mode") == "momentary" and not dev.get("surface"):
-                    raise ValueError("a MOMENTARY CC needs a surface (only our Fire firmware "
-                                     "sends a real release)")
             except (TypeError, ValueError) as ex:
                 errs.append(f"{name} {key}: {ex}"); continue
-            if p["do"] != "pass" or "label" in p or "color" in p:
+            if p["do"] != "pass" or "label" in p:
                 dev["pads"][str(key)] = p
         out["devices"][name] = dev
     return out, errs
@@ -324,12 +309,11 @@ class PadMap:
     REARM_S = 0.08                  # an action pad ignores re-hits this soon after
 
     def __init__(self, emit, module_ch, run_action, log=print, hits_file=None,
-                 run_grab=None, on_hold=None):
+                 run_grab=None):
         """run_grab(entry, press_ts, release_ts): a grab pad fired (release_ts None
-        unless it is a hold). on_hold(device, pad, holding): a hold grab started /
-        ended, so the surface can light the pad while it records."""
+        unless it is a hold)."""
         self.emit, self.module_ch, self.run_action, self.log = emit, module_ch, run_action, log
-        self.run_grab, self.on_hold = run_grab, on_hold
+        self.run_grab = run_grab
         self._holding = {}                  # (device, key) -> press wall time of a HOLD grab
         self._toggle = {}                   # (device, key) -> a TOGGLE CC pad is on
         self.wall = time.time               # grab timestamps: the grab tool's clock
@@ -353,21 +337,12 @@ class PadMap:
         on their old destination so a remap can't strand one."""
         with self._lock:
             held, self._held = self._held, {}
-            holding, self._holding = self._holding, {}
+            self._holding = {}              # a remap mid-hold: no grab
             self.conf = copy.deepcopy(conf)
             self._cc_last = {}
             self._toggle = {}
         for ch, note, port in held.values():
             self._emit("note_off", ch, note, 0, port)
-        for dev, key in holding:            # a remap mid-hold: no grab, the pad stops lit
-            self._hold_changed(dev, key, False)
-
-    def _hold_changed(self, dev, key, holding):
-        if self.on_hold:
-            try:
-                self.on_hold(dev, int(key.split(":")[1]), holding)
-            except Exception as e:
-                self.log(f"  ! padmap hold light: {e}")
 
     def _emit(self, kind, ch, a, b, port=None):
         """port None = the ORC's internal synth bus (a module); else an output port key."""
@@ -394,7 +369,7 @@ class PadMap:
         if not n:
             return None, None
         for name, d in self.conf["devices"].items():
-            if d["port_match"].lower() in n:
+            if port_name_matches(d["port_match"], n):
                 return name, d
         return None, None
 
@@ -416,25 +391,11 @@ class PadMap:
         """True = the pad map consumed `msg` (the brain must not route it on).
         False = not ours (no profile for this device, or the pad passes through)."""
         t = getattr(msg, "type", None)
-        if t not in ("note_on", "note_off", "control_change", "sysex"):
+        if t not in ("note_on", "note_off", "control_change"):
             return False
         with self._lock:
             dev, d = self.device_for(source_name)
             if not dev:
-                return False
-            if d.get("surface"):
-                # A surface is our Fire firmware (v0.21+). Its surface pads are NOT MIDI notes: they arrive as
-                # F0 7D 'ORC' 0C <pad> <vel> F7, so they take no channel from anyone (owner 2026-10-14: "they
-                # recognise each other, they can just talk however"). Every real note / CC on the port is the
-                # Fire's OWN sequencer and passes through untouched.
-                if t != "sysex":
-                    return False
-                data = list(getattr(msg, "data", ()))
-                if data[:5] != SURF_PAD_HDR or len(data) < 7:
-                    return False
-                pad, vel = data[5] & 0x3F, data[6] & 0x7F
-                return self._note(dev, d, _SurfHit("note_on" if vel else "note_off", pad, vel))
-            if t == "sysex":
                 return False
             if t == "control_change":
                 return self._cc(dev, d, msg)
@@ -447,8 +408,6 @@ class PadMap:
             self._record(dev, key, msg.velocity)
         e = d["pads"].get(key)
         hk = (dev, msg.channel, msg.note)
-        if not e and d.get("surface"):
-            return True                     # a surface pad with no job: silent, never "whatever is on ch 16"
         if not e or e["do"] == "pass":
             return False
         if e["do"] == "ignore":
@@ -530,11 +489,6 @@ class PadMap:
             self._emit("cc", dest[0], e["cc"], msg.value, dest[1])
         return True
 
-    def surfaces(self):
-        """[(name, device)] for the profiles that are surfaces (a copy: safe off the lock)."""
-        with self._lock:
-            return [(n, copy.deepcopy(d)) for n, d in self.conf["devices"].items() if d.get("surface")]
-
     def _fire(self, dev, key, action):
         now = self.clock()
         last = self._fired.get((dev, key))
@@ -551,17 +505,15 @@ class PadMap:
 
     def _grab(self, dev, d, key, e, on, vel):
         """A grab pad. bars / time / all: grab on the hit (the press = the end).
-        hold (surfaces only): the press starts it, the RELEASE grabs press -> release."""
+        hold: the press starts it, the RELEASE grabs press -> release."""
         hk = (dev, key)
         if e.get("len") == "hold":
             if on:
                 if vel < e.get("min_vel", d["min_vel"]) or hk in self._holding:
                     return                  # soft hit, or a re-press while already held
                 self._holding[hk] = self.wall()
-                self._hold_changed(dev, key, True)
             elif hk in self._holding:
                 start = self._holding.pop(hk)
-                self._hold_changed(dev, key, False)
                 self._spawn_grab(e, start, self.wall())
             return
         if not on or vel < e.get("min_vel", d["min_vel"]):
@@ -584,42 +536,3 @@ class PadMap:
             except Exception as ex:
                 self.log(f"  ! padmap grab: {ex}")
         self.spawn_grab(go)
-
-
-class _SurfHit:
-    """A surface pad hit (from the 0C SysEx) in the shape _note() reads. channel None: it has none."""
-    def __init__(self, type, note, velocity):
-        self.type, self.note, self.velocity, self.channel = type, note, velocity, None
-
-
-def surface_frames(dev):
-    """The SysEx payloads (without F0 / F7) that put a surface device in surface mode and paint all 64 pads:
-    [0B 01 <ch>] then 0A <first> <count> <r g b ...> in runs of SURF_PER_MSG. A pad's colour = its "note:<n>" entry's
-    "color" (n 0-63); anything else is dark. Pure: what the link sends, and what the tests check against the firmware's
-    own parsing rules (ctl.c)."""
-    return [surface_on(dev.get("surface_ch", SURFACE_CH_DEFAULT))] + surface_colours(dev)
-
-
-def surface_on(ch):
-    """0B 01 <ch>: show the surface, pads on channel ch (1-16). The firmware also remembers ch + that a surface exists,
-    so BROWSER > ORC surface can bring it back later."""
-    return ORC_HDR + [0x0B, 1, ch]
-
-
-def surface_colours(dev):
-    """The 0A messages painting all 64 pads (the firmware keeps them even while the surface is hidden)."""
-    rgb = [(0, 0, 0)] * SURF_PADS
-    for key, e in dev.get("pads", {}).items():
-        m = _KEY_RE.match(key)
-        if m and m.group(1) == "note" and int(m.group(2)) < SURF_PADS and e.get("color") in COLOR_RGB:
-            rgb[int(m.group(2))] = COLOR_RGB[e["color"]]
-    out = []
-    for first in range(0, SURF_PADS, SURF_PER_MSG):
-        run = rgb[first:first + SURF_PER_MSG]
-        out.append(ORC_HDR + [0x0A, first, len(run)] + [v for c in run for v in c])
-    return out
-
-
-def surface_off():
-    """The payload that hands the pads back to the device's own sequencer."""
-    return ORC_HDR + [0x0B, 0]

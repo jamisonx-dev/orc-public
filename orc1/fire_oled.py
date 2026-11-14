@@ -104,6 +104,12 @@ _OUT_CACHE = {}
 _LAST = {}
 _LAST_T = {}
 
+# ORC mode on our Fire firmware (orc1_orcmode, 2026-11-11): when this is set, every
+# frame goes to it (an object with .send(msg)) instead of a port found by name. It
+# rides the brain's one shared link to the Fire; nothing is opened here.
+HOST_OUT = None
+_HOST_NAME = "(orc mode)"
+
 
 def reset_output():
     """Forget the cached OLED output + dedupe state (call after a replug)."""
@@ -126,12 +132,15 @@ def forget_sent():
 
 def send_image(img, port=None, _cache=_OUT_CACHE, _last=_LAST, _last_t=_LAST_T):
     import time as _time
-    name = port or find_fire_output()
-    if name is None:
-        raise RuntimeError("Akai Fire MIDI output not found")
-    out = _cache.get(name)
-    if out is None:
-        out = _cache[name] = mido.open_output(name)
+    if HOST_OUT is not None:
+        name, out = _HOST_NAME, HOST_OUT
+    else:
+        name = port or find_fire_output()
+        if name is None:
+            raise RuntimeError("Akai Fire MIDI output not found")
+        out = _cache.get(name)
+        if out is None:
+            out = _cache[name] = mido.open_output(name)
     buf = image_to_buf(img)
     now = _time.monotonic()
     if _last.get(name) == buf and (now - _last_t.get(name, 0)) < 20:

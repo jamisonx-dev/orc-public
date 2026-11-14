@@ -1,0 +1,10 @@
+[Unit]
+Description=ORC-1: check the mDNS name once a minute (orc1_mdns_guard.sh)
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

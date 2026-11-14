@@ -1,0 +1,15 @@
+[Unit]
+Description=ORC-1 eth0 box guard (the MXV box may not open any service on the Pi)
+# Rules: ~/orc/mxvbox/pi/boxguard.nft. Loaded before the network so the box is never
+# unguarded, even for a moment at boot.
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /home/pibox/orc/mxvbox/pi/boxguard.nft
+ExecStop=/usr/sbin/nft delete table inet orc_boxguard
+
+[Install]
+WantedBy=multi-user.target

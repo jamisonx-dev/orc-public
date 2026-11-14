@@ -239,6 +239,57 @@ def visuals_section():
                  [_blk("", ["CC", "Knob", "Meaning"], rows)])]
 
 
+def mxvbox_section():
+    """The MXV box visuals module: its knob table lives in mxvbox/pi/mxvbox_knobs.py
+    (pure data), read here so the page and the conductor can never disagree."""
+    try:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mxvbox", "pi", "mxvbox_knobs.py")
+        spec = importlib.util.spec_from_file_location("mxvbox_knobs", p)
+        M = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(M)
+        knobs = M.KNOBS
+    except Exception as e:                      # keep the page honest about a failed read
+        return [_sec("mxvbox", G_VOICES, "MXV box visuals (mxvbox)",
+                     f"Could not read mxvbox_knobs.py: {type(e).__name__}: {e}")]
+    rows = [[str(cc), name, f"{what} (default {d})"] for cc, (name, d, what) in sorted(knobs.items())]
+    return [_sec("mxvbox", G_VOICES, "MXV box visuals (mxvbox)",
+                 "The old Android box on the Pi's eth0, drawing beat-locked visuals. CCs on the channel "
+                 "the <b>mxvbox</b> module is bound to (/matrix); the conductor (service orc1-boxvis) "
+                 "saves them in ~/.orc1_mxvbox.json. Kick / snare hits come from the drums and bbkit "
+                 "channels by name. Notes on its channel: note N cues clip N for the next clip bar.",
+                 [_blk("Control changes", ["CC", "Knob", "Meaning"], rows)])]
+
+
+def daw_section():
+    """The ORC as a DAW control surface (module "daw"): the CC -> Mackie strip table lives in
+    orc1_config (DAWSURF_FADER_CC / DAWSURF_BANK_CC), read here so the page can't drift."""
+    C = _cfg()
+    faders = getattr(C, "DAWSURF_FADER_CC", {})
+    banks = getattr(C, "DAWSURF_BANK_CC", {})
+    rows = [[str(cc), "master fader" if s == "master" else f"strip {s + 1} fader",
+             "0-127 = the DAW fader, both ways (the DAW's moves come back as this CC)"]
+            for cc, s in sorted(faders.items())]
+    rows += [[str(cc), "bank " + ("left" if d < 0 else "right"),
+              "once each time the value rises through 64"] for cc, d in sorted(banks.items())]
+    rows += [[str(cc), f"{v} view: shared / independent",
+              "toggles on the rise through 64 (independent = its own window of tracks; needs the OSC dialect)"]
+             for cc, v in sorted(getattr(C, "DAWSURF_VIEW_CC", {}).items())]
+    notes = getattr(C, "DAWSURF_BANK_NOTES", {})
+    nrows = [[str(n), f"bank {b + 1}", f"jump the bsp view to tracks {8 * b + 1}-{8 * b + 8}"]
+             for n, b in sorted(notes.items())]
+    return [_sec("daw", G_CTRL, "DAW control surface (daw)",
+                 "CCs on the channel the <b>daw</b> module is bound to (/matrix). The bridge (service "
+                 "orc1-dawsurf, orc1_dawsurf_bridge.py) plays them into the DAW as a Mackie Control "
+                 "surface over the network-MIDI port named " + ", ".join(getattr(C, "DAWSURF_PORT_NAMES", []))
+                 + " (Mackie) or to REAPER's OSC surface (pattern file orc1/daw/ORC.ReaperOSC), and sends the "
+                 "DAW's fader moves back to the Fire as the same CCs. These are the SHIPPED bindings: any CC or "
+                 "note can run any DAW action (fader, pan, mute, solo, rec, select, transport, bank, shift, "
+                 "goto_bank, view_mode) through ~/.orc1_dawsurf_bindings.json (format in orc1_dawsurf_bind.py).",
+                 [_blk("Control changes", ["CC", "Control", "Meaning"], rows),
+                  _blk("Notes (bank pads)", ["Note", "Control", "Meaning"], nrows)])]
+
+
 def zoomfx_section():
     try:
         import orc1_zoomfx as Z
@@ -334,6 +385,20 @@ def beatbuddy_section():
         _blk("BeatBuddy note -> 909 voice (when the BeatBuddy plays the ORC drums)",
              ["909 note", "BeatBuddy notes folded onto it"], rows_m),
     ]
+    shape = getattr(C, "BBKIT_SHAPE_CC", {})
+    if shape:
+        sdef = getattr(C, "BBKIT_SHAPE_DEFAULT", {})
+        notes = {"note": "Pick the drum (its note number) the per-drum CCs below edit",
+                 "level": "Picked drum: level", "tune": "Picked drum: tune (+/- 12 semitones)",
+                 "attack": "Picked drum: fade-in (0 - 200 ms)",
+                 "decay": "Picked drum: decay (127 = natural length)",
+                 "pan": "Picked drum: pan", "cutoff": "Picked drum: low-pass cutoff (127 = open)",
+                 "reso": "Picked drum: resonance", "kit_tune": "Whole kit: tune",
+                 "kit_cutoff": "Whole kit: low-pass cutoff"}
+        blocks.insert(3, _blk("BBKit per-drum shaping (CCs on the bbkit channel; saved per kit)",
+                              ["CC", "What it does", "Default"],
+                              [[str(c), notes.get(k, k), "" if k == "note" else str(sdef.get(k, ""))]
+                               for k, c in sorted(shape.items(), key=lambda kv: kv[1])]))
     return [_sec("beatbuddy", G_RHYTHM, "BeatBuddy",
                  "The BeatBuddy is an ORC module, not a MIDI device: <b>there is no CC for it</b>. "
                  "It is driven by command-socket actions, which the web page, the FCB1010 pedal "
@@ -467,6 +532,46 @@ def kikpad_section():
 # Fire buttons, message census
 # ---------------------------------------------------------------------------
 
+def knobfocus_section():
+    try:
+        import orc1_knobfocus as KF
+        import orc1_mcu as MC
+    except Exception as e:
+        return [_sec("knobs", G_CTRL, "Follow knobs", f"Could not read orc1_knobfocus: {e}")]
+    d = KF.DEFAULTS
+    ccs = d["ccs"]
+    rows = []
+    for i, c in enumerate(ccs):
+        row = "top" if i < 8 else "bottom"
+        rows.append([str(c), f"Knob {i + 1} ({row} row)",
+                     " / ".join(f"{m}: {p[i][1]}" for m, p in sorted(KF.DEFAULT_PAGES.items())
+                                if m in ("poly", "mono", "chip_p1") and p[i]) or "(empty on synths)"])
+    drum = [[f"Knob {i + 1}", f"focused drum voice: {p.replace('_', ' ')}"]
+            for i, p in enumerate(KF.DRUM_FOCUS_PARAMS)]
+    drum += [[f"Knob {9 + i}", f"{v.replace('_', ' ')} level"] for i, v in enumerate(KF.DRUM_LEVEL_ROW)]
+    mcu = [
+        [f"{MC.VPOT_CC0}-{MC.VPOT_CC0 + 7}", "CC, ch 1", "V-pot 1-8 turn (relative, sign-magnitude) = knobs 1-8"],
+        ["pitch bend", "ch 1-8", "Fader 1-8 = knobs 9-16 (absolute); ch 9 = master fader"],
+        [str(MC.JOG_CC), "CC, ch 1", "Jog wheel (decoded, not used yet)"],
+        [f"{MC.VPOT_RING_CC0}-{MC.VPOT_RING_CC0 + 7}", "CC out, ch 1", "V-pot LED rings (encode only)"],
+        ["0-31", "Note, ch 1", "Rec / solo / mute / select x8 (decoded)"],
+        ["91-95", "Note, ch 1", "Rewind, fast fwd, stop, play, record (decoded)"],
+    ]
+    blocks = [
+        _blk(f"Default: device '{d['device']}', channel {d['channel']}, {d['encoding']} encoders",
+             ["CC", "Knob", "What it moves (synth pages)"], rows),
+        _blk("Drums page (the drum voice you last hit)", ["Knob", "Moves"], drum, numcols=()),
+        _blk("Mackie Control (MCU) input, ports listed in mcu_ports", ["Number", "Message", "Meaning"],
+             mcu, numcols=()),
+    ]
+    return [_sec("knobs", G_CTRL, "Follow knobs (BeatStep Pro encoders, any MCU surface)",
+                 "Not fixed parameters: the 16 knobs move the parameters of the module <b>in focus</b> "
+                 "= the voice being played (a module takes focus when it plays after being quiet; "
+                 "never while a knob is being turned), or a locked one. Each knob moves the module's own "
+                 "CC from its current value. Config: <code>~/.orc1_knobfocus.json</code>, socket actions "
+                 "KNOBS_STATUS / KNOBS_SET. HUI is not decoded yet.", blocks)]
+
+
 def fire_buttons_section():
     src = _read("orc1_fire.py")
     m = re.search(r"^BUTTON_NOTE\s*=\s*\{(.*?)\}", src, re.S | re.M)
@@ -531,11 +636,14 @@ def all_sections():
     secs = []
     secs += brain_sections()
     secs += zoomfx_section()
+    secs += mxvbox_section()
+    secs += daw_section()
     secs += beatbuddy_section()
     secs += visuals_section()
     secs += pedal_section()
     secs += padmap_section()
     secs += kikpad_section()
+    secs += knobfocus_section()
     secs += fire_buttons_section()
     secs += actions_section()
     secs += census_section()
@@ -563,10 +671,16 @@ COVERAGE = {
     "orc1_fxmix.py":        (("bus",), "FX mixer reads its two bus CCs"),
     "orc1_zoomfx.py":       (("zoomfx",), "Zoom pedal module"),
     "daw/orc_visuals.py":   (("visuals",), "visuals renderer"),
+    "../mxvbox/pi/conductor.py": (("mxvbox",), "MXV box visuals conductor (knobs in mxvbox_knobs.py)"),
+    "orc1_dawsurf_bridge.py": (("daw",), "DAW control surface bridge (CC map in orc1_config.DAWSURF_*)"),
+    "orc1_dawsurf_bind.py": (("daw",), "DAW surface binding table: shipped defaults from orc1_config.DAWSURF_*, "
+                                       "user bindings in ~/.orc1_dawsurf_bindings.json"),
     "orc1_fire.py":         (("fire", "firebuttons"), "Fire handler"),
     "orc1_mixtrack.py":     (("mixtrack",), "Mixtrack handler"),
     "orc1_kikpad.py":       (("kikpad",), "KIKPAD bank 2 surface"),
     "orc1_padmap.py":       (("padmap",), "pad maps (user data)"),
+    "orc1_knobfocus.py":    (("knobs",), "follow knobs: claims a device's knob CCs, moves the focused module"),
+    "orc1_mcu.py":          (("knobs",), "Mackie Control codec (V-pots, faders, buttons, LCD)"),
     "orc1_pedal.py":        (("pedal",), "FCB1010"),
     "orc1_routes.py":       (("unlisted",), "user routing rules, not fixed numbers"),
     "orc1_cme.py":          (("unlisted",), "CME patchbay: passes traffic, defines no controls"),

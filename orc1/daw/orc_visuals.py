@@ -4,9 +4,9 @@ the music on the internal MIDI bus.
 
 Run by visuals_session.sh inside the orc1-visuals kiosk X session. Draws on
 the GPU (OpenGL 3.1 via moderngl), so the glow and trails cost the CPU almost
-nothing. NOT a JACK client: it only READS the ORC1-Synth-Bus (ALSA-seq fans
-the bus out to every reader, like the module hosts), so it cannot touch the
-audio graph or skipback.
+nothing. NOT a JACK client: it only READS MIDI (its knobs from the ORC's port
+ORC-visuals; drum hits / notes observed on ORC1-Synth-Bus, since 2026-11-09),
+so it cannot touch the audio graph or skipback.
 
 What the music does:
   * a KICK (note 36/35 on a module bound to "drums" or "bbkit") = the beat
@@ -386,19 +386,44 @@ class Music:
         self.rate = self.rate * 0.85 + (0.15 / max(dt, 0.05))
 
 
+def is_bus_port(pname):
+    """A port name (the part in quotes / after the client) is the brain's synth bus."""
+    return "orc1-synth-bus" in pname.lower()
+
+
 def find_bus(names):
     """The brain's internal MIDI bus among the input names, or None."""
-    return next((n for n in names if "orc1-synth-bus" in n.lower()), None)
+    return next((n for n in names if is_bus_port(n)), None)
 
 
-MIDI_CLIENT = "orc-visuals-in"      # our own ALSA client name (the subscription check finds it)
+# 2026-11-09: the visuals are not a synth, so their knobs come from the ORC (the brain) on its OWN port
+# "ORC-visuals", never the synth bus (owner: "don't ever move anything that doesn't need an internal synthesis onto
+# the synth"). The synth bus is still READ, as an observer, for the drum hits / notes the pictures react to.
+# Exact port name (same rule as orc1_config.is_orc_port, copied: this renderer stands alone): "ORC-visuals" is never
+# confused with our own client "orc-visuals-in".
+ORC_PORT = "ORC-visuals"
+
+
+def port_part(alsa_name):
+    """'RtMidiOut Client:ORC-visuals 140:0' -> 'ORC-visuals' (= orc1_config.port_part)."""
+    m = re.match(r"^[^:]*:(.*?)(?: \d+:\d+)?$", alsa_name or "")
+    return m.group(1) if m else ""
+
+
+def find_orc_port(names, port=ORC_PORT):
+    """The ORC's port named exactly `port` among the input names, or None."""
+    return next((n for n in names if port_part(n) == port), None)
+
+
+MIDI_CLIENT = "orc-visuals-in"      # our client on the synth bus (hits, notes); the subscription check finds it
+CTL_CLIENT = "orc-visuals-ctl"      # our client on the ORC's ORC-visuals port (the knobs)
 SEQ_CLIENTS = "/proc/asound/seq/clients"
 
 
-def seq_listening(text, me=MIDI_CLIENT):
+def seq_listening(text, me=MIDI_CLIENT, is_src=is_bus_port):
     """The kernel's sequencer listing (/proc/asound/seq/clients) -> True when
-    some port of the client named `me` is Connected From the port named
-    ORC1-Synth-Bus, i.e. the brain's CURRENT bus is still feeding us."""
+    some port of the client named `me` is Connected From a port whose name
+    passes is_src (default: ORC1-Synth-Bus), i.e. the CURRENT source still feeds us."""
     bus, mine, cname, sub = set(), [], None, False
     for ln in text.splitlines():
         m = re.match(r'Client\s+(\d+)\s*:\s*"([^"]*)"', ln)
@@ -407,7 +432,7 @@ def seq_listening(text, me=MIDI_CLIENT):
             continue
         m = re.match(r'\s+Port\s+(\d+)\s*:\s*"([^"]*)"', ln)
         if m and cname is not None:
-            if "orc1-synth-bus" in m.group(2).lower():
+            if is_src(m.group(2).strip()):
                 bus.add(f"{cid}:{m.group(1)}")
             sub = cname == me
             continue
@@ -442,8 +467,10 @@ def _read_seq():
         return None
 
 
-def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.0, stop=None):
-    """Listen to the brain's bus (ORC1-Synth-Bus) and follow it when the brain
+def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.0, stop=None,
+                client=MIDI_CLIENT, find=find_bus, is_src=is_bus_port):
+    """Listen to ONE source (default the brain's bus, ORC1-Synth-Bus; since 2026-11-09 also run with
+    client=CTL_CLIENT on the ORC's exact "ORC-visuals" port for the knobs) and follow it when the brain
     restarts. A restart destroys the bus and makes a new one, usually under a
     new ALSA client number; a port opened on the old one then just goes quiet
     (no error), so every knob silently stopped reaching the visuals after a
@@ -458,7 +485,7 @@ def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.
     the bus's name changes. Messages arrive on rtmidi's callback."""
     if rt is None:
         import rtmidi
-        rt = rtmidi.MidiIn(name=MIDI_CLIENT)
+        rt = rtmidi.MidiIn(name=client)
         rt.ignore_types(sysex=True, timing=True, active_sense=True)   # notes + CCs only
     cb = _safe_cb(music)
     name = None
@@ -467,11 +494,11 @@ def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.
             ports = rt.get_ports()
         except Exception:
             ports = []
-        now = find_bus(ports)
+        now = find(ports)
         text = read_seq()
-        fine = name is not None and now == name and (text is None or seq_listening(text))
+        fine = name is not None and now == name and (text is None or seq_listening(text, client, is_src))
         if name is not None and not fine:
-            print(f"[visuals] MIDI bus {name} lost (now {now}): reconnecting", flush=True)
+            print(f"[visuals] MIDI ({client}) {name} lost (now {now}): reconnecting", flush=True)
             try:
                 rt.close_port()
             except Exception:
@@ -490,7 +517,7 @@ def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.
                     pass
                 rt.set_callback(cb)
                 name = now
-                print(f"[visuals] MIDI in: {name}", flush=True)
+                print(f"[visuals] MIDI in ({client}): {name}", flush=True)
             except Exception as e:
                 print(f"[visuals] MIDI error: {e}, retrying", flush=True)
         sleep(check_s)
@@ -502,405 +529,13 @@ def midi_thread(music, rt=None, read_seq=_read_seq, sleep=time.sleep, check_s=1.
 
 # ---------------------------------------------------------------- audio tap
 
-SKIPBUF = os.path.expanduser("~/.skipbuf")
-TAP_SHM = "/dev/shm/orc1_vistap"
-TAP_SRC = os.path.expanduser("~/.orc1_vistap")    # the tap's source ports
-
-
-class TapShm:
-    """Reads what orc1-vistap (daw/orc_jacktap.c) writes: the newest audio
-    of one JACK port pair, float32 stereo, straight from the realtime
-    callback -- no skipback writer pass in between. Header layout =
-    struct tap_hdr in the C file (64 bytes)."""
-
-    HDR = struct.Struct("<8s4IQd4I8x")
-    MAX_AGE = 0.5            # s: an older newest-period = the tap is stuck
-
-    def __init__(self, path=TAP_SHM):
-        self.path = path
-        self.mm, self.ino, self._chk_t = None, None, -99.0
-        self.rate, self.period, self.wpos = 48000, 1024, None
-        self.age = 0.0       # s: how old the newest audio was when read
-
-    def _map(self, now):
-        if now - self._chk_t < 1.0 and self.mm is not None:
-            return
-        self._chk_t = now
-        try:
-            st = os.stat(self.path)
-        except OSError:
-            self.mm = self.ino = None
-            return
-        if self.mm is not None and st.st_ino == self.ino:
-            return
-        try:
-            with open(self.path, "rb") as f:
-                self.mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-            self.ino, self.wpos = st.st_ino, None
-        except (OSError, ValueError):
-            self.mm = self.ino = None
-
-    def header(self):
-        (magic, rate, ch, cap, period, wpos, mono, conn, alive, xruns,
-         pid) = self.HDR.unpack_from(self.mm, 0)
-        return dict(magic=magic, rate=rate, ch=ch, cap=cap, period=period,
-                    wpos=wpos, mono=mono, conn=conn, alive=alive, xruns=xruns)
-
-    def read(self, now, n):
-        """-> ("off", None) the tap can't be used; ("same", None) nothing new
-        since the last call; ("new", frames[n, 2])."""
-        self._map(now)
-        if self.mm is None:
-            return "off", None
-        try:
-            h = self.header()
-        except (struct.error, ValueError):
-            return "off", None
-        if (h["magic"] != b"ORCTAP1\0" or not h["alive"] or not h["conn"]
-                or h["ch"] != 2 or n > h["cap"] // 2
-                or time.monotonic() - h["mono"] > self.MAX_AGE):
-            return "off", None
-        self.rate, self.period = h["rate"] or 48000, h["period"] or 1024
-        w = h["wpos"]
-        if w == self.wpos or w < n:           # nothing new / just started
-            return "same", None
-        cap = h["cap"]
-        start = (w - n) % cap
-        a = np.frombuffer(self.mm, "<f4", count=cap * 2,
-                          offset=self.HDR.size).reshape(cap, 2)
-        if start + n <= cap:
-            fr = a[start:start + n].copy()
-        else:
-            fr = np.concatenate((a[start:], a[:start + n - cap]))
-        # lapped while copying (reader stalled > cap - n frames): drop it.
-        # The C writer stores a period's frames BEFORE it publishes wpos, so
-        # one period past the wpos we re-read may already be overwritten:
-        # the copied span is safe only while it is within cap - period.
-        if self.HDR.unpack_from(self.mm, 0)[5] - (w - n) > cap - self.period:
-            return "same", None
-        self.wpos = w
-        self.age = max(0.0, time.monotonic() - h["mono"])
-        return "new", fr
-
-
-def cc_to_hz(v):
-    """Band knobs (CC 32/33) -> Hz, log from 20 Hz (0) to 16 kHz (127)."""
-    return 20.0 * 800.0 ** (max(0, min(127, v)) / 127.0)
-
-
-def hz_to_cc(hz):
-    return int(round(127 * math.log(max(20.0, hz) / 20.0) / math.log(800.0)))
-
-
-class AudioTap:
-    """Reacts to whatever is playing through the mixer (Bluetooth, the rig,
-    anything on the L-12 master) WITHOUT joining JACK itself. Two sources:
-
-    1. the TAP (TapShm): orc1-vistap, a C listen-only JACK client, copies
-       any port pair (~/.orc1_vistap, picked on /visuals) into shared memory
-       every JACK period (21 ms). Used whenever it is running, connected and
-       fresh.
-    2. otherwise the newest audio of a skipback RAM ring (tmpfs), the way the
-       sampler does -- what this did before the tap existed (2026-09-30).
-    Neither can make the recorder late: the Python side only reads memory.
-
-    Which ring: a RAM stereo track named like MAIN (the master), else any RAM
-    ring, else anything (re-picked every 5 s from heads.json, so a /skipback
-    layout change follows). A card ring works but its ring.pos can stall
-    for seconds behind SD writes, so it's the last choice.
-
-    LATENCY (measured 2026-09-29): the recorder publishes ring.pos every
-    ~43 ms, so audio is 0-43 ms old when it arrives here; nothing on this
-    side can beat that, and the recorder is not ours to hurry. The BEAT
-    looks at only the newest SHORT window (1024 frames = 21 ms; it was 43 ms)
-    so a hit shows as soon as it lands; the LONG window (4096 = 85 ms) is
-    only for the spectrum the /visuals page draws.
-
-    Each update() gives (beat, 0.0, level):
-      beat  = an onset in the BEAT BAND (set_band; default 30-150 Hz) jumping
-              above its last ~1.3 s by ONSET x, 0..1, at most one per GAP s
-      level = loudness 0..1 after an automatic gain that follows the music
-              over ~15 s, so a quiet Bluetooth stream drives it fully
-      beat2 = the same test on a SECOND band (2026-10-12, owner: one band
-              for the shapes, another for the background), with its own SENS
-              (ONSET2); 0.0 while band2_on is False (the background then
-              follows band 1, exactly as before). It reads the same FFT, so
-              it costs one masked sum.
-    (The middle slot was once a treble screen flash: removed, it flickered.)"""
-
-    N = 1024                                  # beat window (~21 ms)
-    N_LONG = 4096                             # spectrum window (~85 ms)
-    FLOOR = 1e-3                              # -60 dBFS rms
-    ONSET = 2.0     # the band must jump to 2x its recent average
-    ONSET2 = 2.0    # the same for band 2 (its own SENS)
-    GAP = 0.3       # s between beats at least (0.25 let eighths through)
-    band2_on = False
-    SPEC_BANDS = 48                           # log bands 20 Hz .. 16 kHz
-    SPEC_EVERY = 0.04                         # s between spectrum updates (25/s)
-    gate = 10 ** (-68 / 20.0)                 # rms; set live from the GATE knob
-
-    def __init__(self, root=None, shm=None):
-        self.root = root or SKIPBUF
-        self.shm = TapShm(shm or TAP_SHM)
-        self.source = None                    # "tap" | "ring" | None
-        self.age_ms = 0.0                     # tap: newest audio's age at read
-        self.dir, self.size, self.ch = None, 0, 2
-        self._pick_t = -99.0
-        self._pos = None
-        self._pos_t = None
-        self.cadence = 0.0                    # ms between ring.pos updates
-        # Auto-gain envelope (rms). Its FLOOR is the sensitivity: MEASURED
-        # 2026-09-29 on the L-12 master, quiet Bluetooth music ran -55..-66
-        # dBFS rms and the gaps between songs -68..-80, so a -60 dBFS floor
-        # lets quiet music reach full level while the gaps stay low.
-        self.env = self.FLOOR
-        self.hist, self.hist2 = [], []
-        self.last_beat = self.last_beat2 = -99.0
-        self.win = np.hanning(self.N).astype("f4")
-        self.win_l = np.hanning(self.N_LONG).astype("f4")
-        self.spec = [None] * self.SPEC_BANDS
-        self.frames, self.frames_t = None, -99.0
-        self._spec_t = -99.0
-        self.band = self.band2 = (None, None)
-        self.rate = None
-        self._set_rate(48000)
-        self.set_band(30.0, 150.0)
-        self.set_band2(30.0, 150.0)
-
-    @property
-    def live(self):
-        """True while there is a source to hear (tap or ring)."""
-        return self.source is not None
-
-    def _set_rate(self, rate):
-        """FFT bins for the stream's sample rate (the tap reports JACK's)."""
-        if rate == self.rate:
-            return
-        self.rate = rate
-        self.freq = np.fft.rfftfreq(self.N, 1.0 / rate)
-        self.freq_l = np.fft.rfftfreq(self.N_LONG, 1.0 / rate)
-        edges = 20.0 * 800.0 ** (np.arange(self.SPEC_BANDS + 1) / self.SPEC_BANDS)
-        # a low band narrower than one bin (~12 Hz) shows its nearest bin
-        self.spec_idx = [np.nonzero((self.freq_l >= lo) & (self.freq_l < hi))[0]
-                         for lo, hi in zip(edges[:-1], edges[1:])]
-        self.spec_idx = [ix if len(ix) else
-                         np.array([int(np.argmin(np.abs(self.freq_l - (lo * hi) ** 0.5)))])
-                         for ix, lo, hi in zip(self.spec_idx, edges[:-1], edges[1:])]
-        # every band is one run of neighbouring bins: [start, end) pairs,
-        # interleaved, so ONE np.maximum.reduceat gives all 48 maxima (the
-        # odd slots are junk and dropped). A per-band Python loop cost ~1 ms.
-        self._spec_ri = np.array([v for ix in self.spec_idx for v in (ix[0], ix[-1] + 1)], np.intp)
-        # the page draws neighbouring bands that read the SAME bins as one
-        # wide bar (the bass end: 12 bands under 100 Hz, ~8 real bins) --
-        # run lengths over the 48 bands, in order (they sum to SPEC_BANDS)
-        runs, prev = [], None
-        for ix in self.spec_idx:
-            key = (int(ix[0]), int(ix[-1]))
-            if key == prev:
-                runs[-1] += 1
-            else:
-                runs.append(1)
-            prev = key
-        self.spec_runs = runs
-        lo, hi = self.band
-        if lo is not None:                    # re-fit the band to the new bins
-            self.band = (None, None)
-            self.set_band(lo, hi)
-        lo, hi = getattr(self, "band2", (None, None))
-        if lo is not None:
-            self.band2 = (None, None)
-            self.set_band2(lo, hi)
-
-    def set_band(self, lo, hi):
-        """The frequencies the BEAT listens to. At least one FFT bin always
-        counts (the short window's bins are ~47 Hz apart)."""
-        lo, hi = sorted((float(lo), float(hi)))
-        if (lo, hi) == self.band:
-            return
-        self.band = (lo, hi)
-        self.band_m, self.band_true = self._mask(lo, hi)
-        self.hist = []                        # a new band = a new baseline
-
-    def set_band2(self, lo, hi):
-        """Band 2 (the background's, when band2_on): same rules as set_band."""
-        lo, hi = sorted((float(lo), float(hi)))
-        if (lo, hi) == self.band2:
-            return
-        self.band2 = (lo, hi)
-        self.band2_m, self.band2_true = self._mask(lo, hi)
-        self.hist2 = []
-
-    def _mask(self, lo, hi):
-        """-> (the short window's bins in lo..hi, what they REALLY hear)."""
-        m = (self.freq >= lo) & (self.freq <= hi)
-        if not m.any():                       # narrower than a bin: nearest
-            m = np.zeros_like(m)
-            m[int(np.argmin(np.abs(self.freq - (lo + hi) / 2)))] = True
-        # what the beat REALLY hears (2026-10-12: the readout said 60-90 Hz
-        # while the only bin it used sat at 94): the chosen bins, each
-        # spreading +-1 bin (a Hann window's -6 dB width is 2 bins)
-        f = self.freq[m]
-        step = self.freq[1]
-        return m, (max(20.0, float(f.min() - step)), float(f.max() + step))
-
-    def _onset(self, e, h, last, onset, rms, gated, now):
-        """One band's beat test: its energy e against its last ~30 readings
-        (h, updated here). -> strength 0..1 (0 = no beat)."""
-        avg = (sum(h) / len(h)) if h else e
-        h.append(e)
-        if len(h) > 30:                       # ~1.3 s of history
-            del h[0]
-        if (len(h) >= 8 and e > avg * onset and rms > 2e-5 and not gated
-                and now - last > self.GAP):
-            return min(1.0, (e / max(avg, 1e-12) - 1.0) / 2.0)
-        return 0.0
-
-    def _pick(self, now):
-        if now - self._pick_t < 5.0:
-            return
-        self._pick_t = now
-        try:
-            with open(os.path.join(self.root, "heads.json")) as f:
-                tr = json.load(f).get("tracks", {})
-        except Exception:
-            self.dir = None
-            return
-
-        def rank(t):
-            ram = t.get("store", "ram") == "ram"
-            main = "MAIN" in str(t.get("name", "")).upper()
-            return (not ram, not (main and t.get("channels") == 2), not main)
-        best = sorted((t for t in tr.values() if t.get("dir")), key=rank)
-        if not best:
-            self.dir = None
-            return
-        t = best[0]
-        self.dir = os.path.join(self.root, t["dir"])
-        self.size = int(t.get("buffer_bytes", 0))
-        self.ch = int(t.get("channels", 2))
-
-    def _read(self, now):
-        try:
-            with open(os.path.join(self.dir, "ring.pos")) as f:
-                pos = int(f.read().strip() or 0)
-        except Exception:
-            return None
-        if pos == self._pos or self.size <= 0:
-            return None                       # recorder hasn't moved: no news
-        if self._pos_t is not None:
-            self.cadence += ((now - self._pos_t) * 1000 - self.cadence) * 0.1
-        self._pos, self._pos_t = pos, now
-        fb = 2 * self.ch
-        n = self.N_LONG * fb
-        start = (pos - n) % self.size
-        start -= start % fb
-        try:
-            with open(os.path.join(self.dir, "ring.raw"), "rb") as f:
-                f.seek(start)
-                raw = f.read(min(n, self.size - start))
-                if len(raw) < n:
-                    f.seek(0)
-                    raw += f.read(n - len(raw))
-        except Exception:
-            return None
-        if len(raw) != n:
-            return None
-        a = np.frombuffer(raw, "<i2").astype("f4") / 32768.0
-        self.frames = a.reshape(-1, self.ch)  # the XY scope wants L and R
-        self.frames_t = now
-        return self.frames.mean(axis=1)
-
-    def _read_tap(self, now):
-        """The tap first: fresher (one JACK period, no writer pass) and any
-        port. -> (usable, mono samples or None when nothing new)."""
-        st, fr = self.shm.read(now, self.N_LONG)
-        if st == "off":
-            return False, None
-        self._set_rate(self.shm.rate)
-        self.cadence = self.shm.period * 1000.0 / self.shm.rate
-        if fr is None:
-            return True, None
-        self.age_ms += (self.shm.age * 1000 - self.age_ms) * 0.1
-        self.ch = 2
-        self.frames = fr
-        self.frames_t = now
-        return True, fr.mean(axis=1)
-
-    def update(self, now):
-        ok, long = self._read_tap(now)
-        if ok:
-            if self.source != "tap":
-                self.source, self.hist, self.hist2 = "tap", [], []
-        else:
-            self._pick(now)
-            if not self.dir:
-                self.source = None
-                return 0.0, 0.0, 0.0
-            if self.source != "ring":
-                # a fresh baseline; the ring's old pos means nothing now
-                self.source, self.hist, self._pos, self._pos_t = "ring", [], None, None
-                self.hist2 = []
-                self._set_rate(48000)
-            long = self._read(now)
-        if long is None:
-            return 0.0, 0.0, None             # None = keep the last level
-        m = long[-self.N:]                    # the newest 21 ms
-        rms = float(np.sqrt(np.mean(m * m)))
-        self.env = max(rms, self.env * 0.9985, self.FLOOR)
-        # the GATE: below it is silence, whatever the auto gain would make of
-        # it. The gain keeps turning itself up in quiet (to catch quiet
-        # Bluetooth), so hiss and the gaps between songs read as "playing"
-        # and fired false beats + lifted the background (owner 2026-09-30)
-        gated = rms < self.gate
-        level = 0.0 if gated else (min(1.0, rms / self.env) if rms > 1e-5 else 0.0)
-        sp = np.abs(np.fft.rfft(m * self.win))
-        p2 = sp * sp
-        beat = self._onset(float(p2[self.band_m].sum()), self.hist, self.last_beat,
-                           self.ONSET, rms, gated, now)
-        if beat:
-            self.last_beat = now
-        beat2 = 0.0
-        if self.band2_on:
-            beat2 = self._onset(float(p2[self.band2_m].sum()), self.hist2, self.last_beat2,
-                                self.ONSET2, rms, gated, now)
-            if beat2:
-                self.last_beat2 = now
-        # the spectrum for the page + ridgeline, relative to the auto gain so a
-        # quiet stream still fills the display. At most every SPEC_EVERY s: the
-        # tap delivers audio every 21 ms (the ring every 43), and a 4096-point
-        # FFT per delivery cost ~3 ms a frame on the Pi (measured 2026-09-30).
-        if now - self._spec_t >= self.SPEC_EVERY:
-            self._spec_t = now
-            if gated:
-                # below the GATE = silence, on the display too. MEASURED
-                # 2026-10-12: with the L-12 master silent, its own hiss
-                # (~-115 dBFS) still drew bars up to a quarter high, because
-                # the display is scaled against the auto gain's -60 dBFS
-                # floor and reaches 72 dB below it (owner: "lots of
-                # readings" with everything turned down)
-                self.spec = [None] * self.SPEC_BANDS
-                return beat, beat2, level
-            sl = np.abs(np.fft.rfft(long * self.win_l)) / (self.N_LONG / 4)
-            g = 1.0 / max(self.env, 1e-6)
-            m = np.maximum.reduceat(np.append(sl, 0.0), self._spec_ri)[::2]
-            self.spec = np.round(20 * np.log10(m * g + 1e-9), 1).tolist()
-        return beat, beat2, level
+# The LISTEN detector (the tap reader, the beat detector, the band / SENS helpers) lives in
+# vis_listen.py since 2026-11-02 (numpy only: the MXV box conductor runs it too).
+from vis_listen import (SKIPBUF, TAP_SHM, TAP_SRC, TapShm, cc_to_hz, hz_to_cc, AudioTap,  # noqa: E402,F401
+                        tap_ports, audio_onset, audio_gate, band2_on)
 
 
 AUDIO_PUB = "/tmp/orc1_visuals_audio.json"
-
-
-def tap_ports():
-    """The tap's source as the page shows it: [left, right] (one entry for a
-    mono source). Mirrors orc_jacktap.c read_source()."""
-    try:
-        with open(TAP_SRC) as f:
-            lines = [ln.strip() for ln in f.read().splitlines()[:2]]
-    except OSError:
-        return ["system:capture_1", "system:capture_2"]
-    left = lines[0] if lines else ""
-    right = lines[1] if len(lines) > 1 and lines[1] else left
-    return [left] if right == left else [left, right]
 
 
 _PORTS_CACHE = [-99.0, None]
@@ -1099,19 +734,6 @@ def audio_attack(v):
 def audio_release(v):
     """RELEASE knob (CC 30) -> seconds: 0.08 .. 1.5, 64 ~ 0.35 (log)."""
     return 0.08 * (1.5 / 0.08) ** (max(0, v) / 127.0)
-
-
-def audio_onset(v):
-    """SENS knob (CC 31) -> how far the bass must jump above its last second
-    to count as a beat: 0 = 3x (big hits only) .. 127 = 1.3x (everything)."""
-    return 3.0 - 1.7 * (max(0, v) / 127.0)
-
-
-def audio_gate(v):
-    """GATE knob (CC 54) -> rms threshold: 0 = off; else -90 .. -40 dBFS
-    (default 56 = -68: under the quietest Bluetooth music measured on the
-    L-12 master, -66, and over the hiss between songs, -68 .. -80)."""
-    return 0.0 if v <= 0 else 10 ** ((-90.0 + 50.0 * min(127, v) / 127.0) / 20.0)
 
 
 def audio_amount(v):
@@ -1405,12 +1027,6 @@ class ModLFO:
             err = ((b / sync_bars) % 1.0 - self.ph + 0.5) % 1.0 - 0.5
             self.ph = (self.ph + err * (1.0 - math.exp(-dt / self.PULL))) % 1.0
         return self.ph
-
-
-def band2_on(knobs):
-    """BACKGROUND OWN BAND switch (CC 62): >= 64 = the background has its own
-    beat band (59/60 + SENS 61); below = it follows band 1, as before."""
-    return knobs.get(62, 0) >= 64
 
 
 def bg_pulse(knobs, a_p, b_p):
@@ -3079,7 +2695,10 @@ def main():
     lines_ph = 0.0             # the lines' LINES CYCLE hue turn (degrees)
 
     music = Music()
-    threading.Thread(target=midi_thread, args=(music,), daemon=True).start()
+    threading.Thread(target=midi_thread, args=(music,), daemon=True).start()          # synth bus: hits, notes
+    threading.Thread(target=midi_thread, args=(music,), daemon=True,                  # the ORC: our knobs
+                     kwargs={"client": CTL_CLIENT, "find": find_orc_port,
+                             "is_src": lambda pname: pname == ORC_PORT}).start()
 
     state = {"next": False, "reload": False, "shot": False}
     # SIGWINCH = save the finished frame to SHOT_PNG (visuals.sh shot): an X

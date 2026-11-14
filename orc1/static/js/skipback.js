@@ -46,10 +46,19 @@
   }
 
   /* ── poll ────────────────────────────────────────────────────────────── */
+  let DECKS = { A: null, B: null };     // which track each sampler deck grabs
   async function poll() {
+    await load();
+    setTimeout(poll, 4000);
+  }
+  async function load() {
     try {
-      const d = await fetch('/api/skipback/tracks').then(r => r.json());
+      const [d, dk] = await Promise.all([
+        fetch('/api/skipback/tracks?' + Date.now()).then(r => r.json()),
+        fetch('/api/sampler/deck_source?' + Date.now()).then(r => r.json()).catch(() => null)]);
+      if (dk && dk.decks) DECKS = dk.decks;
       OPTS = {
+        choices:      d.choices || [],
         sources:      d.sources || [],
         raw_sources:  d.raw_sources || [],
         zoom_present: !!d.zoom_present,
@@ -84,7 +93,6 @@
     } catch (e) {
       $('sb-msg').innerHTML = '<span style="color:var(--danger)">error loading skipback state</span>';
     }
-    setTimeout(poll, 4000);
   }
 
   /* ── RAM meter ───────────────────────────────────────────────────────── */
@@ -135,55 +143,27 @@
     renderAll();
   }
 
-  /* ── QUICK ADD: one pick = a named, wired track (stereo pair or mono) ── */
-  // "system:capture_9" -> "In 9"; anything else keeps its port name.
-  const portLabel = (p) => {
-    const m = /^system:capture_(\d+)$/.exec(p);
-    return m ? 'In ' + m[1] : p;
-  };
-  function quickChoices() {
-    const stereo = [], seen = new Set();
-    OPTS.sources.forEach(s => {
-      if (!s.right) return;
-      stereo.push({ label: s.label, left: s.left, right: s.right });
-      seen.add(s.left + '|' + s.right);
-    });
-    // every odd/even pair of the card's inputs (1/2, 3/4 ... 13/14), so a
-    // pair the named list doesn't cover is still one pick away
-    const caps = OPTS.raw_sources.filter(p => /^system:capture_\d+$/.test(p));
-    const num = (p) => parseInt(p.split('_').pop(), 10);
-    caps.forEach(l => {
-      const n = num(l);
-      if (n % 2 !== 1) return;
-      const r = 'system:capture_' + (n + 1);
-      if (!caps.includes(r) || seen.has(l + '|' + r)) return;
-      stereo.push({ label: `In ${n}/${n + 1}`, left: l, right: r });
-    });
-    const mono = OPTS.raw_sources.map(p => ({ label: portLabel(p), left: p }));
-    return { stereo, mono };
-  }
-  let QUICK = { stereo: [], mono: [] };
+  /* ── + TRACK: one pick = a new track recording that (pair = stereo) ─── */
+  // Same plain-named choices as every track's Records picker (sb_tracks.js).
   function quickOpts() {
     const el = $('sb-quick');
     if (!el || document.activeElement === el) return;
-    QUICK = quickChoices();
-    el.innerHTML = '<option value="">+ QUICK ADD…</option>'
-      + '<optgroup label="STEREO PAIR (one stereo track)">'
-      + QUICK.stereo.map((c, k) => `<option value="S${k}">${esc(c.label)}</option>`).join('')
-      + '</optgroup><optgroup label="MONO CHANNEL">'
-      + QUICK.mono.map((c, k) => `<option value="M${k}">${esc(c.label)}</option>`).join('')
-      + '</optgroup>';
+    el.innerHTML = '<option value="">+ NEW TRACK recording…</option>'
+      + SBT.options({ source_key: '', source_present: true }, OPTS.choices)
+          .replace(/ selected/g, '');
   }
+  const choiceFor = (key) => (OPTS.choices || []).find(c => c.key === key);
+  const srcFromChoice = (c) => c.mode === 'auto'
+    ? { mode: 'auto', left: '', right: '' }
+    : { mode: 'manual', left: c.left, right: c.right || '' };
   window.sbQuick = (v) => {
     const el = $('sb-quick');
     if (el) el.value = '';
-    if (!v) return;
-    const c = (v[0] === 'S' ? QUICK.stereo : QUICK.mono)[parseInt(v.slice(1), 10)];
+    const c = choiceFor(v);
     if (!c) return;
-    const stereo = v[0] === 'S';
+    const stereo = c.mode === 'auto' || !!c.right;
     MODEL.push({ id: null, name: c.label, stereo, length_secs: 900,
-                 armed: true, store: 'ram', persist: true,
-                 source: { mode: 'manual', left: c.left, right: stereo ? c.right : '' } });
+                 armed: true, store: 'ram', persist: true, source: srcFromChoice(c) });
     setDirty(); render(); ramMeter();
     msg(`added "${esc(c.label)}" (${stereo ? 'stereo' : 'mono'}) — press SAVE to start recording`, true);
   };
@@ -211,9 +191,12 @@
       if (el) el.innerHTML = '<span style="color:var(--danger)">save failed</span>';
     }
   }
+  // by NAME, never "t2" (2026-11-12); the server's display_name hides T<n>
+  const showName = (t) => (t && t.id != null && STATUS[t.id] && t.name === STATUS[t.id].name
+    ? STATUS[t.id].display_name : (t && t.name)) || 'new track';
   const trackName = (id) => {
     const t = MODEL.find(x => x.id === id);
-    return t ? `t${id} ${t.name}` : `t${id} (gone)`;
+    return t ? showName(t) : '(removed track)';
   };
   function renderJoins() {
     const el = $('sb-joins');
@@ -225,7 +208,7 @@
     }).join('');
     const used = new Set(JOINS.flat());
     const mono = MODEL.filter(t => t.id != null && !t.stereo && !used.has(t.id));
-    const opts = mono.map(t => `<option value="${t.id}">t${t.id} ${esc(t.name)}</option>`).join('');
+    const opts = mono.map(t => `<option value="${t.id}">${esc(showName(t))}</option>`).join('');
     el.innerHTML = (chips || '<span style="font-size:11px;color:var(--muted)">none — every track gets its own file</span>')
       + (mono.length >= 2 ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center">
           <span style="font-size:10px;color:var(--muted)">L</span><select id="sb-join-l">${opts}</select>
@@ -252,7 +235,7 @@
     el.innerHTML = armed.length ? armed.map(t => {
       const on = !ALL_OUT.has(t.id);
       return `<button class="flag ${on ? 'on' : ''}" onclick="sbAllToggle(${t.id})"
-        style="${on ? 'background:var(--accent);color:#0a0b0d' : ''}">t${t.id} ${esc(t.name)}</button>`;
+        style="${on ? 'background:var(--accent);color:#0a0b0d' : ''}">${esc(showName(t))}</button>`;
     }).join('') : '<span style="font-size:11px;color:var(--muted)">no armed tracks</span>';
     renderJoins();
   }
@@ -275,7 +258,7 @@
         ? `✓ saved folder <b>${esc(r.folder)}</b> (${r.tracks.length} tracks in ${r.files} files, ${Math.round(r.seconds)}s)` +
           (r.aligned ? '' : `<br><span style="color:var(--danger)">⚠ ${esc(r.warning)}</span>`) +
           ((r.joins_skipped || []).length ? `<br><span style="color:var(--danger)">⚠ not joined: ${esc(r.joins_skipped.join('; '))}</span>` : '') +
-          ((r.not_recording || []).length ? `<br><span style="color:var(--danger)">⚠ left out (not recording): ${esc(r.not_recording.map(t => 't' + t).join(', '))}</span>` : '')
+          ((r.not_recording || []).length ? `<br><span style="color:var(--danger)">⚠ left out (not recording): ${esc(r.not_recording.map(trackName).join(', '))}</span>` : '')
         : r.pending ? `⏳ ${esc(r.error)}`
         : `<span style="color:var(--danger)">grab failed: ${esc(r.error || '?')}</span>`;
     } catch (e) {
@@ -283,37 +266,46 @@
     }
   };
 
-  function rowHtml(t, i) {
+  // The key a MODEL source picks (same rule as the server's _sb_track_words).
+  const keyOf = (t) => (t.source.mode || 'auto') !== 'manual' ? 'auto'
+    : t.source.left + (t.stereo ? '|' + (t.source.right || t.source.left) : '');
+
+  // What the shared picker / status helpers read: the server's words for a
+  // saved track, a stand-in for a new (unsaved) one.
+  function words(t) {
     const st = t.id != null ? STATUS[t.id] : null;
-    const isAuto = (t.source.mode || 'auto') !== 'manual';
-    const idBadge = t.id != null ? `t${t.id}` : 'NEW';
+    if (st && keyOf(t) === st.source_key) return Object.assign({}, st, { armed: t.armed });
+    const c = choiceFor(keyOf(t));
+    return { source_key: keyOf(t), source_present: !!c,
+             source_label: c ? c.label : (t.source.left || ''), armed: t.armed };
+  }
 
-    // status line
-    let statusInner = statusHtml(t, st);
-
-    // named source dropdown (manual only)
-    const namedOpts = ['<option value="">— named source —</option>']
-      .concat(OPTS.sources.map(s => {
-        const v = esc(s.left + '|' + (s.right || ''));
-        const sel = (s.left === t.source.left &&
-                     (s.right || '') === (t.source.right || '')) ? ' selected' : '';
-        return `<option value="${v}"${sel}>${esc(s.label)}</option>`;
-      })).join('');
+  function rowHtml(t, i) {
+    const w = words(t);
+    const saved = t.id != null;
+    const custom = CUSTOM.has(i);
+    // Custom ports (rarely needed): raw L / R port lists, applied with USE.
     const rawOpt = (cur) => ['<option value="">—</option>']
+      .concat(cur && !OPTS.raw_sources.includes(cur)
+        ? [`<option value="${esc(cur)}" selected>${esc(cur)} (not connected now)</option>`] : [])
       .concat(OPTS.raw_sources.map(p =>
         `<option value="${esc(p)}"${p === cur ? ' selected' : ''}>${esc(p)}</option>`)).join('');
-
-    const manualBlock = isAuto ? '' : `
-      <div style="margin-top:6px">
-        <select onchange="sbNamed(${i}, this.value)" style="width:100%;margin-bottom:4px">${namedOpts}</select>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <select onchange="sbRawL(${i}, this.value)" style="flex:1;min-width:110px">${rawOpt(t.source.left)}</select>
-          ${t.stereo ? `<select onchange="sbRawR(${i}, this.value)" style="flex:1;min-width:110px">${rawOpt(t.source.right)}</select>` : ''}
-        </div>
+    const customBlock = !custom ? '' : `
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;align-items:center">
+        <span style="font-size:9px;color:var(--muted)">L</span>
+        <select id="sb-cl-${i}" style="flex:1;min-width:110px">${rawOpt(t.source.left)}</select>
+        <span style="font-size:9px;color:var(--muted)">R</span>
+        <select id="sb-cr-${i}" style="flex:1;min-width:110px">${rawOpt(t.stereo ? t.source.right : '')}</select>
+        <button class="flag" onclick="sbUseCustom(${i})" title="R empty = a mono track">USE</button>
       </div>`;
 
-    const grabRow = (t.id != null && t.armed) ? `
+    const now = (saved && STATUS[t.id]) ? SBT.nowLine(Object.assign({}, STATUS[t.id], { armed: t.armed })) : '';
+    const decks = (saved && t.armed) ? ['A', 'B'].map(d =>
+      `<button class="flag ${DECKS[d] === t.id ? 'on' : ''}" onclick="sbDeck('${d}', ${t.id})"
+        title="sampler deck ${d} grabs from this track">DECK ${d}</button>`).join('') : '';
+    const grabRow = (saved && t.armed) ? `
       <div class="flags" style="margin-top:6px">
+        ${decks}<span style="width:8px"></span>
         ${[[5,'5s'],[30,'30s'],[60,'60s'],[300,'5m'],[600,'10m']].map(([s,l]) =>
           `<button class="flag" onclick="sbGrab(${t.id},${s})">${l}</button>`).join('')}
       </div>
@@ -322,21 +314,24 @@
     return `
     <div class="card">
       <div style="display:flex;align-items:center;gap:6px">
-        <span style="font-family:var(--fh,var(--fs));font-size:10px;color:var(--label);min-width:26px">${idBadge}</span>
-        <input value="${esc(t.name)}" oninput="sbName(${i}, this.value)"
+        ${saved ? '' : '<span style="font-size:10px;color:var(--label)">NEW</span>'}
+        <input value="${esc(saved ? showName(t) : t.name)}" oninput="sbName(${i}, this.value)"
                style="flex:1;min-width:60px" placeholder="name">
         <button class="flag ${t.armed ? 'on' : ''}" onclick="sbArm(${i})"
-                style="${t.armed ? 'background:var(--ok,#4ade80);color:#0a0b0d' : ''}">${t.armed ? 'ARMED' : 'DISARMED'}</button>
+                style="${t.armed ? 'background:var(--ok,#4ade80);color:#0a0b0d' : ''}">${t.armed ? 'ARMED' : 'OFF'}</button>
         <button class="flag" onclick="sbRemove(${i})" title="remove track">✕</button>
       </div>
 
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+        <span style="font-size:10px;color:var(--label)">RECORDS</span>
+        <select onchange="sbPick(${i}, this.value)" style="flex:1;min-width:0">${SBT.options(w, OPTS.choices)}</select>
+        <a href="#" onclick="sbCustom(${i});return false" style="font-size:9px;color:var(--muted)">${custom ? 'hide ports' : 'ports…'}</a>
+      </div>
+      ${customBlock}
+      ${now ? `<div style="font-size:10px;margin-top:3px">${now}</div>` : ''}
+
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">
-        <button class="flag ${isAuto ? 'on' : ''}" onclick="sbMode(${i},'auto')"
-                style="${isAuto ? 'background:var(--accent);color:#0a0b0d' : ''}">AUTO</button>
-        <button class="flag ${!isAuto ? 'on' : ''}" onclick="sbMode(${i},'manual')"
-                style="${!isAuto ? 'background:var(--accent);color:#0a0b0d' : ''}">MANUAL</button>
-        <span style="width:8px"></span>
-        <button class="flag" onclick="sbStereo(${i})">${t.stereo ? 'STEREO' : 'MONO'}</button>
+        <span style="font-size:10px;color:var(--muted)">${t.stereo ? 'STEREO' : 'MONO'}</span>
         <button class="flag ${t.store === 'card' ? 'on' : ''}" onclick="sbStore(${i})"
                 title="where this track's ring lives: RAM (cleared on reboot) or the CARD partition"
                 style="${t.store === 'card' ? 'background:var(--accent);color:#0a0b0d' : ''}">${t.store === 'card' ? 'CARD' : 'RAM'}</button>
@@ -350,27 +345,19 @@
         <span id="sb-mb-${i}" style="font-size:10px;color:var(--muted)">${ringMb(t).toFixed(0)} MB</span>
       </div>
 
-      ${manualBlock}
-
-      <div id="sb-st-${i}" style="margin-top:6px;font-size:11px">${statusInner}</div>
+      <div id="sb-st-${i}" style="margin-top:6px;font-size:11px">${statusHtml(t, saved ? STATUS[t.id] : null)}</div>
       ${grabRow}
     </div>`;
   }
 
   function statusHtml(t, st) {
     if (t.id == null) return '<span style="color:var(--muted)">unsaved — press SAVE to start recording</span>';
-    if (!t.armed)     return '<span style="color:var(--muted)">disarmed (ring freed)</span>';
+    if (!t.armed)     return '<span style="color:var(--muted)">○ OFF (nothing recorded)</span>';
     if (!st)          return '<span style="color:var(--muted)">…</span>';
-    if (st.card_blocked) return `<span style="color:var(--danger)">● CARD — not armed: ${esc(st.card_blocked)}</span>`;
-    if (st.ram_blocked) return '<span style="color:var(--danger)">● RAM-BLOCKED — not armed (over the RAM budget; try CARD)</span>';
-    const rec = st.recording && st.connected;
-    const dot = rec ? '<span style="color:var(--ok,#4ade80)">● RECORDING</span>'
-                    : '<span style="color:var(--danger)">● not recording</span>';
-    const src = (st.resolved && st.resolved.length) ? st.resolved.join(' + ') : '—';
-    const fill = st.fill_secs ? ` · ${Math.round(st.fill_secs)}s buffered` : '';
+    const fill = st.fill_secs ? ` · ${Math.round(st.fill_secs)}s held` : '';
     const res = st.resumed_from === 'checkpoint' ? ' <span style="color:var(--muted)">· history resumed after reboot</span>' : '';
     const gaps = st.gaps ? ` <span style="color:var(--danger)">· ⚠ ${st.gaps} dropped period(s)</span>` : '';
-    return `${dot} <span style="color:var(--muted)">${esc(src)}${fill}</span>${res}${gaps}`;
+    return `${SBT.state(Object.assign({}, st, { armed: t.armed }))}<span style="color:var(--muted)">${fill}</span>${res}${gaps}`;
   }
 
   function updateStatusSpans() {
@@ -401,25 +388,63 @@
     const mb = $('sb-mb-' + i); if (mb) mb.textContent = ringMb(MODEL[i]).toFixed(0) + ' MB';
     ramMeter();
   };
-  // structural edits: mutate + re-render
-  window.sbStereo = (i) => { MODEL[i].stereo = !MODEL[i].stereo; setDirty(); render(); ramMeter(); };
   window.sbStore = (i) => {
-    const t = MODEL[i], to = t.store === 'card' ? 'ram' : 'card';
-    if (t.id != null && !confirm(`Move t${t.id} to ${to.toUpperCase()}? This rebuilds its ring, so the audio it holds now is lost.`)) return;
-    t.store = to; setDirty(); render(); ramMeter();
+    const t = MODEL[i];
+    t.store = t.store === 'card' ? 'ram' : 'card'; setDirty(); render(); ramMeter();
   };
   window.sbPersist = (i) => { MODEL[i].persist = !MODEL[i].persist; setDirty(); render(); };
-  window.sbArm = (i) => { MODEL[i].armed = !MODEL[i].armed; setDirty(); render(); ramMeter(); };
-  window.sbMode = (i, m) => { MODEL[i].source.mode = m; setDirty(); render(); };
-  window.sbNamed = (i, v) => {
-    if (!v) return;
-    const [l, r] = v.split('|');
-    MODEL[i].source.left = l || ''; MODEL[i].source.right = r || '';
-    setDirty(); render();
+
+  // Source + ARM on a SAVED track apply AT ONCE (no SAVE): the server writes
+  // the tracks file, the recorder follows within ~5 s. The result is copied
+  // into MODEL so a later SAVE of other edits never puts the old one back.
+  function adopt(i, tr) {
+    const t = MODEL[i];
+    if (!t || !tr) return;
+    t.armed = !!tr.armed; t.stereo = !!tr.stereo;
+    t.source = { mode: (tr.source && tr.source.mode) || 'auto',
+                 left: (tr.source && tr.source.left) || '', right: (tr.source && tr.source.right) || '' };
+    if (tr.name) t.name = tr.name;
+  }
+  async function applySource(i, key, label) {
+    const t = MODEL[i];
+    if (t.id == null) {                       // unsaved row: local, SAVE sends it
+      const c = typeof key === 'string' ? choiceFor(key) : null;
+      const old = words(t).source_label;
+      if (c) { t.source = srcFromChoice(c); t.stereo = c.mode === 'auto' || !!c.right; }
+      else { t.source = { mode: 'manual', left: key.left, right: key.right || '' }; t.stereo = !!key.right; }
+      if (!t.name || t.name === old) t.name = c ? c.label : key.left;
+      setDirty(); render(); ramMeter();
+      return;
+    }
+    msg('setting…', true);
+    const r = await SBT.setSource(t.id, key);
+    if (!r.ok) { msg('refused: ' + esc(r.error || '?'), false); render(); return; }
+    adopt(i, r.track);
+    msg(`${esc(showName(t))} now records ${esc(r.label)} (within ~5 s)`, true);
+    render(); ramMeter(); load();
+  }
+  window.sbPick = (i, key) => { if (key) applySource(i, key); };
+  const CUSTOM = new Set();                   // rows showing the raw port lists
+  window.sbCustom = (i) => { if (CUSTOM.has(i)) CUSTOM.delete(i); else CUSTOM.add(i); render(); };
+  window.sbUseCustom = (i) => {
+    const l = ($('sb-cl-' + i) || {}).value || '', r = ($('sb-cr-' + i) || {}).value || '';
+    if (!l) { msg('pick at least the L port', false); return; }
+    applySource(i, { left: l, right: r });
   };
-  window.sbRawL = (i, v) => { MODEL[i].source.left = v; setDirty(); };
-  window.sbRawR = (i, v) => { MODEL[i].source.right = v; setDirty(); };
-  window.sbRemove = (i) => { MODEL.splice(i, 1); setDirty(); render(); ramMeter(); };
+  window.sbArm = async (i) => {
+    const t = MODEL[i];
+    if (t.id == null) { t.armed = !t.armed; setDirty(); render(); ramMeter(); return; }
+    const r = await SBT.arm(t.id, !t.armed);
+    if (!r.ok) { msg('refused: ' + esc(r.error || '?'), false); return; }
+    adopt(i, r.track);
+    msg(t.armed ? `${esc(showName(t))} armed — recording within ~5 s` : `${esc(showName(t))} off`, true);
+    render(); ramMeter(); load();
+  };
+  window.sbDeck = (d, tid) => {
+    cmd('SAMPLER_SET_SOURCE', { deck: d, track: tid });
+    DECKS[d] = tid; render();
+  };
+  window.sbRemove = (i) => { MODEL.splice(i, 1); CUSTOM.clear(); setDirty(); render(); ramMeter(); };
   window.sbAddTrack = () => {
     // default source: the card's first stereo input pair (the old default,
     // ORC1-Synth, was retired 2026-09-24 and recorded nothing)

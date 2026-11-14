@@ -1776,7 +1776,7 @@ def test_universal_fader_element():
     lit = round(64 * N_COLS / 127)          # = 8
     check("fader bar: cols below the level differ from cols above",
           lit == 8 and row1.get(0) != row1.get(N_COLS - 1)
-          and row1.get(0) == (0, 0x30, 0x30) and row1.get(15) == (0, 0x06, 0x06),
+          and row1.get(0) == (0, 0x30, 0x30) and row1.get(15) == (0, 16, 16),   # (2026-11-12: was (0, 6, 6) = dark on the Fire's squared curve)
           f"lit={lit} c0={row1.get(0)} c15={row1.get(15)}")
 
     # -- clear returns the row to per-pad -------------------------------------

@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Skipback GRAB pads + the blinking TAP TEMPO pad (2026-10-19).
+Skipback GRAB pads (2026-10-19; the Fire surface they started on left 2026-11-13).
 
     python3 _test_grab_pads.py [-v]
 
 owner: trigger a skipback grab of a length he set up "with a press of a fire pad in
 orc mode"; "the sample is usually going to be either quantized bar amounts or a 'sample
-while holding the button down'"; seconds don't fit long grabs; and "a blinking tap
-tempo pad for the clock".
+while holding the button down'"; seconds don't fit long grabs. Fire firmware v0.36
+dropped its ORC pad page, so a grab pad is now a pad on ANY device with a pad map; the
+old "surface" profiles are dropped on load (their entries were pad numbers, not notes).
 
 Covers: orc1_padmap grab validation + grab_plan (bars at the live tempo end at the press,
 hold = press -> release snapped to whole bars from the press, time, everything, tracks),
-PadMap press / hold / release on a surface, the one-pad paint frame against the Fire
-firmware's own parse rules, TapBlinker against a fake clock, and the brain's
+PadMap press / hold / release from real note messages, an old surface profile being
+dropped, and the brain's
 _padmap_grab (extracted from orc1.py by source) with skipback_save_all stubbed.
 
 Pure: no port, no JACK, no file outside a temp dir, never runs a grab.
@@ -24,11 +25,10 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import orc1_padmap as P                                      # noqa: E402
-import orc1_surface_link as L                                # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 PASS = FAIL = 0
-EXPECTED = 50
+EXPECTED = 38
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -44,15 +44,15 @@ def check(name, cond, detail=""):
 
 
 MODS = ["drums", "poly"]
-FIRE_IN = "ORC FW seq:ORC FW seq MIDI 1 32:0"
+PADS_IN = "LPD8:LPD8 MIDI 1 32:0"
 
 
-class SX:                     # a surface pad hit: F0 7D 'ORC' 0C <pad> <vel> F7
+class SX:                     # a pad hit as the device sends it: a note-on, vel 0 = the release (a note-off)
     def __init__(s, pad, vel=100):
-        s.type, s.data = "sysex", P.SURF_PAD_HDR + [pad, vel]
+        s.type, s.note, s.velocity, s.channel = ("note_on" if vel else "note_off"), pad, vel, 9
 
 
-def conf_with(pads, surface=True, name="Fire", match="ORC FW"):
+def conf_with(pads, surface=False, name="Pads", match="LPD8"):
     raw = {"devices": {name: {"port_match": match, "pads": pads}}}
     if surface:
         raw["devices"][name]["surface"] = True
@@ -66,11 +66,11 @@ c, e = conf_with({"note:8": {"do": "grab", "len": "bars", "bars": 8, "color": "b
                   "note:11": {"do": "grab", "len": "all", "tracks": [3, 2, 2]},
                   "note:12": {"do": "grab", "len": "minutes"},
                   "note:13": {"do": "grab", "len": "bars", "bars": 0}})
-pads = c["devices"]["Fire"]["pads"]
-check("bars grab kept with its length + colour",
+pads = c["devices"]["Pads"]["pads"]
+check("bars grab kept with its length; the old surface colour is dropped",
       pads.get("note:8") == {"do": "grab", "scope": "all", "tracks": "armed", "len": "bars",
-                             "bars": 8, "color": "blue"}, pads.get("note:8"))
-check("hold on a surface is kept, snap defaults ON",
+                             "bars": 8}, pads.get("note:8"))
+check("a hold grab is kept on an ordinary device, snap defaults ON",
       pads.get("note:9", {}).get("len") == "hold" and pads["note:9"].get("snap") is True, pads.get("note:9"))
 check("one track + m:ss time kept", pads.get("note:10") == {"do": "grab", "scope": "track", "track": 2,
                                                          "len": "time", "secs": 720}, pads.get("note:10"))
@@ -78,13 +78,16 @@ check("fixed tracks are de-duplicated and sorted", pads.get("note:11", {}).get("
       pads.get("note:11"))
 check("an unknown length is refused + reported", "note:12" not in pads and any("length" in x for x in e), e)
 check("0 bars is refused", "note:13" not in pads)
-c2, e2 = conf_with({"note:36": {"do": "grab", "len": "hold"}}, surface=False, name="Simmons", match="Simmons")
-check("a HOLD grab on a non-surface (Simmons: timer note-offs) is refused with the reason",
-      "note:36" not in c2["devices"]["Simmons"]["pads"] and any("surface" in x for x in e2), e2)
-c3, _ = conf_with({"note:36": {"do": "grab", "len": "bars", "bars": 4}}, surface=False, name="Simmons", match="Simmons")
-check("a BARS grab on a non-surface is fine", "note:36" in c3["devices"]["Simmons"]["pads"])
+c2, e2 = conf_with({"note:8": {"do": "grab", "len": "bars", "bars": 4}}, surface=True, name="Fire", match="ORC FW")
+check("an old Fire SURFACE profile is dropped whole and reported (its entries were pad numbers, not notes)",
+      "Fire" not in c2["devices"] and any("Fire" in x and "surface" in x for x in e2), (c2, e2))
+both = P.validate_config({"devices": {"Fire": {"port_match": "ORC FW", "surface": True, "pads": {}},
+                                      "Simmons": {"port_match": "Simmons",
+                                                  "pads": {"note:36": {"do": "grab", "len": "bars", "bars": 4}}}}}, MODS)[0]
+check("... and the other profiles in the same file are kept",
+      list(both["devices"]) == ["Simmons"] and "note:36" in both["devices"]["Simmons"]["pads"], both)
 c4, e4 = conf_with({"cc:4": {"do": "grab", "len": "bars", "bars": 4}})
-check("a CC can't be a grab pad", "cc:4" not in c4["devices"]["Fire"]["pads"] and e4)
+check("a CC can't be a grab pad", "cc:4" not in c4["devices"]["Pads"]["pads"] and e4)
 
 # ── grab_plan: the math ───────────────────────────────────────────────────────
 G = P.grab_plan
@@ -113,129 +116,54 @@ check("an unsnapped hold grabs exactly press -> release", p == (3.25, 13.25, 0.0
 p = G(bars4, 0.0, None, 0.0, 0)
 check("no tempo -> 120 BPM, never a zero-length grab", p[0] == 8.0, p)
 
-# ── PadMap: press / hold / release on the surface ────────────────────────────
-grabs, holds = [], []
+# ── PadMap: press / hold / release from real notes ───────────────────────────
+grabs = []
 pm = P.PadMap(emit=lambda *a: None, module_ch=lambda m: 10, run_action=lambda a: None, log=lambda s: None,
-              run_grab=lambda e, a, b: grabs.append((e["len"], a, b)),
-              on_hold=lambda d, pad, h: holds.append((d, pad, h)))
+              run_grab=lambda e, a, b: grabs.append((e["len"], a, b)))
 pm.spawn_grab = lambda fn: fn()                 # synchronous for the test
 clk = [100.0]
 pm.wall = lambda: clk[0]
 mono = [0.0]
 pm.clock = lambda: mono[0]
 pm.set_config(c)
-check("a bars pad grabs on the HIT", pm.handle(SX(8), FIRE_IN) is True and grabs == [("bars", 100.0, None)], grabs)
+check("a bars pad grabs on the HIT", pm.handle(SX(8), PADS_IN) is True and grabs == [("bars", 100.0, None)], grabs)
 mono[0] += 0.01
-pm.handle(SX(8), FIRE_IN)
+pm.handle(SX(8), PADS_IN)
 check("a double-trigger 10 ms later is not a 2nd grab", len(grabs) == 1, grabs)
-pm.handle(SX(8, 0), FIRE_IN)
+pm.handle(SX(8, 0), PADS_IN)
 check("its release does nothing", len(grabs) == 1)
 mono[0] += 1.0
-pm.handle(SX(8), FIRE_IN)
+pm.handle(SX(8), PADS_IN)
 check("a real 2nd hit a second later is a 2nd grab", len(grabs) == 2)
 del grabs[:]
 clk[0] = 200.0
-pm.handle(SX(9), FIRE_IN)
-check("a HOLD press grabs nothing yet and lights the pad", grabs == [] and holds == [("Fire", 9, True)], (grabs, holds))
-pm.handle(SX(9), FIRE_IN)
-check("a 2nd press while held does not restart it", len(holds) == 1)
+pm.handle(SX(9), PADS_IN)
+check("a HOLD press grabs nothing yet", grabs == [], grabs)
+clk[0] = 203.0
+pm.handle(SX(9), PADS_IN)
 clk[0] = 207.5
-pm.handle(SX(9, 0), FIRE_IN)
-check("the RELEASE grabs press -> release and puts the pad back",
-      grabs == [("hold", 200.0, 207.5)] and holds[-1] == ("Fire", 9, False), (grabs, holds))
-pm.handle(SX(9, 0), FIRE_IN)
+pm.handle(SX(9, 0), PADS_IN)
+check("the RELEASE grabs press -> release; a 2nd press while held did not restart it",
+      grabs == [("hold", 200.0, 207.5)], grabs)
+pm.handle(SX(9, 0), PADS_IN)
 check("a stray release with no press grabs nothing", len(grabs) == 1)
-pm.handle(SX(9), FIRE_IN)
+pm.handle(SX(9), PADS_IN)
 pm.set_config(c)
-check("a remap mid-hold drops the hold and un-lights the pad (no grab)",
-      len(grabs) == 1 and holds[-1] == ("Fire", 9, False), (grabs, holds))
+pm.handle(SX(9, 0), PADS_IN)
+check("a remap mid-hold drops the hold (its release grabs nothing)", len(grabs) == 1, grabs)
 lowc, _ = conf_with({"note:8": {"do": "grab", "len": "bars", "bars": 4, "min_vel": 60}})
 pm.set_config(lowc)
 mono[0] += 5
 del grabs[:]
-pm.handle(SX(8, 30), FIRE_IN)
+pm.handle(SX(8, 30), PADS_IN)
 check("a hit softer than its min velocity doesn't grab", grabs == [])
-
-# ── tap pads + the one-pad paint frame ───────────────────────────────────────
-tc, _ = conf_with({"note:15": {"do": "action", "action": P.TAP_ACTION, "color": "orange"},
-                   "note:14": {"do": "action", "action": "cmd:ARP_TOGGLE"},
-                   "note:3": {"do": "action", "action": P.TAP_ACTION}})
-check("tap_pads finds the tap-tempo pads only", P.tap_pads(tc["devices"]["Fire"]) == [3, 15],
-      P.tap_pads(tc["devices"]["Fire"]))
-
-
-class Out:
-    def __init__(s):
-        s.sent = []
-
-    def send(s, m):
-        s.sent.append(m.data)
-
-
-class FakeMido:
-    class Message:
-        def __init__(s, kind, data=()):
-            s.type, s.data = kind, list(data)
-
-
-link = L.SurfaceLink(FakeMido, lambda: [], lambda: {}, log=lambda s: None)
-check("paint_pad on a Fire that isn't linked says False", link.paint_pad("Fire", 3, (7, 0, 0)) is False)
-out = Out()
-link.links["Fire"] = {"out": out}
-link.paint_pad("Fire", 63, (9, -1, 4))
-f = out.sent[-1] if out.sent else []
-check("paint_pad sends ONE 0A pad: <pad> count 1, levels clamped to 0-7",
-      f == P.ORC_HDR + [0x0A, 63, 1, 7, 0, 4], f)
-check("... a frame the firmware accepts (first + count <= 64, fits the 40-byte buffer)",
-      f[5] + f[6] <= 64 and len(f) + 2 < 40)
-
-# ── TapBlinker ────────────────────────────────────────────────────────────────
-
-
-class PaintLink:
-    def __init__(s):
-        s.painted, s.calls = 0, []
-
-    def paint_pad(s, name, pad, rgb):
-        s.calls.append((pad, tuple(rgb)))
-        return True
-
-
-pl = PaintLink()
-tb = L.TapBlinker(pl, lambda: [("Fire", tc["devices"]["Fire"])])
-check("refresh() sees the tap pads", tb.refresh() is True)
-ORANGE = P.COLOR_RGB["orange"]
-tb.tick(0.0, None, None, False)
-check("no clock: both pads sit at their colour, DIM (green default for the uncoloured one)",
-      sorted(pl.calls) == [(3, L._dim(L.DEFAULT_TAP_RGB)), (15, L._dim(ORANGE))], pl.calls)
-n = len(pl.calls)
-tb.tick(0.01, None, None, False)
-check("nothing is re-sent while nothing changes", len(pl.calls) == n)
-tb.tick(1.00, (0.30, 0.5), (1.30, 2.0), False)      # clock runs: first reading, no flash yet
-tb.tick(1.25, (0.005, 0.5), (1.505, 2.0), False)    # the phase wrapped: a beat (not beat 1)
-check("a new beat flashes the pad at its FULL colour", (15, ORANGE) in pl.calls[n:], pl.calls[n:])
-m = len(pl.calls)
-tb.tick(1.25 + L.FLASH_S + 0.01, (0.10, 0.5), (1.60, 2.0), False)
-check("the flash ends after FLASH_S (back to dim)", (15, L._dim(ORANGE)) in pl.calls[m:], pl.calls[m:])
-m = len(pl.calls)
-tb.tick(1.75, (0.004, 0.5), (0.004, 2.0), False)    # wrapped at the bar line
-check("beat 1 of the bar flashes WHITE", (15, (7, 7, 7)) in pl.calls[m:], pl.calls[m:])
-tb.tick(2.0, (0.25, 0.5), (0.25, 2.0), True)        # mid-beat, now following an outside clock
-m = len(pl.calls)
-tb.tick(2.25, (0.004, 0.5), (0.504, 2.0), True)
-check("following an OUTSIDE clock the blink is grey (a tap does nothing then)",
-      (15, (3, 3, 3)) in pl.calls[m:] and not any(c[1] == ORANGE for c in pl.calls[m:]), pl.calls[m:])
-m = len(pl.calls)
-pl.painted += 1                                      # a full repaint overwrote the pads
-tb.tick(2.25 + 0.02, (0.03, 0.5), (0.53, 2.0), True)
-check("after a full repaint the blinker re-sends what it shows", len(pl.calls) > m)
-pl2 = PaintLink()
-tb2 = L.TapBlinker(pl2, lambda: [("Fire", c["devices"]["Fire"])])
-tb2.refresh()
-tb2.tick(0.0, (0.0, 0.5), (0.0, 2.0), False)
-check("no tap pad = the blinker sends nothing at all", pl2.calls == [])
-check("tap_colour is pure: inside 0-7", all(0 <= v <= 7 for fl in (0, 1) for db in (0, 1) for ex in (0, 1)
-                                            for v in L.tap_colour((7, 2, 0), fl, db, ex)))
+sx = type("O", (), {"type": "sysex", "data": [0x7D, 0x4F, 0x52, 0x43, 0x0C, 8, 100]})()
+check("the Fire's old surface-hit SysEx (0C) is nobody's pad any more: not consumed, no grab",
+      pm.handle(sx, PADS_IN) is False and grabs == [], grabs)
+check("the surface code is gone from the pad map (no colours, no 0A / 0B frames, no hold light)",
+      not any(hasattr(P, n) for n in ("COLORS", "COLOR_RGB", "surface_frames", "surface_on", "surface_colours",
+                                      "surface_off", "SURF_PAD_HDR", "tap_pads", "TAP_ACTION"))
+      and not hasattr(pm, "surfaces") and not hasattr(pm, "on_hold"))
 
 # ── the brain: _padmap_grab and the wiring (by source) ───────────────────────
 src = open(os.path.join(HERE, "orc1.py"), encoding="utf-8").read()
@@ -264,10 +192,11 @@ ns["_padmap_grab"]({"scope": "track", "track": 2, "len": "hold", "snap": True}, 
 check("brain: a snapped-UP hold is scheduled, not run early",
       len(calls) == 1 and timers and abs(timers[-1][0] - 1.05) < 1e-6
       and timers[-1][2] == (6.0, [2]) and timers[-1][3] == {"end_ts": 301.0}, (calls, timers))
-check("brain: the pad map is given the grab + hold-light callbacks",
-      "padmap.run_grab = _padmap_grab" in src and "padmap.on_hold = _padmap_hold_light" in src)
-check("brain: the tap-blink thread is started",
-      'threading.Thread(target=_tap_blink_loop' in src)
+check("brain: the pad map is given the grab callback",
+      "padmap.run_grab = _padmap_grab" in src)
+check("brain: nothing of the Fire surface link is left (no link, no blink thread, no SURFACE_SHOW)",
+      not any(w in src for w in ("surface_link", "_tap_blink_loop", "_surface_loop", "SURFACE_SHOW", "on_hold"))
+      and not os.path.exists(os.path.join(HERE, "orc1_surface_link.py")))
 sa = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "skipback_save_all")
 sa_src = ast.get_source_segment(src, sa)
 check("brain: skipback_save_all ends at end_ts and passes fractional seconds",
@@ -275,8 +204,13 @@ check("brain: skipback_save_all ends at end_ts and passes fractional seconds",
 
 # ── the page offers it ───────────────────────────────────────────────────────
 js = open(os.path.join(HERE, "static", "js", "pads.js"), encoding="utf-8").read()
-check("/pads offers 'skipback grab' and 'while held' only on a surface",
-      '["grab", "skipback grab"]' in js and 'if (surface) lens.splice(1, 0, ["hold", "while held"])' in js)
+html = open(os.path.join(HERE, "templates", "pads.html"), encoding="utf-8").read()
+web = open(os.path.join(HERE, "orc1_web.py"), encoding="utf-8").read()
+check("/pads offers 'skipback grab' and 'while held' on any device",
+      '["grab", "skipback grab"]' in js and '["hold", "while held"]' in js)
+check("/pads has no surface controls left (no tick box, no SHOW ON FIRE, no colour picker, no show route)",
+      not any(w in js + html for w in ("surface", "pm-show", "SHOW ON FIRE", "colorCell", "pm-grid"))
+      and "/api/padmap/show" not in web and "_pm.COLORS" not in web)
 
 if __name__ == "__main__":
     check("every check ran (%d expected)" % EXPECTED, PASS + FAIL + 1 == EXPECTED,

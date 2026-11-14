@@ -510,63 +510,89 @@ loadOneshot();
 // ring each deck grabs; what a ring RECORDS is set on /skipback. Repoint goes over
 // the cmd socket as SAMPLER_SET_SOURCE, mirroring every other sampler control.
 let _deckSrcCache = null;
-// RINGS card (2026-09-23, replaces CAPTURE SOURCE): every ARMED skipback ring up
-// front on this page -- point a deck at it, or save its last N seconds to a file
-// (same /api/skipback/tracks/<id>/grab the /skipback page uses). Mirrors the
-// Mixtrack: FX1/2/3 = the 1st/2nd/3rd armed ring per deck, SHIFT+FX saves. Kept
-// at the TOP of the page; re-polled so a Mixtrack pick shows here too.
+// TRACKS card (2026-11-12; was RINGS, 2026-09-23): EVERY skipback track, with
+// what it records picked right here (sb_tracks.js, the same picker /skipback
+// uses), ARM / OFF, which deck grabs from it, and SAVE its last N seconds.
+// Mirrors the Mixtrack: FX1/2/3 = the 1st/2nd/3rd ARMED track per deck (RAM
+// first, then CARD, by id), SHIFT+FX saves. Re-polled so a Mixtrack pick shows.
 decksEl.insertAdjacentHTML('afterbegin', `
   <div class="card">
-    <div class="card-label"><span>RINGS · GRAB FROM / SAVE</span>
-      <a href="/skipback" style="font-size:9px;color:var(--accent);text-decoration:none">add / edit rings ›</a>
+    <div class="card-label"><span>SKIPBACK TRACKS · WHAT EACH RECORDS</span>
+      <a href="/skipback" style="font-size:9px;color:var(--accent);text-decoration:none">more on /skipback ›</a>
     </div>
     <div style="font-size:9px;color:var(--muted);margin-bottom:6px">
-      <b>DECK A / B</b>: that deck grabs from this ring (lit = current).
-      <b>SAVE</b>: write the ring's last N seconds to ~/recordings.
-      Mixtrack: FX1-3 pick the ring for a deck; SHIFT+FX saves it.
+      <b>RECORDS</b>: pick what the track listens to (a pair = stereo, one input = mono; a change empties it).
+      <b>DECK A / B</b>: that deck grabs from this track (lit = current).
+      <b>SAVE</b>: write its last N seconds to ~/recordings.
+      Mixtrack: FX1-3 pick the track for a deck; SHIFT+FX saves it.
     </div>
-    <div id="deck-src-rows" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div id="deck-src-rows" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div id="deck-src-msg" style="font-size:10px;min-height:12px"></div>
   </div>`);
 
-function _deckSrcInfo(tid) {
-  const t = _deckSrcCache && (_deckSrcCache.tracks || []).find(x => x.id === tid);
-  if (!t) return 'track ' + tid;
-  return (t.source ? 'records ' + t.source : 'no source assigned')
-         + (t.recording ? '' : ' · NOT recording');
-}
+let _sbTracks = null;            // GET /api/skipback/tracks
 function _esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function _deckSrcRender() {
   const rows = document.getElementById('deck-src-rows');
-  if (!rows || !_deckSrcCache) return;
+  if (!rows || !_deckSrcCache || !_sbTracks) return;
+  const ae = document.activeElement;           // never rebuild an open picker
+  if (ae && rows.contains(ae) && ae.tagName === 'SELECT') return;
   const cur = _deckSrcCache.decks || { A: 0, B: 1 };
-  // same order as the Mixtrack's FX1-3 (orc1.skipback_rings): RAM rings first
-  // -- a grab from a CARD ring can land early when the SD card stalls -- then
-  // CARD, each by id
-  const rings = (_deckSrcCache.tracks || []).filter(t => t.armed)
-                  .sort((a, b) => ((a.store === 'card') - (b.store === 'card')) || (a.id - b.id));
-  if (!rings.length) {
-    rows.innerHTML = '<div style="font-size:10px;color:var(--muted)">no armed rings — add one on the skipback page</div>';
+  const byStore = (a, b) => ((a.store === 'card') - (b.store === 'card')) || (a.id - b.id);
+  const all = _sbTracks.tracks || [];
+  const armed = all.filter(t => t.armed).sort(byStore);
+  const off = all.filter(t => !t.armed).sort(byStore);
+  if (!all.length) {
+    rows.innerHTML = '<div style="font-size:10px;color:var(--muted)">no tracks — add one on the skipback page</div>';
     return;
   }
-  rows.innerHTML = rings.map((t, i) => `
+  rows.innerHTML = armed.concat(off).map(t => {
+    const fx = armed.indexOf(t);
+    const now = SBT.nowLine(t);
+    return `
     <div>
       <div class="card-label" style="margin:0">
-        <span>${i < 3 ? 'FX' + (i + 1) + ' · ' : ''}${_esc(t.name)}
-          <span style="color:var(--muted)">(${t.stereo ? 'stereo' : 'mono'}, ${t.store === 'card' ? 'CARD: grabs may land early' : 'RAM'})</span></span>
-        <span style="font-size:9px;color:${t.recording ? 'var(--muted)' : 'var(--danger)'}">
-          ${_esc(_deckSrcInfo(t.id))}</span>
+        <span>${fx >= 0 && fx < 3 ? 'FX' + (fx + 1) + ' · ' : ''}${_esc(SBT.name(t))}
+          <span style="color:var(--muted)">(${t.stereo ? 'stereo' : 'mono'}, ${t.length_secs}s, ${t.store === 'card' ? 'CARD: grabs may land early' : 'RAM'})</span></span>
+        <span style="font-size:9px">${SBT.state(t)}
+          <button class="flag ${t.armed ? 'on' : ''}" style="margin-left:4px"
+            onclick="smpTrackArm(${t.id}, ${!t.armed})">${t.armed ? 'TURN OFF' : 'ARM'}</button></span>
       </div>
-      <div class="flags" style="margin-top:3px">
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+        <span style="font-size:9px;color:var(--label)">RECORDS</span>
+        <select style="flex:1;min-width:0" onchange="smpTrackSrc(${t.id}, this.value)">${SBT.options(t, _sbTracks.choices)}</select>
+      </div>
+      ${now ? `<div style="font-size:9px;margin-top:2px">${now}</div>` : ''}
+      ${t.armed ? `<div class="flags" style="margin-top:4px">
         ${['A', 'B'].map(d => `<button class="flag ${cur[d] === t.id ? 'on' : ''}"
            onclick="deckSrcSet('${d}', ${t.id})">DECK ${d}</button>`).join('')}
         <span style="width:8px"></span>
         ${[[30, '30s'], [60, '60s'], [300, '5m'], [600, '10m']].map(([s, l]) =>
           `<button class="flag" onclick="ringSave(${t.id}, ${s})">SAVE ${l}</button>`).join('')}
-      </div>
+      </div>` : ''}
       <div id="ring-save-${t.id}" style="font-size:9px;color:var(--accent);min-height:11px"></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+function _deckSrcMsg(text, bad) {
+  const el = document.getElementById('deck-src-msg');
+  if (el) { el.textContent = text; el.style.color = bad ? 'var(--danger)' : 'var(--muted)'; }
+}
+async function smpTrackSrc(tid, key) {
+  if (!key) return;
+  if (document.activeElement) document.activeElement.blur();
+  _deckSrcMsg('setting…');
+  const r = await SBT.setSource(tid, key);
+  _deckSrcMsg(r.ok ? 'now records ' + r.label + ' (within ~5 s)' : 'refused: ' + (r.error || '?'), !r.ok);
+  _deckSrcLoad();
+}
+async function smpTrackArm(tid, on) {
+  _deckSrcMsg(on ? 'arming…' : 'turning off…');
+  const r = await SBT.arm(tid, on);
+  _deckSrcMsg(r.ok ? (on ? 'armed — recording within ~5 s' : 'off — its audio is gone') : 'refused: ' + (r.error || '?'), !r.ok);
+  _deckSrcLoad();
 }
 function deckSrcSet(deck, track) {
   const tid = parseInt(track, 10);
@@ -592,7 +618,11 @@ async function ringSave(tid, secs) {
 }
 async function _deckSrcLoad() {
   try {
-    _deckSrcCache = await fetch('/api/sampler/deck_source?' + Date.now()).then(r => r.json());
+    const [dk, tr] = await Promise.all([
+      fetch('/api/sampler/deck_source?' + Date.now()).then(r => r.json()),
+      fetch('/api/skipback/tracks?' + Date.now()).then(r => r.json())]);
+    _deckSrcCache = dk;
+    _sbTracks = tr;
     _deckSrcRender();
   } catch (e) {}
 }

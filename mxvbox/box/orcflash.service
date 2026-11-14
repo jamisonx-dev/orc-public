@@ -1,0 +1,15 @@
+[Unit]
+Description=ORC visuals player (orcflash: framebuffer, driven by the Pi over the eth0 cable)
+# ORC all the way (owner 2026-10-29): Kodi is masked; this owns the screen from boot.
+Conflicts=kodi.service
+After=network.target
+
+[Service]
+# the clip slots live in /dev/shm/orc (RAM): give it room for the library's ~620 MB budget
+ExecStartPre=-/bin/mount -o remount,size=640M /dev/shm
+ExecStart=/usr/bin/python -u /storage/orc/orcflash.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=kodi.target

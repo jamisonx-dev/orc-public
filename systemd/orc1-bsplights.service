@@ -1,0 +1,27 @@
+[Unit]
+Description=ORC-1 -> BeatStep Pro step lights (the ORC's live state on the BSP's 16 RGB steps; needs the stepled BSP firmware)
+# Reads /dev/shm/orc1_playstate.json, writes SysEx to the BSP's USB port, nothing else.
+# Not PartOf orc1: a brain restart must not take it down (it goes dark on a stale feed and
+# picks up again by itself). Show = ~/.orc1_bsplights.json, set from /beatstep > STEP LIGHTS.
+After=orc1.service
+
+[Service]
+Type=simple
+User=pibox
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/orc1/orc1_bsplights.py
+Restart=always
+RestartSec=3
+# Skipback comes first: ordinary priority, niced (not SCHED_IDLE: the visuals renderer
+# showed idle-class work gets starved into visible hitches, 2026-10-24).
+Nice=10
+MemoryMax=48M
+OOMScoreAdjust=900
+# It writes only its status file in /dev/shm; the rest of the filesystem is read-only to it.
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

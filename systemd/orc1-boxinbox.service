@@ -1,0 +1,18 @@
+[Unit]
+Description=ORC-1 box inbox (videos dropped in \\pibox\boxinbox -> clips on the MXV box's card)
+After=network-online.target
+
+[Service]
+User=pibox
+ExecStart=/usr/bin/python3 -u /home/pibox/orc/mxvbox/pi/inbox.py
+Restart=always
+RestartSec=10
+# conversion only ever uses CPU / disk nothing else wants (skipback's recorder is
+# SCHED_FIFO, far above this); bounded memory so a huge video can't crowd the rig
+CPUSchedulingPolicy=idle
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

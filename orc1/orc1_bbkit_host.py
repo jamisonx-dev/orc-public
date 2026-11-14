@@ -64,6 +64,48 @@ KITS_DIR = S._SYNTH_CFG.get("BBKIT_DIR") or \
 STATE_FILE = os.path.expanduser("~/.orc1_bbkit.json")
 _CHOKE_FADE = max(1, int(0.006 * SR))     # ~6ms declick fade for choke/steal
 
+# -- per-drum shaping (2026-11-04) ---------------------------------------------
+# One CC picks a drum (note), the others shape it; two shape the whole kit. The
+# numbers live in orc1_config.BBKIT_SHAPE_CC (shared with the brain's follow
+# knobs and /cc). Values are applied when a drum is HIT (a hit already ringing
+# keeps its shape). Saved per kit in PARAMS_FILE by the persist thread.
+import orc1_config as _cfg                                      # noqa: E402
+SHAPE_CC = dict(_cfg.BBKIT_SHAPE_CC)
+SHAPE_DEFAULT = dict(_cfg.BBKIT_SHAPE_DEFAULT)
+_CC_SHAPE = {v: k for k, v in SHAPE_CC.items()}
+_KIT_KEYS = ("kit_tune", "kit_cutoff")
+PARAMS_FILE = os.path.expanduser("~/.orc1_bbkit_params.json")
+_ATTACK_MAX_S = 0.2
+_DECAY_MIN_S, _DECAY_MAX_S = 0.015, 3.0
+_ENV_FLOOR = 1e-4                         # -80 dB: a decaying hit ends here
+
+
+class Shape:
+    """What one hit is played with, from the drum's + the kit's CC values."""
+    __slots__ = ("gain", "rate", "attack", "tau", "panL", "panR", "cutoff", "q")
+
+    def __init__(self, p, kit):
+        g = p.get
+        self.gain = (g("level", 100) / 100.0) ** 2
+        st = (g("tune", 64) - 64) * 12.0 / 63.0 + (kit.get("kit_tune", 64) - 64) * 12.0 / 63.0
+        self.rate = 2.0 ** (st / 12.0)
+        a = g("attack", 0)
+        self.attack = int((a / 127.0) ** 2 * _ATTACK_MAX_S * SR)
+        d = g("decay", 127)
+        self.tau = None if d >= 127 else \
+            _DECAY_MIN_S * (_DECAY_MAX_S / _DECAY_MIN_S) ** (d / 127.0) * SR
+        pan = g("pan", 64)
+        self.panL = 1.0 if pan <= 64 else (127 - pan) / 63.0
+        self.panR = 1.0 if pan >= 64 else pan / 64.0
+        c = min(g("cutoff", 127), kit.get("kit_cutoff", 127))
+        self.cutoff = None if c >= 127 else S._cc_to_cutoff(c)
+        self.q = S._cc_to_q(g("reso", 0))
+
+    @property
+    def plain(self):
+        return (self.rate == 1.0 and not self.attack and self.tau is None
+                and self.cutoff is None and self.panL == 1.0 and self.panR == 1.0)
+
 
 # ============================================================================
 #  Kit data model
@@ -329,9 +371,14 @@ def load_kit(path):
 # ============================================================================
 #  Playback voice (one live sample hit)
 # ============================================================================
+def _seg(buf, pos, k):
+    return buf[pos:pos + k] if isinstance(buf, np.ndarray) else buf.seg(pos, k)
+
+
 class Voice:
-    __slots__ = ("buf", "pos", "gain", "note", "choke", "pre", "fade_left", "fade_len", "done")
-    def __init__(self, buf, gain, note, choke, pre):
+    __slots__ = ("buf", "pos", "gain", "note", "choke", "pre", "fade_left", "fade_len", "done",
+                 "shape", "posf", "age", "fL", "fR")
+    def __init__(self, buf, gain, note, choke, pre, shape=None):
         self.buf   = buf
         self.pos   = 0
         self.gain  = gain
@@ -341,16 +388,78 @@ class Voice:
         self.fade_left = -1       # -1 = not fading
         self.fade_len  = _CHOKE_FADE
         self.done  = False
+        # shaping: None = the original plain playback path, byte for byte
+        self.shape = shape if (shape is not None and not shape.plain) else None
+        self.posf  = 0.0
+        self.age   = 0
+        self.fL = self.fR = None
+        if self.shape is not None and self.shape.cutoff is not None:
+            self.fL = S.BiquadFilter(SR, cutoff=self.shape.cutoff, q=self.shape.q)
+            self.fR = S.BiquadFilter(SR, cutoff=self.shape.cutoff, q=self.shape.q)
 
     def start_fade(self):
         if self.fade_left < 0:
             self.fade_left = self.fade_len
+
+    def _mix_shaped(self, outL, outR, start, n):
+        sh = self.shape
+        L = len(self.buf)
+        rate = sh.rate
+        if rate == 1.0:
+            i0 = int(self.posf)
+            k = min(n - start, L - i0)
+            if k <= 0:
+                self.done = True
+                return
+            seg = _seg(self.buf, i0, k)
+        else:
+            k = min(n - start, int(np.floor((L - 1 - self.posf) / rate)) + 1)
+            if k <= 0:
+                self.done = True
+                return
+            i0 = int(self.posf)
+            idx = (self.posf - i0) + np.arange(k) * rate
+            need = min(int(idx[-1]) + 2, L - i0)
+            raw = _seg(self.buf, i0, need)
+            xp = np.arange(need)                # np.interp (C): 2x the fancy-index version, measured on the Pi
+            left = np.interp(idx, xp, raw[:, 0]).astype(np.float32)
+            right = left if raw.shape[1] < 2 else np.interp(idx, xp, raw[:, 1]).astype(np.float32)
+            seg = None
+        if seg is not None:
+            r = 1 if seg.shape[1] > 1 else 0
+            left, right = seg[:, 0], seg[:, r]
+        t = self.age + np.arange(k, dtype=np.float32)
+        env = np.full(k, self.gain, dtype=np.float32)
+        if sh.attack:
+            env *= np.minimum(1.0, t / sh.attack)
+        if sh.tau is not None:
+            env *= np.exp(-t / sh.tau)
+        if self.fade_left >= 0:
+            f0 = self.fade_left / self.fade_len
+            f1 = max(0, self.fade_left - k) / self.fade_len
+            env *= np.linspace(f0, f1, k, endpoint=False, dtype=np.float32)
+            self.fade_left -= k
+            if self.fade_left <= 0:
+                self.done = True
+        if self.fL is not None:
+            left, right = self.fL.process(left), self.fR.process(right)
+        outL[start:start + k] += left * (env * sh.panL)
+        outR[start:start + k] += right * (env * sh.panR)
+        self.posf += k * rate
+        self.age += k
+        if self.posf >= L - 1 or (sh.tau is not None and env[-1] < _ENV_FLOOR * self.gain
+                                  and t[-1] > sh.attack):
+            self.done = True
 
     def mix(self, outL, outR, n):
         start = self.pre
         self.pre = 0
         if start >= n:
             self.pre = start - n
+            return
+        if self.shape is not None:
+            if not self.done:
+                self._mix_shaped(outL, outR, start, n)
             return
         avail = len(self.buf) - self.pos
         k = min(n - start, avail)
@@ -400,6 +509,11 @@ class KitEngine:
         self.voices  = []                       # active Voice list (RT-owned)
         self.instruments = {}                   # note -> Instrument (swapped atomically)
         self.kit_name = None
+        self.kit_key = None                     # the kit's folder name (params are saved under it)
+        self.params = {}                        # note -> {param: cc value} (copy-on-write)
+        self.kit_params = {}                    # kit_tune / kit_cutoff
+        self._target = None                     # the drum the next per-drum CC edits
+        self._params_dirty = False
 
         # scan available kits
         self.kits = []
@@ -446,6 +560,9 @@ class KitEngine:
         except Exception as e:
             print(f"[bbkit] kit load failed {path}: {e}", flush=True)
             return
+        p, kp = load_kit_params(os.path.basename(path))
+        self.params, self.kit_params = p, kp    # before the instruments: no hit uses old params
+        self.kit_key = os.path.basename(path)
         self.instruments = instruments          # atomic ref swap
         self.kit_name = name
         self._kit_idx = idx
@@ -493,6 +610,34 @@ class KitEngine:
     def program(self, prog):
         self._enqueue(("pc", prog))
 
+    def set_shape(self, cc, value):
+        """A BBKIT_SHAPE_CC on the kit channel (MIDI thread). Dicts are replaced,
+        never edited in place, so the RT thread always reads a whole one."""
+        name = _CC_SHAPE.get(cc)
+        if name is None:
+            return False
+        value = max(0, min(127, int(value)))
+        if name == "note":
+            self._target = value
+            return True
+        if name in _KIT_KEYS:
+            kp = dict(self.kit_params)
+            kp[name] = value
+            self.kit_params = kp
+        else:
+            if self._target is None:
+                return True                     # no drum picked yet: nothing to shape
+            d = dict(self.params.get(self._target, {}))
+            d[name] = value
+            p = dict(self.params)
+            p[self._target] = d
+            self.params = p
+        self._params_dirty = True
+        return True
+
+    def shape_for(self, note):
+        return Shape(self.params.get(note, {}), self.kit_params)
+
     def _ev_offset(self, ft, frame_time, n):
         if ft is None or frame_time is None:
             return 0
@@ -509,8 +654,11 @@ class KitEngine:
         L = ins.layer_for(vel)
         if L is None:
             return
+        sh = self.shape_for(note)
+        if sh.gain <= 0.0:
+            return                              # level 0 = this drum is muted
         buf = L.pick()
-        gain = (vel / 127.0) * ins.gain
+        gain = (vel / 127.0) * ins.gain * sh.gain
         # choke: fade group-mates
         if ins.choke:
             for v in self.voices:
@@ -521,7 +669,7 @@ class KitEngine:
         if len(same) >= ins.poly:
             for v in same[:len(same) - ins.poly + 1]:
                 v.start_fade()
-        self.voices.append(Voice(buf, gain, note, ins.choke, off))
+        self.voices.append(Voice(buf, gain, note, ins.choke, off, sh))
 
     def render(self, n, frame_time=None):
         trigs = []
@@ -585,6 +733,9 @@ def _make_router(eng):
             state["armed"] = False
             return
         if ch in chs:
+            if msg.type == "control_change":
+                eng.set_shape(msg.control, msg.value)
+                return
             if msg.type == "note_on" and msg.velocity > 0:
                 eng.note_on(msg.note, msg.velocity)
             elif msg.type == "program_change":
@@ -595,6 +746,7 @@ def _make_router(eng):
 
 def midi_input_thread(eng, stop_event):
     import mido
+    import orc1_midisafe; orc1_midisafe.install()   # no leaked ALSA clients (2026-11-09)
     prefix = S._SYNTH_CFG.get("MIDI_PORT_PREFIX", "").lower()
     route = _make_router(eng)
 
@@ -633,8 +785,61 @@ def midi_input_thread(eng, stop_event):
             time.sleep(2)
 
 
+def load_kit_params(kit_key, path=None):
+    """({note: {param: value}}, {kit param: value}) saved for one kit."""
+    try:
+        with open(path or PARAMS_FILE) as f:
+            k = (json.load(f).get("kits") or {}).get(kit_key) or {}
+    except Exception:
+        return {}, {}
+    notes = {}
+    for n, d in (k.get("notes") or {}).items():
+        try:
+            notes[int(n)] = {p: max(0, min(127, int(v))) for p, v in d.items()
+                             if p in SHAPE_DEFAULT and p not in _KIT_KEYS}
+        except (TypeError, ValueError):
+            pass
+    kit = {p: max(0, min(127, int(v))) for p, v in (k.get("kit") or {}).items()
+           if p in _KIT_KEYS}
+    return notes, kit
+
+
+def save_kit_params(kit_key, params, kit_params, path=None):
+    """Read-modify-write: only this kit's entry changes. Values equal to the
+    default are dropped, so the file holds only what was actually changed."""
+    path = path or PARAMS_FILE
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    notes = {}
+    for n, d in params.items():
+        kept = {p: v for p, v in d.items() if v != SHAPE_DEFAULT.get(p)}
+        if kept:
+            notes[str(n)] = kept
+    kit = {p: v for p, v in kit_params.items() if v != SHAPE_DEFAULT.get(p)}
+    kits = data.setdefault("kits", {})
+    if notes or kit:
+        kits[kit_key] = {"notes": notes, "kit": kit}
+    else:
+        kits.pop(kit_key, None)
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
 def persist_thread(eng, stop_event, poll_s=1.5):
     while not stop_event.wait(poll_s):
+        if eng._params_dirty and eng.kit_key:
+            eng._params_dirty = False
+            try:
+                save_kit_params(eng.kit_key, eng.params, eng.kit_params)
+            except Exception as e:
+                print(f"[bbkit] params save failed: {e}", flush=True)
         if eng._bus_dirty:
             eng._bus_dirty = False
             S._bus_level_write({"bbkit": max(0, min(127, int(round(eng.master * 127.0))))})
@@ -692,6 +897,21 @@ def run_jack(eng, stop_event):
     print("[bbkit] JACK client stopped", flush=True)
 
 
+def _warm_shaped():
+    """Run one fully-shaped voice through a few blocks now, so any one-time cost
+    (lfilter's first call, numpy paths) is paid before JACK activates, not on the
+    first shaped hit (the 2026-10-19 first-np.random xrun lesson). Never raises."""
+    try:
+        sh = Shape({"tune": 70, "attack": 10, "decay": 60, "pan": 30, "cutoff": 60, "reso": 40}, {})
+        v = Voice(np.zeros((4096, 2), dtype=np.float32), 0.5, 36, 0, 0, sh)
+        a = np.zeros(256, dtype=np.float32)
+        b = np.zeros(256, dtype=np.float32)
+        for _ in range(3):
+            v.mix(a, b, 256)
+    except Exception as e:
+        print(f"[bbkit] shaped warm-up failed: {e}", flush=True)
+
+
 def main():
     eng = KitEngine()
     stop_event = threading.Event()
@@ -706,6 +926,7 @@ def main():
         print(f"[bbkit] SIGTERM handler not installed: {_se}", flush=True)
 
     S.preload_midi_backend()   # before the MIDI thread + JACK activation (GIL -> xruns, 2026-09-24)
+    _warm_shaped()             # first use of the shaped path (lfilter, interp) off the RT thread
     threading.Thread(target=midi_input_thread, args=(eng, stop_event), daemon=True).start()
     threading.Thread(target=persist_thread, args=(eng, stop_event), daemon=True).start()
     fatal = False

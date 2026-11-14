@@ -962,7 +962,7 @@ async function palReset() {
 // ── TABS (2026-10-24): PLAY, LINES, BACKGROUND, LISTEN, SETUP. Every card is
 // always in the page (only hidden), so nothing the script looks up goes
 // missing; the tab is remembered per browser and can be linked (#setup).
-const TABS = ['play', 'lines', 'background', 'peephole', 'listen', 'setup'];
+const TABS = ['play', 'lines', 'background', 'peephole', 'listen', 'setup', 'box'];   // box: boxvis.js
 function showTab(name) {
   if (!TABS.includes(name)) name = 'play';
   document.querySelectorAll('.vtab').forEach(el => el.classList.toggle('on', el.dataset.tab === name));

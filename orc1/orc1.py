@@ -33,17 +33,20 @@ from collections import deque
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import orc1_midisafe
+orc1_midisafe.install()   # mido leaked 2 ALSA clients per port vanishing mid-listing (all 64 gone, 2026-11-09)
 import orc1_config   as cfg
 import orc1_patterns as pat
 import orc1_pedal    as _orc1_pedal   # foot-pedal recognition + gesture layer (stdlib only)
 import orc1_padmap   as _orc1_padmap  # per-device pad maps (/pads), stdlib only
-import orc1_surface_link as _orc1_surface_link  # paints control SURFACES (our Fire firmware) from the pad maps
+import orc1_knobfocus as _orc1_knobfocus  # knobs that follow the played voice (BSP encoders), stdlib only
 import orc1_cme      as _orc1_cme     # CME U6MIDI Pro config over SysEx (stdlib; mido lazily)
 import orc1_kikpad   as _orc1_kikpad  # KIKPAD bank 2 = sampler + skipback surface (stdlib; mido lazily)
 import orc1_kikpad_map as _orc1_kikpad_map  # the KIKPAD's own pad/encoder maps, edited from /kikpad (stdlib)
 import orc1_playstate as _orc1_playstate  # live play-state feed for the HUD / kiosk (stdlib only)
 import orc1_scenes   as _orc1_scenes   # SCENES: store / capture / recall timing (stdlib only)
 import orc1_fire_pages as _orc1_fire_pages  # the Fire's UNIVERSAL pages, stored on the Fire (stdlib only)
+import orc1_orcmode as _orc1_orcmode    # ORC MODE on our Fire firmware: wakes the Fire handler over the shared link
 import orc1_settings_registry as _orc1_settings  # every setting a scene can hold (stdlib, lazy)
 from orc1_arp import ArpEngine, CLOCK_EXTERNAL, CLOCK_INTERNAL, CLOCK_DRIFT, PPQN
 from orc1_arp import SUBDIVISION_LIST, ARP_SILENT
@@ -541,6 +544,16 @@ _clock_owner     = None   # source_label ('din'/'usb') that currently drives the
 
 
 _ps_activity = _orc1_playstate.ActivityTracker()   # synth-bus note-on counters (HUD pulses)
+knobfocus = None    # orc1_knobfocus.KnobFocus, built next to the pad maps
+
+
+def _knobfocus_observe(msg):
+    """Every synth-bus message: knob focus follows notes, the value cache follows CCs."""
+    if knobfocus is not None and msg.type in ("note_on", "control_change", "program_change"):
+        try:
+            knobfocus.observe(msg)
+        except Exception as e:
+            print(f"  ! knobfocus observe: {e}", flush=True)
 
 
 def send_to(port_key, msg):
@@ -548,8 +561,10 @@ def send_to(port_key, msg):
     if port:
         try:
             port.send(msg)
-            if port_key == "synth" and msg.type == "note_on" and msg.velocity > 0:
-                _ps_activity.hit(msg.channel + 1, msg.velocity)   # two dict stores
+            if port_key == "synth":
+                if msg.type == "note_on" and msg.velocity > 0:
+                    _ps_activity.hit(msg.channel + 1, msg.velocity)   # two dict stores
+                _knobfocus_observe(msg)
             if cfg.DEBUG:
                 print(f"  [-> {port_key}] {msg}")
         except Exception as e:
@@ -627,16 +642,61 @@ def tap_tempo():
 
 # -- Internal synth MIDI bus --------------------------------------------------
 
+_ORC_MOD_BY_CH = {}   # {1-based ch: module} for bound cfg.ORC_MODULES -- rebuilt with _SYNTH_CHS
+
+
+class _SynthBusSplit:
+    """THE way the ORC writes 'to the synth' (2026-11-09). Every path (send_synth_midi, scene recalls, routing rules
+    naming the "synth" port) goes through this one object. A message on a channel bound to a NON-synth module
+    (cfg.ORC_MODULES: visuals, mxvbox, daw, zoomfx) goes to that module's own ORC port ('ORC-<module>') and NEVER
+    onto ORC1-Synth-Bus; everything else (the sound hosts' channels, the CH_CTRL bind handshake, channel-less
+    messages) goes to the synth bus exactly as before. owner: "don't ever move anything that doesn't need an
+    internal synthesis onto the synth again"."""
+
+    def __init__(self, bus, orc_ports, by_ch=None):
+        self.bus = bus
+        self.orc_ports = orc_ports                  # {module: mido output}
+        self.by_ch = _ORC_MOD_BY_CH if by_ch is None else by_ch
+
+    def target(self, msg):
+        """The ORC module a message belongs to, or None (= the synth bus)."""
+        ch = getattr(msg, "channel", None)
+        return None if ch is None else self.by_ch.get(ch + 1)
+
+    def send(self, msg):
+        m = self.target(msg)
+        if m is None:
+            self.bus.send(msg)
+            return
+        p = self.orc_ports.get(m)
+        if p is not None:
+            p.send(msg)                             # its own port; never the synth bus, even when this one is missing
+
+    def close(self):
+        for p in [self.bus] + list(self.orc_ports.values()):
+            try:
+                p.close()
+            except Exception:
+                pass
+
+
 def _open_synth_bus():
-    """Open a mido virtual MIDI output that orc1_synth discovers by name.
-    Fails gracefully -- engine works fine without it.
+    """Open a mido virtual MIDI output that orc1_synth discovers by name, plus one ORC port per non-synth module
+    ('ORC-visuals', ...). Fails gracefully -- engine works fine without it.
     """
     global _synth_bus
     bus_name = getattr(cfg, "SYNTH", {}).get("INTERNAL_BUS_NAME", "ORC1-Synth-Bus")
     try:
-        _synth_bus = mido.open_output(bus_name, virtual=True)
+        bus = mido.open_output(bus_name, virtual=True)
+        orc_ports = {}
+        for m in getattr(cfg, "ORC_MODULES", ()):
+            try:
+                orc_ports[m] = mido.open_output(cfg.orc_port_name(m), virtual=True)
+            except Exception as e:
+                print(f"  ! ORC port for {m}: {e}")
+        _synth_bus = _SynthBusSplit(bus, orc_ports)
         port_outs["synth"] = _synth_bus   # presets can route chords here -> internal synth
-        print(f"  ✓ Synth bus: {bus_name}")
+        print(f"  ✓ Synth bus: {bus_name}; ORC ports: {', '.join(cfg.orc_port_name(m) for m in orc_ports)}")
     except Exception as e:
         _synth_bus = None
         print(f"  ! Synth bus unavailable: {e}")
@@ -662,11 +722,11 @@ def _synth_bus_guard_once():
     client_names = {}          # client_num_str -> client_name_lower
     cur_client  = None
     cur_port    = None
-    bus_client  = None
-    bus_port    = None
-    bus_targets = []           # list of (target_client_str, target_port_str)
+    guarded     = set()        # (client_str, port_str) of the synth bus + the ORC module ports (2026-11-09)
+    bus_targets = []           # list of (source "c:p", target_client_str, target_port_str)
 
     bus_id = getattr(cfg, "SYNTH", {}).get("INTERNAL_BUS_NAME", "ORC1-Synth-Bus").lower()
+    orc_ids = {cfg.orc_port_name(m) for m in getattr(cfg, "ORC_MODULES", ())}   # exact port names
 
     for line in out.split('\n'):
         cm = re.match(r'^client (\d+):\s+\'([^\']*)', line)
@@ -678,28 +738,25 @@ def _synth_bus_guard_once():
         pm = re.match(r'^\s{4}(\d+)\s+\'([^\']*)', line)
         if pm and cur_client:
             cur_port = pm.group(1)
-            if bus_id in pm.group(2).strip().lower():
-                bus_client = cur_client
-                bus_port   = cur_port
+            pname = pm.group(2).strip()
+            if bus_id in pname.lower() or pname in orc_ids:
+                guarded.add((cur_client, cur_port))
             continue
         tm = re.match(r'^\tConnecting To:\s+(.+)', line)
-        if tm and cur_client == bus_client and cur_port == bus_port:
+        if tm and (cur_client, cur_port) in guarded:
             for conn in tm.group(1).split(','):
                 conn = conn.strip().split('[')[0].strip()
                 parts = conn.split(':')
                 if len(parts) == 2:
-                    bus_targets.append((parts[0], parts[1]))
+                    bus_targets.append((f'{cur_client}:{cur_port}', parts[0], parts[1]))
 
-    if not bus_client:
-        return
-
-    for tc, tp in bus_targets:
+    for src, tc, tp in bus_targets:
         tname = client_names.get(tc, '')
         if 'rtpmidid' in tname or 'rtpmidi' in tname:
             try:
-                _sp.run(['aconnect', '-d', f'{bus_client}:{bus_port}',
+                _sp.run(['aconnect', '-d', src,
                          f'{tc}:{tp}'], timeout=5, capture_output=True)
-                print(f'  [synth_bus] blocked leak → {tname} ({tc}:{tp})', flush=True)
+                print(f'  [synth_bus] blocked leak {src} → {tname} ({tc}:{tp})', flush=True)
             except Exception as e:
                 print(f'  [synth_bus] disconnect error: {e}', flush=True)
 
@@ -732,6 +789,7 @@ def send_synth_midi(msg):
         except Exception: pass
         if msg.type == "note_on" and msg.velocity > 0:
             _ps_activity.hit(msg.channel + 1, msg.velocity)   # HUD pulse (2nd synth-bus choke point)
+        _knobfocus_observe(msg)
     # Voice thru: mirror to external port if configured for this source channel.
     if hasattr(msg, 'channel') and msg.type in ('note_on', 'note_off', 'control_change'):
         src_ch = str(msg.channel + 1)   # 1-indexed string key
@@ -1911,6 +1969,9 @@ def _rebuild_synth_chs():
     bindings (replaces the old fixed cfg.SYNTH sweep)."""
     global _SYNTH_CHS
     _SYNTH_CHS = {int(ch): True for ch in _bindings.values()}
+    orc_mods = set(getattr(cfg, "ORC_MODULES", ()))
+    _ORC_MOD_BY_CH.clear()                  # in place: the _SynthBusSplit holds this very dict
+    _ORC_MOD_BY_CH.update({int(ch): m for m, ch in _bindings.items() if m in orc_mods})
 
 def _save_module_bindings():
     """Persist the live map atomically as {channel: module} (the synth's form)."""
@@ -2428,9 +2489,8 @@ def _din_echo_blocked(source_label, out_port):
 # SysEx that is a device talking to the PI, never music for the DIN gear. mido
 # strips F0/F7, so each prefix is the head of msg.data.
 #   00 20 6B     Arturia config/read-back (the /beatstep page reading the BSP)
-#   7D 'O' 'R' 'C'  our own Fire firmware's host protocol (its hello reply comes
-#                back every 3 s while orc1-firevu runs; wire-measured on the
-#                pisound out 2026-10-13)
+#   7D 'O' 'R' 'C'  our own Fire firmware's host protocol (its replies were
+#                wire-measured leaking to the pisound out 2026-10-13)
 _DEVICE_SYSEX_PREFIXES = ((0x00, 0x20, 0x6B), (0x7D, 0x4F, 0x52, 0x43))
 
 
@@ -3695,6 +3755,8 @@ def _playstate_snapshot():
         "tracks": tracks,
         "bindings": dict(_bindings),
         "mods": _ps_activity.by_module(_bindings),
+        "knobs": ({"focus": knobfocus.focus, "voice": knobfocus.voice,
+                   "names": knobfocus.names()} if knobfocus else {}),
         "bb": ({"playing": bool(beatbuddy.is_playing()),
                 "part": beatbuddy.PartIndex + 1} if beatbuddy else {}),
     }
@@ -4141,6 +4203,18 @@ def _execute_cmd(cmd):
             print_status(f"[fire pages] {action} page {cmd.get('page')}: "
                          + ("ok" if r.get("ok") else str(r.get("error"))))
         return r
+    # -- ORC mode on our Fire firmware (orc1_orcmode, 2026-11-11): reply dicts.
+    if action in ("FIRE_HOST", "FIRE_HOST_STATUS", "FIRE_HOST_CURVE"):
+        r = _orc1_orcmode.socket_cmd(fire_host, cmd)
+        if action != "FIRE_HOST_STATUS":
+            print_status(f"[fire host] {action} {cmd.get('on', cmd.get('curve'))}: "
+                         + ("ok" if r.get("ok") else str(r.get("error"))))
+        return r
+    # -- knob follow (orc1_knobfocus, 2026-11-04): reply dicts.
+    if action == "KNOBS_STATUS":    # which module/voice the follow knobs drive + their 16 slots
+        return knobfocus.status() if knobfocus else {"ok": False, "error": "no knobfocus"}
+    if action == "KNOBS_SET":       # pick focus / follow or lock / edit the knob config
+        return knobfocus.command(cmd) if knobfocus else {"ok": False, "error": "no knobfocus"}
     if action == "TOGGLE_ROOT_MODE":
         state["root_mode"] = not state["root_mode"]
     elif action == "TOGGLE_KEY_LOCK":
@@ -4161,8 +4235,6 @@ def _execute_cmd(cmd):
         _pedal_conf_set(cmd.get("config"))
     elif action == "PADMAP_SET":
         _padmap_conf_set(cmd.get("config"))
-    elif action == "SURFACE_SHOW":                  # /pads SHOW ON FIRE: back into surface mode, repainted
-        surface_link.repaint(cmd.get("device") or None)
     # -- RC-505 looper control (orc1_rc505.py). All no-op if the RC is absent. --
     elif action == "RC505_ACTION" and rc505:
         rc505.do(cmd.get("name", ""), cmd.get("value"))   # named assign action
@@ -5084,7 +5156,7 @@ def _execute_cmd(cmd):
             _skip_sub = (
                 "midi through", "pisound-ctl", "rtpmidid:announc",
                 "rtmidi",       "orc1-synth",
-            )
+            ) + tuple(getattr(cfg, "DAWSURF_BRAIN_SKIP", ()))   # + the DAW surface port and the bridge's own clients (orc1_config)
             # Prefixes already covered by cfg.PORTS values
             _cfg_vals = [v.lower() for v in cfg.PORTS.values()]
             for _name in mido.get_output_names():
@@ -5921,6 +5993,12 @@ def _route_message(msg, source_label="usb", source_name=""):
     if padmap.handle(msg, source_name):
         return
 
+    # Knob follow (orc1_knobfocus, 2026-11-04): a device's knob CCs (the BSP's 16
+    # encoders by default) move the parameters of the module in focus = the voice
+    # being played. Only the configured device + channel + CCs are claimed.
+    if knobfocus is not None and knobfocus.handle(msg, source_name):
+        return
+
     # Anti-feedback (MIDI merge rule): a message that ARRIVED on the DIN input
     # must never be echoed back out the DIN output. pisound is a single physical
     # in/out, so "pass unmatched input through to pisound" is a self-echo. It's
@@ -5946,6 +6024,9 @@ def _route_message(msg, source_label="usb", source_name=""):
         # scenes engine (orc1_scenes.FireBarLink); consumed, never forwarded.
         # The UNIVERSAL page replies (10-15) go to fire_pages FIRST (it only queues
         # them for the waiting socket thread; FireBarLink would swallow them).
+        # ORC mode (21 / 22 / 23: the Fire's presses and turns) goes to fire_host FIRST, for the same reason.
+        if msg.type == 'sysex' and fire_host.handle_sysex(msg.data, source_name):
+            return
         if msg.type == 'sysex' and fire_pages.handle_sysex(msg.data, source_name):
             return
         if msg.type == 'sysex' and fire_bar_link.handle_sysex(msg.data, source_name):
@@ -6442,27 +6523,25 @@ except FileNotFoundError:
 except Exception as _e:
     print(f"  ! padmap config unreadable: {_e}", flush=True)
 
-# Control surfaces (2026-10-14): a pad-map profile marked "surface" is a device the ORC
-# draws on (our Fire firmware). The link ARMS it (colours + channel, but the Fire stays on
-# its sequencer) when it appears / reboots / the map changes; only /pads SHOW ON FIRE or
-# the Fire's BROWSER > ORC surface shows it. Polled once a second from its own thread.
-surface_link = _orc1_surface_link.SurfaceLink(
-    mido, padmap.surfaces, lambda: _usb_card_idents(), log=lambda s: print(s, flush=True),
-    armed_path="/tmp/orc1_surface_armed.json")
+
+def _knobfocus_send(ch, cc, value):
+    send_synth_midi(mido.Message("control_change", channel=ch - 1, control=cc, value=value))
 
 
-def _surface_loop():
-    said = False
-    while True:
-        time.sleep(1.0)
-        try:
-            surface_link.poll()
-            said = False
-        except Exception as e:
-            if not said:
-                print(f"  ! surface link: {e}", flush=True)
-                said = True
+def _module_at_channel(ch):
+    for _m, _c in _bindings.items():
+        if int(_c) == ch:
+            return _m
+    return None
 
+
+_drum_notes = _orc1_knobfocus.drum_note_map(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "orc1_synth.py"),
+    getattr(cfg, "SYNTH", {}).get("DRUM_NOTE_MAP", {}))
+knobfocus = _orc1_knobfocus.KnobFocus(
+    send_cc=_knobfocus_send, module_ch=lambda m: _module_channel(m),
+    module_at=_module_at_channel, drum_voice_of=_drum_notes.get,
+    drum_layout=cfg.DRUM_CC.get("LAYOUT", {}), log=lambda s: print(s, flush=True))
 
 # Skipback GRAB pads (2026-10-19, orc1_padmap.grab_plan): bars at the live tempo, a
 # hold (press -> release, snapped to whole bars), a time, or everything. All go
@@ -6485,49 +6564,7 @@ def _padmap_grab(e, press_ts, release_ts):
         skipback_save_all(secs, tracks, end_ts=end_ts)
 
 
-_HOLD_RGB = (7, 7, 7)                # a grab pad while it records (held)
-
-
-def _padmap_hold_light(dev, pad, holding):
-    if holding:
-        surface_link.paint_pad(dev, pad, _HOLD_RGB)
-        return
-    e = (padmap.conf["devices"].get(dev, {}).get("pads", {}).get(f"note:{pad}") or {})
-    surface_link.paint_pad(dev, pad, _orc1_padmap.COLOR_RGB.get(e.get("color"), (0, 0, 0)))
-
-
 padmap.run_grab = _padmap_grab
-padmap.on_hold = _padmap_hold_light
-
-tap_blinker = _orc1_surface_link.TapBlinker(surface_link, padmap.surfaces)
-
-
-def _tap_blink_loop():
-    """Blink every surface tap-tempo pad on the ORC clock's beat (orc1_surface_link.TapBlinker).
-    ~66 Hz while a tap pad exists; it re-reads the pad maps twice a second."""
-    said, next_refresh, have = False, 0.0, False
-    while True:
-        try:
-            now = time.monotonic()
-            if now >= next_refresh:
-                have = tap_blinker.refresh()
-                next_refresh = now + 0.5
-            if not have:
-                time.sleep(0.5)
-                continue
-            beat = bar = None
-            ext = False
-            if arp:
-                beat = arp.beat_phase()
-                bar = arp.bar_phase(beats_per_bar=_SMP_BEATS_BAR)
-                ext = arp.clock_mode == CLOCK_EXTERNAL
-            tap_blinker.tick(now, beat, bar, ext)
-            said = False
-        except Exception as e:
-            if not said:
-                print(f"  ! tap blink: {e}", flush=True)
-                said = True
-        time.sleep(0.015)
 
 
 # -- SCENES (orc1_scenes + orc1_settings_registry, 2026-10-26) -------------------
@@ -6628,16 +6665,51 @@ def _scene_state_changed():
         pass
 
 
+def _fire_crash_save(data):
+    """The Fire reports a crash record we have not handed on yet (FireBarLink asks 06 once per connection;
+    this was orc1-firevu's job until 2026-11-12). Save the full report (record + stack, symbolised against
+    the kept ELF) with the firmware repo's host_crash.py --save, in the background, at the lowest priority.
+    --save skips a record already saved; it never clears one."""
+    d = list(data)
+    print(f"[fire] the Fire reports a crash record (cause {d[7]}, stage {d[8]}, total {d[10]}): "
+          "saving the full report to ~/fire_fw/crashes/", flush=True)
+    saver = os.path.expanduser(getattr(cfg, "FIRE_CRASH_SAVER", "~/fire_fw/host_crash.py"))
+    if not os.path.isfile(saver):
+        print(f"[fire] cannot save it: {saver} not found", flush=True)
+        return
+    import subprocess
+    subprocess.Popen(["nice", "-n", "19", sys.executable, "-B", saver, "--save"],
+                     cwd=os.path.dirname(saver), stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 fire_bar_link = _orc1_scenes.FireBarLink(
     mido, lambda: _usb_card_idents(), on_bar=lambda *a: scenes.fire_bar(*a),
     log=lambda s: print(s, flush=True),
-    ports=tuple(getattr(cfg, "FIRE_SEQ_PORT_NAMES", None) or _orc1_scenes.FIRE_SEQ_PORTS))
+    ports=tuple(getattr(cfg, "FIRE_SEQ_PORT_NAMES", None) or _orc1_scenes.FIRE_SEQ_PORTS),
+    on_crash=_fire_crash_save)
 
 # The Fire's UNIVERSAL pages (fw v0.31+, stored on the Fire), edited from /control.
 # Shares fire_bar_link's port + lock; one page transfer at a time.
 fire_pages = _orc1_fire_pages.FirePages(
     send=fire_bar_link.host_send, version=fire_bar_link.link_version,
     is_ours=fire_bar_link.is_ours, log=lambda s: print(s, flush=True))
+
+# ORC MODE on our Fire firmware (orc1_orcmode, fw v0.33): the Fire hands its pads, buttons,
+# knobs and screen to the ORC's Fire handler while its own sequencer keeps playing. Shares
+# fire_bar_link's port + lock like fire_pages: no connection of its own.
+def _fire_host_make():
+    global fire
+    if fire is None and _FIRE_AVAILABLE:
+        fire = FireHandler(sys.modules[__name__])
+    return fire
+
+fire_host = _orc1_orcmode.FireHost(
+    mido, send=fire_bar_link.host_send, link_version=fire_bar_link.link_version,
+    is_ours=fire_bar_link.is_ours, get_fire=lambda: fire, make_fire=_fire_host_make,
+    fire_mod=sys.modules.get("orc1_fire"),
+    oled_mod=getattr(sys.modules.get("orc1_fire"), "fire_oled", None),
+    log=lambda s: print(s, flush=True))
 
 scenes = _orc1_scenes.SceneEngine(
     _orc1_scenes.SceneStore(), _orc1_settings,
@@ -6779,6 +6851,7 @@ def _scene_loop():
         time.sleep(0.25)
         try:
             scenes.poll()
+            fire_host.poll()        # ORC mode's "still here" (once a second, inside)
             n += 1
             if n % 4 == 0:
                 fire_bar_link.poll()
@@ -6978,7 +7051,7 @@ def _hotplug_scan_once():
     Also sweeps for disappeared ports as a safety net (the handler thread's
     finally block is the primary cleanup, but race windows exist)."""
     mixtrack_pfx = getattr(cfg, "MIXTRACK_PORT_PREFIX", "mixtrack").lower()
-    _SKIP = ("pisound-ctl", "midi through", "rtmidi", "orc1-synth")
+    _SKIP = ("pisound-ctl", "midi through", "rtmidi", "orc1-synth") + tuple(getattr(cfg, "DAWSURF_BRAIN_SKIP", ()))
     try:
         # -- Same-name replugs: the USB address changed under a known card ----
         idents = _usb_card_idents()
@@ -7246,7 +7319,7 @@ def open_ports():
     fire_port     = None
 
 
-    _skip_inputs = ("pisound-ctl", "midi through", "rtmidi", "orc1-synth")
+    _skip_inputs = ("pisound-ctl", "midi through", "rtmidi", "orc1-synth") + tuple(getattr(cfg, "DAWSURF_BRAIN_SKIP", ()))
     for name in ins:
         if any(s in name.lower() for s in _skip_inputs):
             continue
@@ -7488,6 +7561,11 @@ def main():
     # the old fixed cfg.SYNTH sweep -- channels are now bound/moved/removed live.
     _load_module_bindings()
     print(f"  Synth channels: {sorted(_SYNTH_CHS.keys())}")
+    knobfocus.start()
+    _kc = knobfocus.conf
+    print(f"  Knob follow: {'on' if _kc['enabled'] else 'off'}, '{_kc['device']}' ch {_kc['channel']} "
+          f"CC {_kc['ccs'][0]}-{_kc['ccs'][-1]} ({_kc['encoding']}, {_kc['mode']})"
+          if _kc['ccs'] else "  Knob follow: no knob CCs configured")
 
     # Routing engine -- must be initialised after port_outs is ready
     global router
@@ -7641,8 +7719,6 @@ def main():
     print("  Web cmd socket: ~/.orc1_cmd.sock  (fallback poll: ~/orc1_cmd.json)")
     threading.Thread(target=_hotplug_loop, daemon=True).start()
     print("  MIDI hot-plug scanner running (3s interval)")
-    threading.Thread(target=_surface_loop, daemon=True, name="surface").start()
-    threading.Thread(target=_tap_blink_loop, daemon=True, name="tap-blink").start()
     # SCENES: beats / bars of the ORC clock. Subscribed HERE, after the
     # sequencer's subscriber (built above) and the BeatBuddy tick, so on each
     # pulse it sees the step / beat that pulse made.

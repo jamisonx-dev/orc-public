@@ -6,8 +6,9 @@ TRUSTED source address:
 
   * the Pi itself (127.x / ::1)
   * the Pi's own hotspot subnet (172.24.1.0/24): joining it takes the WPA key
-  * the local LAN, but ONLY while the Pi is joined to a network listed as a home
-    network in ~/.orc1_net.json ("trusted_connections", default: none; mark your network as home on the :5003 page).
+  * the local LAN (wlan0's own subnet, nothing on eth0), but ONLY while the Pi is
+    joined to a network listed as a home network in ~/.orc1_net.json
+    ("trusted_connections", default: none; mark your network as home on the :5003 page).
     On a stranger's WiFi the LAN is not trusted, so nobody there can reach these
     pages (use the hotspot).
 
@@ -64,6 +65,32 @@ def at_home():
     return bool(n) and n in trusted_connections()
 
 
+def wlan_networks():
+    """The subnets wlan0 itself is on (link-local left out: eth0 shares fe80::/64).
+    Only these count as "home": a device on another port (eth0) has a private
+    address too, but is NOT the home LAN. Cached 4 s."""
+    now = time.time()
+    if now - _nets["t"] < 4 and _nets["v"] is not None:
+        return _nets["v"]
+    nets = []
+    try:
+        out = subprocess.run(["ip", "-o", "addr", "show", "dev", IF],
+                             capture_output=True, text=True, timeout=4).stdout
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) > 3 and f[2] in ("inet", "inet6"):
+                n = ipaddress.ip_interface(f[3]).network
+                if not n.is_link_local:
+                    nets.append(n)
+    except Exception:
+        nets = []
+    _nets["t"], _nets["v"] = now, nets
+    return nets
+
+
+_nets = {"t": 0.0, "v": None}
+
+
 def _addr(a):
     ip = ipaddress.ip_address(a.split("%")[0])
     if getattr(ip, "ipv4_mapped", None):
@@ -82,7 +109,7 @@ def source_class(addr):
             if net.network_address.is_loopback:
                 return "local"
             return "hotspot"
-    if (ip.is_private or ip.is_link_local) and at_home():
+    if at_home() and any(ip.version == n.version and ip in n for n in wlan_networks()):
         return "home"
     return None
 

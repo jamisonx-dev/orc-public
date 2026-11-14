@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "orc-control"))
 
-EXPECTED = 19
+EXPECTED = 22
 _p = _f = 0
 
 
@@ -65,6 +65,18 @@ SAMBA_ALWAYS = next(ast.literal_eval(n.value) for n in _sm.body if isinstance(n,
                     and getattr(n.targets[0], "id", "") == "ALWAYS")
 check(not any(a.startswith(("100.64", "fd7a")) for a in SAMBA_ALWAYS)
       and "172.24.1.0/24" in SAMBA_ALWAYS, "Samba's always-allowed list has no Tailscale range")
+# "home" = wlan0's own subnet only (2026-10-29): a box on eth0 (the MXV S805 link)
+# has a private / link-local address too and must NOT count as home.
+import ipaddress                     # noqa: E402
+_real = (N.at_home, N.wlan_networks)
+N.at_home = lambda: True
+N.wlan_networks = lambda: [ipaddress.ip_network("192.168.1.0/24")]
+check(N.source_class("192.168.1.71") == "home", "at home, a wlan0-subnet address is home")
+check(not N.trusted("10.55.0.2") and not N.trusted("169.254.12.7") and not N.trusted("fe80::1"),
+      "at home, an eth0 / link-local address is NOT trusted")
+N.at_home = lambda: False
+check(not N.trusted("192.168.1.71"), "away from home, the LAN is not trusted")
+N.at_home, N.wlan_networks = _real
 net_src = open(os.path.join(HERE, "orc1_net.py"), encoding="utf-8").read().lower()
 check("tailscale" not in net_src, "the WiFi page (orc1_net.py) no longer calls or mentions tailscale")
 
@@ -117,7 +129,8 @@ RAN.clear()
 r = sc.post("/system/reboot")
 check(r.status_code == 200 and RAN == [["sudo", "reboot"]], "dashboard reboot, no token", (r.status_code, RAN))
 RAN.clear(); TRUST["ok"] = False
-r = sc.post("/system/shutdown", headers={"Authorization": "Bearer " + SY.SYSTEM_TOKEN})
+# (the public copy has no default token: SYSTEM_TOKEN is None there, and the answer must be the same 401)
+r = sc.post("/system/shutdown", headers={"Authorization": "Bearer " + (SY.SYSTEM_TOKEN or "no-token-configured")})
 check(r.status_code == 401 and RAN == [], "dashboard: untrusted refused even WITH the token", (r.status_code, RAN))
 TRUST["ok"] = True
 

@@ -1,5 +1,7 @@
 # This repo deploys to a Linux Raspberry Pi — keep everything LF, always.
 * text=auto eol=lf
+# ...except Windows batch files, which run on the PC and need CRLF
+*.bat text eol=crlf
 *.png binary
 *.jpg binary
 *.wav binary

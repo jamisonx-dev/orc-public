@@ -4,9 +4,9 @@ Pads sending ANY CC (or note) to an ORC module or to an OUTPUT PORT + CHANNEL (2
 
     python3 _test_pad_cc.py [-v]
 
-owner: "can it not be set to send an arbitrary cc to a channel?" A NOTE pad (a Fire
-surface pad, a drum pad) can now send a CC: value = its hit velocity or fixed, behaviour
-press / momentary (value then 0 on the release: surfaces only) / toggle. A note or CC can
+owner: "can it not be set to send an arbitrary cc to a channel?" A NOTE pad (a pad
+controller, a drum pad) can send a CC: value = its hit velocity or fixed, behaviour
+press / momentary (value then 0 on the release: needs a device with a real release) / toggle. A note or CC can
 go to a named ORC module (resolved live from /matrix) or to a cfg.PORTS output on its own
 channel (never 13). Also checks the page offers it, labelled, and the brain routes a port.
 
@@ -25,7 +25,7 @@ EXPECTED = 34
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODS = ["drums", "poly"]
 PORTS = {"pisound", "rtp"}
-FIRE_IN = "ORC FW seq:ORC FW seq MIDI 1 32:0"
+PADS_IN = "LPD8:LPD8 MIDI 1 32:0"
 
 
 def check(name, cond, detail=""):
@@ -39,16 +39,14 @@ def check(name, cond, detail=""):
         print("  FAIL %s%s" % (name, ("  -- " + str(detail)) if detail else ""))
 
 
-def conf_with(pads, surface=True, name="Fire", match="ORC FW", ports=PORTS):
+def conf_with(pads, name="Pads", match="LPD8", ports=PORTS):
     raw = {"devices": {name: {"port_match": match, "pads": pads}}}
-    if surface:
-        raw["devices"][name]["surface"] = True
     return P.validate_config(raw, MODS, ports)
 
 
-class SX:
+class SX:                     # a pad hit as the device sends it: a note-on, vel 0 = the release (a note-off)
     def __init__(s, pad, vel=100):
-        s.type, s.data = "sysex", P.SURF_PAD_HDR + [pad, vel]
+        s.type, s.note, s.velocity, s.channel = ("note_on" if vel else "note_off"), pad, vel, 9
 
 
 class N:
@@ -70,7 +68,7 @@ c, e = conf_with({
     "note:4": {"do": "cc", "port": "pisound", "ch": 13, "cc": 1},
     "note:5": {"do": "cc", "module": "poly", "cc": 1, "mode": "sometimes"},
     "note:6": {"do": "note", "module": "drums", "note": 36, "vel": "same"}})
-p = c["devices"]["Fire"]["pads"]
+p = c["devices"]["Pads"]["pads"]
 check("a NOTE pad may send a CC to a module (value + mode kept)",
       p.get("note:0") == {"do": "cc", "module": "poly", "cc": 74, "value": 100, "mode": "momentary"}, p.get("note:0"))
 check("... or to an output port + channel, value = hit velocity",
@@ -85,17 +83,17 @@ check("an unknown CC behaviour is refused", "note:5" not in p)
 check("an old module note entry is unchanged", p.get("note:6") == {"do": "note", "module": "drums", "note": 36,
                                                                    "vel": "same"})
 c2, _ = conf_with({"note:0": {"do": "cc", "module": "poly", "cc": 7}})
-check("a note-pad CC defaults to value 127, press", c2["devices"]["Fire"]["pads"]["note:0"] ==
+check("a note-pad CC defaults to value 127, press", c2["devices"]["Pads"]["pads"]["note:0"] ==
       {"do": "cc", "module": "poly", "cc": 7, "value": 127, "mode": "press"})
-c3, e3 = conf_with({"note:36": {"do": "cc", "module": "poly", "cc": 7, "mode": "momentary"}},
-                   surface=False, name="Simmons", match="Simmons")
-check("MOMENTARY off a surface (timer note-offs) is refused with the reason",
-      "note:36" not in c3["devices"]["Simmons"]["pads"] and any("surface" in x for x in e3), e3)
+c3, e3 = P.validate_config({"devices": {"Fire": {"port_match": "ORC FW", "surface": True, "pads": {
+    "note:0": {"do": "cc", "module": "poly", "cc": 7, "mode": "momentary"}}}}}, MODS, PORTS)
+check("an old Fire SURFACE profile is dropped and reported (its pads were pad numbers, not notes)",
+      c3["devices"] == {} and any("surface" in x for x in e3), (c3, e3))
 c4, _ = conf_with({"cc:4": {"do": "cc", "module": "poly", "cc": 74}})
 check("a CC input sending a CC keeps its old shape (value passes through)",
-      c4["devices"]["Fire"]["pads"]["cc:4"] == {"do": "cc", "module": "poly", "cc": 74})
+      c4["devices"]["Pads"]["pads"]["cc:4"] == {"do": "cc", "module": "poly", "cc": 74})
 c5, _ = conf_with({"note:2": {"do": "note", "port": "anything_ok", "ch": 3, "note": 60}}, ports=None)
-check("ports=None checks only the name's shape", "note:2" in c5["devices"]["Fire"]["pads"])
+check("ports=None checks only the name's shape", "note:2" in c5["devices"]["Pads"]["pads"])
 
 # ── runtime ──────────────────────────────────────────────────────────────────
 sent = []
@@ -104,46 +102,46 @@ pm = P.PadMap(emit=lambda *a: sent.append(a), module_ch=lambda m: {"poly": 6, "d
 mono = [0.0]
 pm.clock = lambda: mono[0]
 pm.set_config(c)
-pm.handle(SX(0, 90), FIRE_IN)
+pm.handle(SX(0, 90), PADS_IN)
 check("momentary: the press sends the fixed value to the module's LIVE channel",
       sent == [("cc", 6, 74, 100)], sent)
 del sent[:]
-pm.handle(SX(0, 0), FIRE_IN)
+pm.handle(SX(0, 0), PADS_IN)
 check("momentary: the release sends 0", sent == [("cc", 6, 74, 0)], sent)
 del sent[:]
-pm.handle(SX(0, 0), FIRE_IN)
+pm.handle(SX(0, 0), PADS_IN)
 check("a release without a press sends nothing", sent == [])
-pm.handle(SX(1, 77), FIRE_IN)
+pm.handle(SX(1, 77), PADS_IN)
 check("toggle ON: the hit velocity to the OUTPUT PORT on its channel",
       sent == [("cc", 10, 20, 77, "pisound")], sent)
 del sent[:]
 mono[0] += 0.01
-pm.handle(SX(1, 77), FIRE_IN)
+pm.handle(SX(1, 77), PADS_IN)
 check("a double-trigger 10 ms later does not toggle straight back", sent == [], sent)
 mono[0] += 1.0
-pm.handle(SX(1, 50), FIRE_IN)
+pm.handle(SX(1, 50), PADS_IN)
 check("the next real press toggles OFF (0)", sent == [("cc", 10, 20, 0, "pisound")], sent)
 del sent[:]
-pm.handle(SX(1, 0), FIRE_IN)
+pm.handle(SX(1, 0), PADS_IN)
 check("a toggle's release sends nothing", sent == [])
-pm.handle(SX(2, 99), FIRE_IN)
+pm.handle(SX(2, 99), PADS_IN)
 check("a note pad to a port: note_on on that port + channel", sent == [("note_on", 3, 60, 99, "rtp")], sent)
 del sent[:]
-pm.handle(SX(2, 0), FIRE_IN)
+pm.handle(SX(2, 0), PADS_IN)
 check("... and its release is the note_off there", sent == [("note_off", 3, 60, 0, "rtp")], sent)
 del sent[:]
-pm.handle(SX(2, 99), FIRE_IN)
+pm.handle(SX(2, 99), PADS_IN)
 del sent[:]
 pm.set_config(c)
 check("a remap releases a sounding PORT note on its port", sent == [("note_off", 3, 60, 0, "rtp")], sent)
 del sent[:]
-pm.handle(SX(6, 99), FIRE_IN)
+pm.handle(SX(6, 99), PADS_IN)
 check("a module note still goes to the internal bus (no port argument)", sent == [("note_on", 10, 36, 99)], sent)
 del sent[:]
 pmu = P.PadMap(emit=lambda *a: sent.append(a), module_ch=lambda m: None, run_action=lambda a: None,
                log=lambda s: None)
 pmu.set_config(c)
-pmu.handle(SX(0, 90), FIRE_IN)
+pmu.handle(SX(0, 90), PADS_IN)
 check("an UNBOUND module stays silent (never ch 1)", sent == [], sent)
 cc_in, _ = P.validate_config({"devices": {"K": {"port_match": "Knobs", "pads": {
     "cc:4": {"do": "cc", "port": "pisound", "ch": 2, "cc": 30}}}}}, MODS, PORTS)
@@ -160,7 +158,7 @@ pms = P.PadMap(emit=lambda *a: sent.append(a), module_ch=lambda m: 6, run_action
 pms.set_config(plain)
 pms.handle(N("note_on", 38, 64), "Simmons SD350")
 pms.handle(N("note_off", 38, 0), "Simmons SD350")
-check("a drum pad (not a surface) can send a CC on the hit; its timer note-off sends nothing",
+check("a drum pad can send a CC on the hit (press mode); its timer note-off sends nothing",
       sent == [("cc", 6, 64, 64)], sent)
 
 # ── the brain routes a port ──────────────────────────────────────────────────
@@ -192,8 +190,8 @@ check("web: GET /api/padmap lists the output ports and validates against them",
       '"ports": _pedal_ports(),' in web and web.count("ports=set(_pedal_ports())") >= 4)
 js = open(os.path.join(HERE, "static", "js", "pads.js"), encoding="utf-8").read()
 check("page: a NOTE pad can 'send a CC'", '["cc", "send a CC"], ["action", "action"], ["grab", "skipback grab"]' in js)
-check("page: 'momentary' is offered only on a surface",
-      'if (surface) modes.splice(1, 0, ["momentary", "momentary: value, 0 on release"])' in js)
+check("page: 'momentary' is offered on any device",
+      '["momentary", "momentary: value, 0 on release"]' in js and "if (surface)" not in js)
 check("page: To = ORC modules + Output ports, a port shows a Channel line",
       'el("optgroup", { label: "Output ports" })' in js and 'line("Channel"' in js)
 check("page: every setting is a labelled line, label first (no trailing 'on' / 'note')",
